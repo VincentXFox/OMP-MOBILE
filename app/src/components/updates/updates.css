@@ -1,18 +1,29 @@
-/* Updates screen — component cards, job progress, busy dialog, toast. */
+/* Updates screen — sticky glass toolbar, component cards, job progress,
+ * busy sheet, toast. Builds on the shared pk-card / pk-btn primitives;
+ * tokens only. */
 
 .upd-wrap {
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
 	max-width: 640px;
-	margin: 0 auto;
+	margin: -12px auto 0; /* pull under .pk-main's top padding so the glass toolbar sits flush below the app header */
 }
 
-/* toolbar */
+/* ---- sticky glass toolbar ---- */
 .upd-toolbar {
+	position: sticky;
+	top: 0;
+	z-index: 10;
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
+	margin: 0 -14px;
+	padding: 10px 14px;
+	background: var(--glass);
+	backdrop-filter: var(--blur-surface);
+	-webkit-backdrop-filter: var(--blur-surface);
+	box-shadow: inset 0 -0.5px 0 var(--hairline);
 }
 
 .upd-btn--secondary {
@@ -34,8 +45,10 @@
 	display: flex;
 	flex-wrap: wrap;
 	gap: 6px 14px;
-	font-size: 12px;
+	padding: 0 2px;
+	font-size: var(--text-footnote);
 	color: var(--muted);
+	font-variant-numeric: tabular-nums;
 }
 
 .upd-meta-warn {
@@ -43,7 +56,8 @@
 }
 
 .upd-backup {
-	font-size: 12px;
+	padding: 0 2px;
+	font-size: var(--text-footnote);
 	font-family: var(--font-mono);
 	color: var(--success);
 	overflow: hidden;
@@ -52,14 +66,21 @@
 }
 
 .upd-list {
-	margin-top: 2px;
+	margin-top: 0;
 }
 
-/* component card */
+/* ---- component card ---- */
 .upd-card {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	gap: 10px;
+	padding: 16px;
+}
+
+/* the card itself is not a control — no press scale from .pk-card:active */
+.upd-card:active {
+	transform: none;
+	opacity: 1;
 }
 
 .upd-card-head {
@@ -75,20 +96,23 @@
 	width: 34px;
 	height: 34px;
 	flex-shrink: 0;
-	border-radius: var(--radius);
-	background: var(--surface2);
+	border-radius: var(--radius-sm);
+	background: var(--accent-muted);
 	color: var(--accent);
 }
 
 .upd-card-title {
 	flex: 1;
-	font-size: 16px;
+	min-width: 0;
+	font-size: var(--text-headline);
 	font-weight: 600;
+	letter-spacing: var(--tracking-tight);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
+/* status pill */
 .upd-chip {
 	display: inline-flex;
 	align-items: center;
@@ -97,7 +121,7 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-size: 11px;
+	font-size: var(--text-caption);
 	font-weight: 600;
 	color: var(--muted);
 	background: var(--surface2);
@@ -118,17 +142,24 @@
 	border-color: transparent;
 }
 
+/* version row */
 .upd-version {
 	display: flex;
 	align-items: center;
 	gap: 7px;
-	font-size: 13px;
+	font-size: var(--text-subhead);
 	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
 	color: var(--muted);
 }
 
 .upd-version--update {
 	color: var(--accent);
+}
+
+.upd-version svg {
+	flex-shrink: 0;
+	opacity: 0.6;
 }
 
 .upd-version-next {
@@ -138,7 +169,7 @@
 }
 
 .upd-method {
-	font-size: 12px;
+	font-size: var(--text-caption);
 	color: var(--fg-faint, var(--muted));
 }
 
@@ -148,7 +179,7 @@
 	display: flex;
 	flex-direction: column;
 	gap: 3px;
-	font-size: 12px;
+	font-size: var(--text-footnote);
 	color: var(--muted);
 }
 
@@ -161,17 +192,18 @@
 }
 
 .upd-link {
-	font-size: 13px;
+	margin-left: auto;
+	padding: 8px 0 8px 8px;
+	font-size: var(--text-subhead);
 	color: var(--accent);
 	text-decoration: none;
-	margin-left: auto;
 }
 
 .upd-link:active {
 	opacity: 0.7;
 }
 
-/* job progress */
+/* ---- job progress ---- */
 .upd-job {
 	display: flex;
 	flex-direction: column;
@@ -187,15 +219,17 @@
 }
 
 .upd-job-title {
-	font-size: 15px;
+	font-size: var(--text-body);
 	font-weight: 600;
+	letter-spacing: var(--tracking-tight);
 }
 
 .upd-job-status {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	font-size: 12px;
+	flex-shrink: 0;
+	font-size: var(--text-footnote);
 	font-weight: 600;
 }
 
@@ -252,7 +286,7 @@
 }
 
 .upd-step-label {
-	font-size: 13px;
+	font-size: var(--text-subhead);
 }
 
 .upd-step--fail .upd-step-label {
@@ -260,13 +294,14 @@
 }
 
 .upd-step-detail {
-	font-size: 11px;
+	font-size: var(--text-caption);
 	font-family: var(--font-mono);
 	color: var(--muted);
 	overflow-wrap: anywhere;
 	white-space: pre-wrap;
 }
 
+/* failure block */
 .upd-error {
 	display: flex;
 	align-items: center;
@@ -281,7 +316,7 @@
 	display: inline-flex;
 	align-items: flex-start;
 	gap: 7px;
-	font-size: 13px;
+	font-size: var(--text-subhead);
 	color: var(--error);
 	min-width: 0;
 	overflow-wrap: anywhere;
@@ -296,7 +331,7 @@
 	flex-shrink: 0;
 }
 
-/* busy dialog */
+/* ---- busy sheet ---- */
 .upd-overlay {
 	position: fixed;
 	inset: 0;
@@ -305,28 +340,31 @@
 	align-items: flex-end;
 	justify-content: center;
 	background: var(--backdrop);
+	animation: upd-fade var(--speed-fast) var(--ease-ios);
 }
 
 .upd-sheet {
 	width: 100%;
 	max-width: 640px;
-	background: var(--surface);
+	background: var(--bg-overlay);
 	border: 1px solid var(--border);
-	border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
 	padding: 18px 18px calc(18px + env(safe-area-inset-bottom));
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
 	box-shadow: var(--shadow-overlay);
+	animation: upd-sheet-in var(--speed) var(--ease-ios);
 }
 
 .upd-sheet-title {
-	font-size: 17px;
+	font-size: var(--text-title);
 	font-weight: 700;
+	letter-spacing: var(--tracking-tight);
 }
 
 .upd-sheet-text {
-	font-size: 13px;
+	font-size: var(--text-subhead);
 	color: var(--muted);
 }
 
@@ -357,7 +395,7 @@
 }
 
 .upd-agent-cwd {
-	font-size: 12px;
+	font-size: var(--text-footnote);
 	font-family: var(--font-mono);
 	color: var(--muted);
 	overflow: hidden;
@@ -376,23 +414,26 @@
 	gap: 8px;
 }
 
-/* toast */
+/* ---- toast ---- */
 .upd-toast {
 	position: fixed;
 	left: 16px;
 	right: 16px;
 	bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 14px);
 	z-index: 50;
-	background: var(--bg-overlay, var(--surface2));
+	background: var(--glass);
+	backdrop-filter: var(--blur-surface);
+	-webkit-backdrop-filter: var(--blur-surface);
 	border: 1px solid var(--border);
-	border-radius: var(--radius);
+	border-radius: var(--radius-lg);
 	padding: 11px 14px;
-	font-size: 13px;
-	box-shadow: var(--shadow-overlay);
+	font-size: var(--text-subhead);
+	box-shadow: var(--shadow-card);
 	overflow-wrap: anywhere;
+	animation: rise var(--speed) var(--ease-ios);
 }
 
-/* spinner */
+/* ---- spinner & motion ---- */
 .upd-spin {
 	animation: upd-spin 1s linear infinite;
 }
@@ -400,5 +441,17 @@
 @keyframes upd-spin {
 	to {
 		transform: rotate(360deg);
+	}
+}
+
+@keyframes upd-fade {
+	from {
+		opacity: 0;
+	}
+}
+
+@keyframes upd-sheet-in {
+	from {
+		transform: translateY(48px);
 	}
 }

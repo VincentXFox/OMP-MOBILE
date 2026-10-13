@@ -1,0 +1,148 @@
+/* Settings screen — Settings.app inset-grouped lists. Scoped by .set-screen;
+ * builds on the shared pk-* primitives (pocket.css) and tokens only. */
+
+/* ---- grouped card: one elevated surface per section ---- */
+.set-screen .pk-section-body {
+	padding: 0;
+	gap: 0;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-card);
+	overflow: hidden;
+}
+
+/* hairline row separators, inset from the leading edge */
+.set-screen .pk-section-body > * + * {
+	position: relative;
+}
+
+.set-screen .pk-section-body > * + *::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	left: 16px;
+	right: 0;
+	height: 0.5px;
+	background: var(--hairline);
+	pointer-events: none;
+}
+
+/* ---- rows: 44px+ tap height, body type ---- */
+.set-screen .pk-fieldrow {
+	min-height: var(--tap);
+	padding: 6px 16px;
+	font-size: var(--text-body);
+}
+
+.set-screen .pk-fieldrow > .pk-muted,
+.set-screen .set-row-end .pk-muted {
+	font-variant-numeric: tabular-nums;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* value + trailing control (switch) */
+.set-screen .set-row-end {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	flex-shrink: 0;
+	min-width: 0;
+}
+
+/* stacked field rows (label above input) */
+.set-screen .pk-field {
+	gap: 6px;
+	padding: 10px 16px 12px;
+	font-size: var(--text-footnote);
+}
+
+.set-screen .pk-field > span {
+	font-variant-numeric: tabular-nums;
+}
+
+/* full-width action button inside a group */
+.set-screen .pk-section-body > .pk-btn {
+	align-self: stretch;
+	justify-content: center;
+	margin: 8px 16px 14px;
+}
+
+/* status line under the action */
+.set-screen .pk-section-body > .pk-check {
+	margin: 0 16px 10px;
+	padding: 0;
+}
+
+/* segmented control inset inside its group */
+.set-screen .pk-section-body > .pk-segmented {
+	margin: 10px 16px 14px;
+}
+
+/* ---- switch (Settings.app toggle) ---- */
+.set-switch {
+	position: relative;
+	flex-shrink: 0;
+	width: 51px;
+	height: 31px;
+	min-height: 0;
+	padding: 0;
+	border-radius: var(--radius-pill);
+	background: var(--bg-inset);
+	border: 1px solid var(--border);
+	transition:
+		background var(--speed-fast) var(--ease-ios),
+		border-color var(--speed-fast) var(--ease-ios);
+}
+
+/* the track must not scale like a regular button — the knob stretches instead */
+.set-switch:active {
+	transform: none;
+	opacity: 1;
+}
+
+.set-switch::after {
+	content: "";
+	position: absolute;
+	top: 1px;
+	left: 1px;
+	width: 27px;
+	height: 27px;
+	border-radius: 50%;
+	background: var(--fg-inverse);
+	transition: transform var(--speed-fast) var(--ease-ios);
+}
+
+.set-switch:active::after {
+	transform-origin: left center;
+	transform: scaleX(1.12);
+}
+
+.set-switch--on {
+	background: var(--success);
+	border-color: transparent;
+}
+
+.set-switch--on::after {
+	transform: translateX(20px);
+}
+
+.set-switch--on:active::after {
+	transform-origin: right center;
+	transform: translateX(20px) scaleX(1.12);
+}
+
+.set-switch:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+/* ---- tts rate slider ---- */
+.set-slider {
+	width: 100%;
+	height: 28px;
+	accent-color: var(--accent);
+}

@@ -20,8 +20,9 @@
 	gap: 8px;
 	padding: calc(8px + env(safe-area-inset-top, 0px)) 10px 8px;
 	background: var(--glass);
-	backdrop-filter: blur(14px);
-	border-bottom: 1px solid var(--border);
+	backdrop-filter: var(--blur-surface);
+	-webkit-backdrop-filter: var(--blur-surface);
+	border-bottom: 1px solid var(--hairline);
 	position: sticky;
 	top: 0;
 	z-index: 20;
@@ -91,26 +92,39 @@
 .ss-agent-row {
 	display: flex;
 	gap: 6px;
-	padding: 6px 10px;
+	padding: 8px 12px;
 	overflow-x: auto;
 	border-bottom: 1px solid var(--border);
 	background: var(--panel);
 	scrollbar-width: none;
 	flex: none;
 }
+.ss-agent-row--quiet {
+	border-bottom: none;
+	padding: 6px 12px 0;
+}
 .ss-agent-chip {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	padding: 5px 10px;
+	height: 28px;
+	padding: 0 10px;
 	border: 1px solid var(--border);
 	border-radius: 999px;
-	background: var(--bg-raised);
+	background: var(--surface2);
 	color: var(--fg);
 	font-size: 12px;
 	white-space: nowrap;
 	cursor: pointer;
 	flex: none;
+}
+.ss-agent-chip--more {
+	color: var(--fg-muted);
+}
+.ss-agent-chip--summary {
+	color: var(--fg-muted);
+	font-size: 12px;
+	border-color: var(--border);
 }
 .ss-agent-dot {
 	width: 6px;
@@ -142,20 +156,87 @@
 	flex: 1;
 	overflow-y: auto;
 	overscroll-behavior: contain;
-	padding: 10px 10px 16px;
+	padding: 0;
+}
+/* Inline insets live here: 16px of air between screen edge and bubbles. */
+.ss-transcript .tr-root {
+	padding: 12px 16px 20px;
 }
 
-/* adaptation layer: compact transcript spacing on mobile */
+/* adaptation layer: iMessage rhythm — a run of turns by one author reads as
+ * one message (tight group, label only on the first); an author change breathes.
+ * Margins sum with the 5px row padding: 12px between authors, 4px in a group. */
 .ss-transcript .tr-row {
-	padding: 4px 0;
-	gap: 8px;
+	padding: 5px 0;
+	gap: 6px;
 	max-width: 100%;
+}
+.ss-transcript .tr-row + .tr-row {
+	margin-top: 2px;
+}
+.ss-transcript .tr-row--assistant + .tr-row--assistant,
+.ss-transcript .tr-row--user + .tr-row--user {
+	margin-top: -6px;
+}
+.ss-transcript .tr-row--assistant + .tr-row--assistant > .tr-gutter,
+.ss-transcript .tr-row--user + .tr-row--user > .tr-gutter {
+	display: none;
+}
+.ss-transcript .tr-divider {
+	margin: 12px 0;
+}
+/* User turns: right-aligned accent bubble, tail corner toward the bottom-right
+ * (compose-side) edge. margin-left:auto right-aligns in both the mobile flex
+ * and the desktop grid row. */
+.ss-transcript .tr-row--user .tr-gutter {
+	text-align: right;
+}
+.ss-transcript .tr-row--user .tr-body {
+	align-self: flex-end;
+	margin-left: auto;
+	align-items: flex-end;
+	max-width: min(85%, 480px);
+	padding: 10px 14px;
+	background: var(--accent);
+	border: none;
+	border-radius: 18px;
+	border-bottom-right-radius: 5px;
+	color: var(--accent-fg);
+	box-shadow: none;
+}
+.ss-transcript .tr-row--user .tr-md a {
+	color: var(--accent-fg);
+	text-decoration: underline;
+}
+.ss-transcript .tr-row--user .tr-md pre {
+	background: rgb(0 0 0 / 0.22);
+	border-color: transparent;
+	color: var(--accent-fg);
+}
+.ss-transcript .tr-row--user .tr-body .tr-md code {
+	background: rgba(255, 255, 255, 0.18);
+	border-color: transparent;
+	color: var(--accent-fg);
+}
+/* Agent turns: elevated card with a soft shadow, readable line measure,
+ * tail corner toward the bottom-left (leading) edge. */
+.ss-transcript .tr-row--assistant .tr-body {
+	justify-self: start;
+	margin-right: auto;
+	width: 100%;
+	max-width: min(100%, 640px);
+	padding: 12px 14px;
+	background: var(--surface);
+	border: 1px solid var(--hairline);
+	border-radius: 18px;
+	border-bottom-left-radius: 5px;
+	box-shadow: var(--shadow-card);
 }
 .ss-transcript .tr-body {
 	max-width: 100%;
 	min-width: 0;
-	font-size: 14px;
-	line-height: 1.45;
+	font-size: 15px;
+	line-height: 1.55;
 }
 .ss-transcript pre,
 .ss-transcript code {
@@ -165,24 +246,32 @@
 	overflow-x: auto;
 	font-size: 13px;
 }
-.ss-transcript table {
-	display: block;
-	overflow-x: auto;
+.ss-transcript .tr-tablewrap {
 	max-width: 100%;
+	overflow-x: auto;
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius);
 }
-/* tool cards: spacing/sizes only */
+/* tool cards: spacing/sizes only — inset panels, never wider than the chat */
 .ss-transcript .tool-render,
 .ss-transcript [class*="tool-"] {
 	max-width: 100%;
 	font-size: 13px;
+}
+.ss-transcript .tr-body > .tv-card {
+	max-width: 100%;
+	min-width: 0;
+	background: var(--bg-inset);
+	border-color: var(--hairline);
+	border-radius: var(--radius);
 }
 
 .ss-jump {
 	position: absolute;
 	right: 14px;
 	bottom: 14px;
-	width: 42px;
-	height: 42px;
+	width: var(--tap);
+	height: var(--tap);
 	border-radius: 50%;
 	border: 1px solid var(--border-strong);
 	background: var(--bg-overlay);
@@ -211,11 +300,14 @@
 }
 
 /* ---- composer ---- */
+/* Glass bar over the transcript: iOS material, hairline separation. */
 .ss-composer-zone {
 	flex: none;
-	background: var(--panel);
-	border-top: 1px solid var(--border);
-	padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+	background: var(--glass);
+	backdrop-filter: var(--blur-surface);
+	-webkit-backdrop-filter: var(--blur-surface);
+	border-top: 1px solid var(--hairline);
+	padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
 }
 .ss-queued-row {
 	display: flex;
@@ -240,30 +332,37 @@
 	align-items: flex-end;
 	gap: 8px;
 }
+/* Composer controls meet the 44px tap target (header icons stay compact). */
+.ss-composer .ss-icon-btn {
+	width: var(--tap);
+	height: var(--tap);
+}
 .ss-input {
 	flex: 1;
 	min-width: 0;
 	resize: none;
-	border: 1px solid var(--border);
-	border-radius: var(--radius-lg);
-	background: var(--bg-raised);
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-pill);
+	background: var(--bg-inset);
 	color: var(--fg);
 	font: inherit;
 	font-size: 15px;
 	line-height: 20px;
-	padding: 8px 12px;
+	padding: 11px 14px;
 	max-height: 136px;
+	transition: border-color var(--speed-fast) var(--ease-ios);
 }
 .ss-input:focus {
 	outline: none;
 	border-color: var(--ring-soft);
+	box-shadow: 0 0 0 3px var(--ring-soft);
 }
 .ss-input:disabled {
 	opacity: 0.5;
 }
 .ss-interrupt {
 	color: var(--err);
-	margin-bottom: 2px;
+	margin-bottom: 0;
 }
 .ss-send {
 	width: 48px;
@@ -277,6 +376,7 @@
 	justify-content: center;
 	cursor: pointer;
 	flex: none;
+	box-shadow: var(--shadow-card);
 }
 .ss-send:disabled {
 	opacity: 0.35;
@@ -421,36 +521,93 @@
 	flex: 1;
 }
 
-/* ---- agent drawer ---- */
+/* ---- agent drawer: full-height hub sheet ---- */
+.ss-agent-backdrop {
+	background: rgba(0, 0, 0, 0.5);
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
 .ss-agent-drawer {
 	position: fixed;
 	left: 0;
 	right: 0;
 	bottom: 0;
+	top: 10dvh;
 	z-index: 41;
+	display: flex;
+	flex-direction: column;
 	background: var(--bg-raised);
 	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
 	border-top: 1px solid var(--edge-top);
-	padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+	box-shadow: var(--shadow-overlay);
 	animation: ss-slide-up 0.2s var(--ease-out);
-	max-height: 60dvh;
-	overflow-y: auto;
+}
+.ss-agent-drawer-handle {
+	flex: none;
+	width: 36px;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--border-strong);
+	margin: 8px auto 4px;
 }
 .ss-agent-drawer-head {
+	flex: none;
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	margin-bottom: 10px;
+	gap: 10px;
+	padding: 6px 12px 10px 16px;
+	border-bottom: 1px solid var(--border);
+}
+.ss-agent-drawer-head strong {
+	font-size: 15px;
+	font-weight: 600;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 .ss-agent-drawer-head .ss-icon-btn {
 	margin-left: auto;
-	width: 30px;
-	height: 30px;
+	width: 32px;
+	height: 32px;
+}
+.ss-agent-pill {
+	flex: none;
+	padding: 2px 8px;
+	border-radius: 999px;
+	font-size: 11px;
+	background: var(--surface2);
+	color: var(--fg-muted);
+}
+.ss-agent-pill--running {
+	background: var(--accent-muted);
+	color: var(--accent);
+}
+.ss-agent-pill--aborted {
+	background: color-mix(in srgb, var(--err) 16%, transparent);
+	color: var(--err);
 }
 .ss-agent-drawer-body {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 10px;
+	padding: 12px 16px;
+}
+.ss-agent-progress-card {
+	flex: none;
+	padding: 10px 12px;
+	background: var(--surface2);
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	font-size: 13px;
+	color: var(--fg);
+	word-break: break-word;
+}
+.ss-agent-progress-label {
+	color: var(--fg-muted);
 }
 .ss-agent-line {
 	font-size: 13px;
@@ -459,6 +616,39 @@
 }
 .ss-agent-line--empty {
 	font-style: italic;
+}
+.ss-agent-btn {
+	flex: 1;
+	min-width: 0;
+	height: 40px;
+	padding: 0 10px;
+	border-radius: 12px;
+	border: 1px solid var(--border);
+	background: var(--surface2);
+	color: var(--fg);
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.ss-agent-btn:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+.ss-agent-btn--danger {
+	background: transparent;
+	border-color: color-mix(in srgb, var(--err) 55%, transparent);
+	color: var(--err);
+}
+.ss-agent-btn--danger-fill {
+	background: var(--err);
+	border-color: transparent;
+	color: #fff;
+}
+.ss-agent-btn--success {
+	background: transparent;
+	border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+	color: var(--ok);
 }
 
 /* ---- ended ---- */
@@ -604,21 +794,16 @@
 	border-radius: 999px;
 }
 
-/* ---- agent drawer: live line, transcript, controls ---- */
-.ss-agent-live {
-	font-size: 12px;
-	color: var(--accent);
-	margin-bottom: 8px;
-	word-break: break-word;
-}
+/* ---- agent drawer: transcript, controls, pinned chat row ---- */
 .ss-agent-transcript {
-	margin: 0 0 10px;
-	max-height: 50vh;
-	overflow-y: auto;
-	background: var(--bg-inset);
+	margin: 0;
+	flex: none;
+	max-height: 45vh;
+	overflow: auto;
+	background: var(--surface2);
 	border: 1px solid var(--border);
 	border-radius: 12px;
-	padding: 10px;
+	padding: 12px;
 	font-family: ui-monospace, "SF Mono", Menlo, monospace;
 	font-size: 12px;
 	line-height: 1.45;
@@ -628,34 +813,56 @@
 }
 .ss-agent-transcript-error {
 	color: var(--err);
-	margin-bottom: 8px;
 }
 .ss-agent-actions {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	margin-bottom: 8px;
-}
-.ss-agent-actions .ss-opt {
-	width: auto;
-	flex: 1;
+	flex: none;
 }
 .ss-agent-chat {
+	flex: none;
 	display: flex;
+	align-items: center;
 	gap: 8px;
+	padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+	border-top: 1px solid var(--border);
+	background: var(--bg-raised);
 }
 .ss-agent-chat-input {
 	flex: 1;
 	min-width: 0;
-	background: var(--bg-inset);
+	height: 36px;
+	background: var(--surface2);
 	border: 1px solid var(--border);
-	border-radius: 10px;
-	padding: 8px 10px;
+	border-radius: 12px;
+	padding: 0 12px;
 	color: var(--fg);
 	font-size: 14px;
 }
+.ss-agent-chat-input:focus {
+	outline: none;
+	border-color: var(--ring-soft);
+}
 .ss-agent-chat-input::placeholder {
 	color: var(--fg-faint);
+}
+.ss-agent-send {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	border: none;
+	border-radius: 50%;
+	background: var(--accent);
+	color: var(--accent-fg);
+	cursor: pointer;
+}
+.ss-agent-send:disabled {
+	opacity: 0.4;
+	cursor: default;
 }
 
 /* terminal / files entry points + toast */
@@ -683,4 +890,11 @@
 	color: var(--fg);
 	font-size: 13px;
 	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* base.css clamps durations under reduced motion; infinite loops stop here. */
+@media (prefers-reduced-motion: reduce) {
+	.ss-pulse-dot--on {
+		animation: none;
+	}
 }

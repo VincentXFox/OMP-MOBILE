@@ -29,7 +29,7 @@ sudo cp ~/omp-mobile/deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl rel
 
 ## Телефон (Android)
 
-1. Открыть `https://vincentfox.ru` → «Добавить на главный экран» (установится как приложение).
+1. Открыть `https://pocket.31-77-109-219.sslip.io` (через reverse-туннель на VPS `de5`) → «Добавить на главный экран» (установится как приложение).
 2. Настройки → Подключение: вставить токен из `~/omp-mobile/gateway/config.json`.
 3. Настройки → Уведомления: включить push (разрешение + подписка).
 
@@ -60,7 +60,26 @@ omp config set tools.approvalMode write   # правки файлов — сам
 | `~/omp-mobile/app` | PWA (React+Bun, форк официального клиента omp collab-web, протокол не изменён) |
 | `~/omp-mobile/gateway` | API реестра + выдача ссылок + Web Push + статика |
 | `~/.config/systemd/user/omp-pocket-gateway.service` | user-юнит gateway |
-| `/etc/caddy/Caddyfile` | TLS-фронт |
+| `~/.config/systemd/user/omp-pocket-tunnel.service` | user-юнит reverse-SSH-туннеля: `de5:8088` → gateway `127.0.0.1:8088` (публичный адрес `https://pocket.31-77-109-219.sslip.io`) |
+| `~/.config/systemd/user/herdr-mobile-relay.service` | user-юнит фонового сервиса релея (env: `~/.config/herdr/plugins/config/herdr-mobile-relay.events/relay.env`) |
+| `/etc/caddy/Caddyfile` | TLS-фронт (системный юнит `caddy`) |
+
+## Systemd-юниты и linger
+
+Стек держат три user-юнита плюс системный Caddy — итого 4 юнита:
+
+```bash
+systemctl --user is-enabled omp-pocket-gateway omp-pocket-tunnel herdr-mobile-relay   # все: enabled
+```
+
+Чтобы user-юниты стартовали при загрузке (пока пользователь не вошёл в сессию), обязателен linger:
+
+```bash
+loginctl show-user vincentfox -p Linger   # должно быть Linger=yes
+sudo loginctl enable-linger vincentfox    # если no
+```
+
+После правки любых `*.service` в `~/.config/systemd/user/` — `systemctl --user daemon-reload`; проверка корректности: `systemd-analyze --user verify omp-pocket-gateway.service omp-pocket-tunnel.service herdr-mobile-relay.service`.
 
 ## Herdr + herdr-mobile-relay (основной мобильный клиент)
 
@@ -86,6 +105,14 @@ herdr plugin pane open --plugin herdr-mobile-relay.events --entrypoint setup --p
 
 Подтверждения: приложение показывает вопросы агентов (Approve/Deny). Чтобы они появлялись, режим OMP не должен быть `yolo`:
 `omp config set tools.approvalMode write` (bash/exec — спрашивает, правки файлов — нет).
+
+## Супер-агент (раздача задач)
+
+Экран «Супер» (`#/super`) в PWA: одна задача уходит выбранным агентам, доска показывает живой статус каждого и его субагентов.
+
+- Источники статусов: `herdr agent list` (статус/заголовок терминала агента) + `omp collab list` (сессия, busy, relay) + субагенты из `<sessions>/<cwd>/<ts>_<sessionId>/<Имя>.jsonl` (хвост транскрипта = текущий инструмент/текст).
+- Раздача: `herdr agent prompt <pane> <текст> --wait --until working`; ультабыстрые ответы подтверждаются хвостом терминала (`agent_prompt_stalled` → проверка доставки). Blocked-агенту задача не отправляется.
+- API: `GET /api/super/board`, `POST /api/super/dispatch` (`{items:[{target,text}]}`, ≤12 × 64KB), `GET /api/super/agent/<pane>/activity`. Файлы: `gateway/super.ts`, `app/src/components/super/`.
 
 ## Центр обновлений (внутри OMP Pocket)
 

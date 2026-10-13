@@ -99,6 +99,86 @@ export async function fetchHosts(signal?: AbortSignal): Promise<HostInfo[]> {
 	return Array.isArray(data.hosts) ? data.hosts : [];
 }
 
+/* ---- agent memory (mnemopi banks) ---- */
+
+export type MemoryTable = "working_memory" | "facts" | "episodic_memory" | "gists" | "annotations";
+
+export interface MemoryBank {
+	name: string;
+	total: number;
+	tables: Partial<Record<MemoryTable, number>>;
+	bytes: number;
+	mtime: number;
+}
+
+/** Normalized memory row; the gateway maps every mnemopi table into this shape. */
+export interface MemoryEntry {
+	id: string;
+	title: string | null;
+	body: string;
+	ts: string | null;
+	source: string | null;
+	kind: string | null;
+	importance: number | null;
+	confidence: number | null;
+	recallCount: number | null;
+	sessionId: string | null;
+	memoryId: string | null;
+}
+
+export async function fetchMemoryBanks(signal?: AbortSignal): Promise<MemoryBank[]> {
+	const data = await request<{ banks: MemoryBank[] }>("/api/memory/banks", { signal });
+	return Array.isArray(data.banks) ? data.banks : [];
+}
+
+/* ---- persisted sessions (resurrect dead agents) ---- */
+
+export type SessionStatus = "live" | "complete" | "aborted" | "error" | "interrupted" | "unknown";
+
+export interface SessionSummary {
+	id: string;
+	path: string;
+	projectSlug: string;
+	cwd: string | null;
+	title: string | null;
+	status: SessionStatus;
+	modified: number;
+	size: number;
+}
+
+export async function fetchSessions(signal?: AbortSignal): Promise<SessionSummary[]> {
+	const data = await request<{ sessions: SessionSummary[] }>("/api/sessions", { signal });
+	return Array.isArray(data.sessions) ? data.sessions : [];
+}
+
+export type AgentResumeResult = { ok: true; instanceId: string } | { ok: false; error: string };
+
+export async function resumeSession(cwd: string, session: string, model?: string, label?: string): Promise<AgentResumeResult> {
+	try {
+		const data = await request<{ ok?: boolean; instanceId?: unknown; error?: unknown }>("/api/agents/resume", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ cwd, session, model, label }),
+		});
+		if (typeof data.instanceId === "string") return { ok: true, instanceId: data.instanceId };
+		return { ok: false, error: typeof data.error === "string" ? data.error : "Некорректный ответ шлюза" };
+	} catch (err) {
+		return { ok: false, error: err instanceof Error ? err.message : String(err) };
+	}
+}
+
+export async function fetchMemoryEntries(
+	bank: string,
+	type: MemoryTable,
+	opts: { q?: string; limit?: number; offset?: number; signal?: AbortSignal } = {},
+): Promise<{ total: number; entries: MemoryEntry[] }> {
+	const params = new URLSearchParams({ type });
+	if (opts.q) params.set("q", opts.q);
+	if (opts.limit != null) params.set("limit", String(opts.limit));
+	if (opts.offset != null) params.set("offset", String(opts.offset));
+	return request(`/api/memory/banks/${encodeURIComponent(bank)}/entries?${params}`, { signal: opts.signal });
+}
+
 export async function mintLink(id: string, view: boolean): Promise<string> {
 	const data = await request<{ url: string }>(`/api/hosts/${encodeURIComponent(id)}/link`, {
 		method: "POST",
@@ -147,16 +227,20 @@ export async function startAgent(cwd: string, model: string | undefined, label: 
 	}
 }
 
-export async function stopAgent(instanceId: string): Promise<boolean> {
+export type StopResult = "ok" | "missing" | "not_started_here";
+
+/** 409 = агент запущен вне этого шлюза; повторить с force после подтверждения пользователем. */
+export async function stopAgent(instanceId: string, force = false): Promise<StopResult> {
 	try {
 		await request<{ ok: boolean }>("/api/agents/stop", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ instanceId }),
+			body: JSON.stringify({ instanceId, force }),
 		});
-		return true;
+		return "ok";
 	} catch (err) {
-		if (err instanceof GatewayError && err.status === 404) return false;
+		if (err instanceof GatewayError && err.status === 404) return "missing";
+		if (err instanceof GatewayError && err.status === 409) return "not_started_here";
 		throw err;
 	}
 }
@@ -326,6 +410,78 @@ export async function sendTerminalText(instanceId: string, text: string): Promis
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ text }),
 	});
+}
+
+/* ---- super agent (orchestration board) ---- */
+
+export type SuperAgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
+
+/** A subagent transcript living next to the host session. */
+export interface SuperSubagent {
+	name: string;
+	sizeBytes: number;
+	updatedAt: number;
+	active: boolean;
+	state: "working" | "done" | "unknown";
+	activity: string;
+}
+
+export interface SuperHostInfo {
+	instanceId: string;
+	sessionId: string;
+	sessionName: string | null;
+	model: { provider: string; id: string };
+	startedAt: number;
+	relayConnected: boolean;
+	inputRequired: boolean;
+	busy: boolean;
+}
+
+export interface SuperAgent {
+	/** herdr pane id — dispatch target ("w1:p1"). */
+	target: string;
+	name: string;
+	agentStatus: SuperAgentStatus;
+	cwd: string;
+	/** Stripped terminal title — what the agent is doing right now. */
+	title: string;
+	interactiveReady: boolean;
+	host: SuperHostInfo | null;
+	subagents: SuperSubagent[];
+}
+
+export interface SuperBoard {
+	agents: SuperAgent[];
+	orphans: { instanceId: string; cwd: string; sessionName: string | null; busy: boolean }[];
+}
+
+export interface SuperActivity {
+	target: string;
+	agentStatus: SuperAgentStatus;
+	title: string;
+	cwd: string;
+	name: string;
+	tail: string;
+	subagents: SuperSubagent[];
+}
+
+export type DispatchResult = { target: string; ok: true } | { target: string; ok: false; error: string };
+
+export async function fetchSuperBoard(signal?: AbortSignal): Promise<SuperBoard> {
+	return request<SuperBoard>("/api/super/board", { signal });
+}
+
+export async function dispatchSuperTasks(items: { target: string; text: string }[]): Promise<DispatchResult[]> {
+	const data = await request<{ results: DispatchResult[] }>("/api/super/dispatch", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ items }),
+	});
+	return Array.isArray(data.results) ? data.results : [];
+}
+
+export async function fetchSuperActivity(target: string, signal?: AbortSignal): Promise<SuperActivity> {
+	return request<SuperActivity>(`/api/super/agent/${encodeURIComponent(target)}/activity`, { signal });
 }
 
 /* ---- project files / git ---- */

@@ -3,10 +3,13 @@ import { existsSync, statSync } from "node:fs";
 import { loadConfig } from "./config.ts";
 import { listHosts, mintLink } from "./hosts.ts";
 import type { OmpHostsOutput } from "./hosts.ts";
-import { startAgent, stopAgent } from "./agents.ts";
+import { resumeAgent, startAgent, stopAgent } from "./agents.ts";
+import { listSessions } from "./sessions.ts";
 import { listProjectFiles, projectGit, readTerminal, sendTerminalKeys, sendTerminalText, MAX_TERMINAL_TEXT_BYTES } from "./files.ts";
 import { PushManager } from "./push.ts";
+import { isMemoryTable, listBanks, listEntries } from "./memory.ts";
 import { Updater, LIVE_UPDATER_PATHS, isComponentId } from "./updater.ts";
+import { dispatchTasks, superActivity, superBoard, validateDispatchItems } from "./super.ts";
 
 const DIST_DIR = new URL("../app/dist/", import.meta.url).pathname;
 const HOSTS_CACHE_MS = 2000;
@@ -110,6 +113,22 @@ async function route(req: Request, url: URL): Promise<Response> {
 
   if (url.pathname === "/api/hosts" && req.method === "GET") return json(200, await cache.get());
 
+  if (url.pathname === "/api/memory/banks" && req.method === "GET") return json(200, { banks: listBanks() });
+
+  const memMatch = /^\/api\/memory\/banks\/([^/]+)\/entries$/.exec(url.pathname);
+  if (memMatch && req.method === "GET") {
+    const type = url.searchParams.get("type") ?? "";
+    if (!isMemoryTable(type)) return json(400, { error: "unknown memory type" });
+    const limitRaw = Number(url.searchParams.get("limit"));
+    const offsetRaw = Number(url.searchParams.get("offset"));
+    const limit = Number.isInteger(limitRaw) && limitRaw >= 1 && limitRaw <= 200 ? limitRaw : 50;
+    const offset = Number.isInteger(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+    const q = url.searchParams.get("q")?.trim() || undefined;
+    const result = listEntries(decodeURIComponent(memMatch[1]), type, { q, limit, offset });
+    if (!result) return json(404, { error: "bank not found" });
+    return json(200, result);
+  }
+
   const linkMatch = /^\/api\/hosts\/([^/]+)\/link$/.exec(url.pathname);
   if (linkMatch && req.method === "POST") {
     const body = (await readJson<{ view?: boolean }>(req)) ?? {};
@@ -167,10 +186,30 @@ async function route(req: Request, url: URL): Promise<Response> {
     return json(200, { ok: true, instanceId: outcome.instanceId, note: outcome.note });
   }
 
+  if (url.pathname === "/api/agents/resume" && req.method === "POST") {
+    const body = (await readJson<{ cwd?: unknown; session?: unknown; model?: unknown; label?: unknown }>(req)) ?? {};
+    if (typeof body.cwd !== "string" || body.cwd.trim() === "") return json(400, { error: "cwd required" });
+    if (typeof body.session !== "string" || !body.session.endsWith(".jsonl")) return json(400, { error: "session .jsonl path required" });
+    const model = typeof body.model === "string" && body.model.trim() !== "" ? body.model.trim() : undefined;
+    const label = typeof body.label === "string" && body.label.trim() !== "" ? body.label.trim() : undefined;
+    const outcome = await resumeAgent(body.cwd, body.session, model, label);
+    if (outcome.kind === "bad_cwd") return json(400, { error: outcome.error });
+    if (outcome.kind === "failed") return json(502, { error: outcome.error });
+    return json(200, { ok: true, instanceId: outcome.instanceId, note: outcome.note });
+  }
+
+  if (url.pathname === "/api/sessions" && req.method === "GET") {
+    const hosts = await cache.get();
+    const live = new Set<string>();
+    for (const host of hosts.hosts) if (typeof host.sessionId === "string") live.add(host.sessionId);
+    return json(200, { sessions: listSessions(live) });
+  }
+
   if (url.pathname === "/api/agents/stop" && req.method === "POST") {
-    const body = (await readJson<{ instanceId?: unknown }>(req)) ?? {};
+    const body = (await readJson<{ instanceId?: unknown; force?: unknown }>(req)) ?? {};
     if (typeof body.instanceId !== "string" || body.instanceId.trim() === "") return json(400, { error: "instanceId required" });
-    const outcome = await stopAgent(body.instanceId);
+    const outcome = await stopAgent(body.instanceId, { force: body.force === true });
+    if (outcome.scoped) return json(409, { error: "not_started_here" });
     if (!outcome.found) return json(404, { error: "host not found" });
     if (!outcome.killed) return json(502, { error: "process did not exit" });
     return json(200, { ok: true, killed: true });
@@ -212,6 +251,36 @@ async function route(req: Request, url: URL): Promise<Response> {
     return json(200, { ok: true });
   }
 
+  if (url.pathname === "/api/super/board" && req.method === "GET") {
+    try {
+      return json(200, await superBoard());
+    } catch (err) {
+      return json(502, { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  if (url.pathname === "/api/super/dispatch" && req.method === "POST") {
+    const body = (await readJson<{ items?: unknown }>(req)) ?? {};
+    const parsed = validateDispatchItems(body.items);
+    if ("error" in parsed) return json(400, { error: parsed.error });
+    try {
+      return json(200, { results: await dispatchTasks(parsed.items) });
+    } catch (err) {
+      return json(502, { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  const superMatch = /^\/api\/super\/agent\/([^/]+)\/activity$/.exec(url.pathname);
+  if (superMatch && req.method === "GET") {
+    try {
+      const activity = await superActivity(decodeURIComponent(superMatch[1]));
+      if (activity === null) return json(404, { error: "agent not found" });
+      return json(200, activity);
+    } catch (err) {
+      return json(502, { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   if (url.pathname === "/api/project/files" && req.method === "GET") {
     const dir = url.searchParams.get("path");
     if (dir === null || !dir.startsWith("/")) return json(400, { error: "absolute path required" });
@@ -222,7 +291,12 @@ async function route(req: Request, url: URL): Promise<Response> {
       return json(400, { error: `path does not exist: ${dir}` });
     }
     if (!stat.isDirectory()) return json(400, { error: "not a directory" });
-    return json(200, listProjectFiles(dir));
+    try {
+      return json(200, listProjectFiles(dir));
+    } catch (err) {
+      if (err instanceof Error && err.message === "path not allowed") return json(403, { error: "path not allowed" });
+      throw err;
+    }
   }
 
   if (url.pathname === "/api/project/git" && req.method === "GET") {
@@ -239,6 +313,7 @@ async function route(req: Request, url: URL): Promise<Response> {
     if (mode !== "status" && mode !== "diff") return json(400, { error: "mode must be status or diff" });
     if (!existsSync(join(dir, ".git"))) return json(404, { error: "no-git" });
     const outcome = await projectGit(dir, mode);
+    if (outcome.kind === "failed" && outcome.error === "path not allowed") return json(403, { error: "path not allowed" });
     if (outcome.kind === "failed") return json(502, { error: outcome.error });
     return json(200, { text: outcome.text });
   }

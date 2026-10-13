@@ -130,14 +130,15 @@ export function FilesScreen(props: { root: string; onBack: () => void }): ReactN
 	return (
 		<div className="fs-root">
 			<header className="fs-header">
-				<button type="button" className="fs-icon-btn" onClick={onBack} aria-label="Назад">
-					<ArrowLeft size={20} />
-				</button>
+				<div className="fs-header-bar">
+					<button type="button" className="fs-icon-btn" onClick={onBack} aria-label="Назад">
+						<ArrowLeft size={18} />
+					</button>
+					{hasGit && <FolderGit2 size={16} className="fs-git-badge" />}
+				</div>
 				<div className="fs-title">Файлы проекта</div>
-				{hasGit && <FolderGit2 size={18} className="fs-git-badge" />}
+				<Breadcrumbs path={path} root={root} onJump={target => void load(target)} />
 			</header>
-
-			<Breadcrumbs path={path} root={root} onJump={target => void load(target)} />
 
 			{error != null && <div className="fs-error">{error}</div>}
 
@@ -149,7 +150,7 @@ export function FilesScreen(props: { root: string; onBack: () => void }): ReactN
 						className="fs-row"
 						onClick={() => void load(parentPath(path))}
 					>
-						<ArrowLeft size={16} className="fs-row-icon" />
+						<ArrowLeft size={16} className="fs-row-icon fs-row-icon--up" />
 						<span className="fs-row-name">…</span>
 					</button>
 				)}

@@ -3,6 +3,7 @@ import { SendHorizontal, Square } from "lucide-react";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { ConnectionPhase, GuestClient } from "../../lib/client";
+import { VoiceRecorder } from "./VoiceRecorder";
 
 export interface ComposerProps {
 	client: GuestClient;
@@ -126,6 +127,7 @@ export const Composer = memo(function Composer({
 	queuedMessageCount,
 }: ComposerProps): ReactNode {
 	const [text, setText] = useState("");
+	const [voiceActive, setVoiceActive] = useState(false);
 	const taRef = useRef<HTMLTextAreaElement | null>(null);
 	const { composingRef, onCompositionStart, onCompositionEnd } = useCompositionGuard();
 
@@ -152,6 +154,15 @@ export const Composer = memo(function Composer({
 			send();
 		}
 	};
+
+	/** Same prompt path as `send`, but with the voice transcript instead of the typed draft. */
+	const sendVoice = useCallback(
+		(value: string): void => {
+			if (!value || !live || readOnly) return;
+			client.sendPrompt(value);
+		},
+		[client, live, readOnly],
+	);
 
 	if (uiRequest && canPrompt) {
 		return (
@@ -212,52 +223,63 @@ export const Composer = memo(function Composer({
 	return (
 		<div className="sh-composer">
 			<div className="sh-composer-inner">
-				<textarea
-					ref={taRef}
-					className="sh-composer-input"
-					value={text}
-					onChange={e => setText(e.target.value)}
-					onKeyDown={onKeyDown}
-					onCompositionStart={onCompositionStart}
-					onCompositionEnd={onCompositionEnd}
-					placeholder={
-						readOnly
-							? "Read-only session — watching only"
-							: live
-								? "Prompt the host agent…"
-								: "Waiting for the session…"
-					}
-					disabled={!canPrompt}
-					rows={1}
-					spellCheck={false}
-				/>
-				<div className="sh-composer-actions">
-					{busy && queued > 0 && (
-						<span className="sh-queued">
-							<span className="sh-queued-label">queued </span>×{queued}
-						</span>
-					)}
-					{busy && !readOnly && (
+				{!voiceActive && (
+					<textarea
+						ref={taRef}
+						className="sh-composer-input"
+						value={text}
+						onChange={e => setText(e.target.value)}
+						onKeyDown={onKeyDown}
+						onCompositionStart={onCompositionStart}
+						onCompositionEnd={onCompositionEnd}
+						placeholder={
+							readOnly
+								? "Read-only session — watching only"
+								: live
+									? "Prompt the host agent…"
+									: "Waiting for the session…"
+						}
+						disabled={!canPrompt}
+						rows={1}
+						spellCheck={false}
+					/>
+				)}
+				{!voiceActive && (
+					<div className="sh-composer-actions">
+						{busy && queued > 0 && (
+							<span className="sh-queued">
+								<span className="sh-queued-label">queued </span>×{queued}
+							</span>
+						)}
+						{busy && !readOnly && (
+							<button
+								type="button"
+								className="sh-btn sh-btn-stop"
+								onClick={() => client.sendAbort()}
+								disabled={!live}
+								title="stop the current turn"
+							>
+								<Square size={11} /> <span className="sh-btn-label">Stop</span>
+							</button>
+						)}
 						<button
 							type="button"
-							className="sh-btn sh-btn-stop"
-							onClick={() => client.sendAbort()}
-							disabled={!live}
-							title="stop the current turn"
+							className="sh-btn sh-btn-primary"
+							onClick={send}
+							disabled={!canSend}
+							title="send (Enter)"
 						>
-							<Square size={11} /> <span className="sh-btn-label">Stop</span>
+							<SendHorizontal size={12} /> <span className="sh-btn-label">Send</span>
 						</button>
-					)}
-					<button
-						type="button"
-						className="sh-btn sh-btn-primary"
-						onClick={send}
-						disabled={!canSend}
-						title="send (Enter)"
-					>
-						<SendHorizontal size={12} /> <span className="sh-btn-label">Send</span>
-					</button>
-				</div>
+					</div>
+				)}
+				{canPrompt && (
+					<VoiceRecorder
+						disabled={!canPrompt}
+						onSend={sendVoice}
+						onActiveChange={setVoiceActive}
+					/>
+				)}
 			</div>
 		</div>
 	);

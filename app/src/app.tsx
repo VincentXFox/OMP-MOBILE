@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bot, Folder, Settings, Activity, RefreshCw } from "lucide-react";
+import { Bot, Folder, Settings, Activity, RefreshCw, Brain, History, Crown } from "lucide-react";
 import { AgentsScreen } from "./components/agents/AgentsScreen";
 import { ActivityScreen } from "./components/activity/ActivityScreen";
+import { MemoryScreen } from "./components/memory/MemoryScreen";
 import { ProjectsScreen } from "./components/projects/ProjectsScreen";
+import { SessionsScreen } from "./components/sessions/SessionsScreen";
 import { SettingsScreen } from "./components/settings/SettingsScreen";
 import { SessionScreen } from "./components/session/SessionScreen";
+import { SuperScreen } from "./components/super/SuperScreen";
 import { UpdatesScreen } from "./components/updates/UpdatesScreen";
 import type { HostInfo } from "./lib/gateway";
 import { fetchHosts, GatewayError, mintLink, setToken } from "./lib/gateway";
 import { GuestClient } from "./lib/client";
 import "./components/shell/pocket.css";
 
-type Screen = "agents" | "projects" | "activity" | "updates" | "settings" | "session";
+type Screen = "agents" | "super" | "projects" | "sessions" | "memory" | "activity" | "updates" | "settings" | "session";
 
 const SCREENS: readonly { id: Exclude<Screen, "session">; label: string }[] = [
+	{ id: "super", label: "Супер" },
 	{ id: "agents", label: "Агенты" },
 	{ id: "projects", label: "Проекты" },
+	{ id: "sessions", label: "Сессии" },
+	{ id: "memory", label: "Память" },
 	{ id: "activity", label: "Активность" },
 	{ id: "updates", label: "Обновления" },
 	{ id: "settings", label: "Настройки" },
@@ -23,7 +29,10 @@ const SCREENS: readonly { id: Exclude<Screen, "session">; label: string }[] = [
 
 const SCREEN_TITLE: Record<Screen, string> = {
 	agents: "Агенты",
+	super: "Супер-агент",
 	projects: "Проекты",
+	sessions: "Сессии",
+	memory: "Память",
 	activity: "Активность",
 	updates: "Обновления",
 	settings: "Настройки",
@@ -53,7 +62,7 @@ provisionTokenFromHash();
 
 function screenFromHash(): Screen {
 	const hash = window.location.hash.replace(/^#\/?/, "");
-	return hash === "projects" || hash === "activity" || hash === "updates" || hash === "settings" ? hash : "agents";
+	return hash === "super" || hash === "projects" || hash === "sessions" || hash === "memory" || hash === "activity" || hash === "updates" || hash === "settings" ? hash : "agents";
 }
 
 export function App(): ReactNode {
@@ -152,6 +161,33 @@ export function App(): ReactNode {
 		})();
 	}, []);
 
+	const openSuperSession = useCallback(
+		(instanceId: string): void => {
+			const host = hosts?.find(h => h.instanceId === instanceId);
+			if (host) void openHost(host);
+			else setHostsError("Сессия недоступна — агент не отвечает в collab-реестре.");
+		},
+		[hosts, openHost],
+	);
+
+	// Resume flow: fetch a fresh registry snapshot — the 5s poll state may be stale.
+	const openInstance = useCallback(
+		async (instanceId: string): Promise<void> => {
+			try {
+				const fresh = await fetchHosts();
+				const host = fresh.find(h => h.instanceId === instanceId);
+				if (host) {
+					await openHost(host);
+					return;
+				}
+				setHostsError("Сессия поднялась, но агент не появился в collab-реестре.");
+			} catch (err) {
+				setHostsError(err instanceof Error ? err.message : String(err));
+			}
+		},
+		[openHost],
+	);
+
 	const activeHost = useMemo(
 		() => hosts?.find(h => h.instanceId === activeInstanceId),
 		[hosts, activeInstanceId],
@@ -162,6 +198,10 @@ export function App(): ReactNode {
 			case "session":
 				if (client) return <SessionScreen client={client} onLeave={leaveSession} host={activeHost} />;
 				return <AgentsScreen hosts={hosts} error={hostsError} filterCwd={filterCwd} onClearFilter={() => setFilterCwd(null)} onOpen={h => void openHost(h)} onRefresh={refreshHosts} />;
+			case "super":
+				return <SuperScreen onOpenSession={openSuperSession} />;
+			case "sessions":
+				return <SessionsScreen onOpenInstance={id => void openInstance(id)} />;
 			case "projects":
 				return (
 					<ProjectsScreen
@@ -173,6 +213,8 @@ export function App(): ReactNode {
 						}}
 					/>
 				);
+			case "memory":
+				return <MemoryScreen />;
 			case "activity":
 				return <ActivityScreen client={client} onOpenSession={() => goto("session")} hosts={hosts} />;
 			case "updates":
@@ -182,11 +224,14 @@ export function App(): ReactNode {
 			default:
 				return <AgentsScreen hosts={hosts} error={hostsError} filterCwd={filterCwd} onClearFilter={() => setFilterCwd(null)} onOpen={h => void openHost(h)} onRefresh={refreshHosts} />;
 		}
-	}, [screen, client, hosts, hostsError, filterCwd, openHost, leaveSession, goto, activeHost, refreshHosts]);
+	}, [screen, client, hosts, hostsError, filterCwd, openHost, openInstance, leaveSession, goto, activeHost, refreshHosts]);
 
 	const navIcon: Record<Exclude<Screen, "session">, ReactNode> = {
+		super: <Crown size={22} />,
 		agents: <Bot size={22} />,
 		projects: <Folder size={22} />,
+		sessions: <History size={22} />,
+		memory: <Brain size={22} />,
 		activity: <Activity size={22} />,
 		updates: <RefreshCw size={22} />,
 		settings: <Settings size={22} />,
@@ -209,7 +254,7 @@ export function App(): ReactNode {
 							onClick={() => goto(s.id)}
 						>
 							{navIcon[s.id]}
-							{s.label}
+							<span className="pk-nav-label">{s.label}</span>
 						</button>
 					))}
 				</nav>

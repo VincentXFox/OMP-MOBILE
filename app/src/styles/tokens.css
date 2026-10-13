@@ -1,75 +1,113 @@
-/* Design tokens — OMP Pocket. Dark is the default; light via [data-theme]
- * and prefers-color-scheme fallback. The ONLY file allowed to contain raw
- * color values. Legacy var names consumed by transcript.css / tool-render /
- * shell.css / agents.css are kept as aliases. */
+/* Design tokens — OMP Pocket. Apple HIG design language.
+ * Dark is the default; light via [data-theme] with prefers-color-scheme
+ * fallback. The ONLY file allowed to contain raw color values.
+ * Names are a stable contract: never rename, never remove — only retune
+ * values or append new tokens. */
+
 :root {
 	color-scheme: dark;
 
-	/* palette */
-	--bg: #0a0a0c;
-	--surface: #141417;
-	--surface2: #1c1c21;
-	--border: #26262b;
+	/* ---- palette (iOS dark: base darker, elevated lighter) ---- */
+	--bg: #0b0b0f;
+	--surface: #16161b;
+	--surface2: #1e1e24;
+	--border: #2a2a32;
 	--fg: #f5f5f7;
-	--muted: #8e8e93;
+	--muted: #98989f;
 	--accent: #0a84ff;
-	--success: #30d158;
+	--success: #32d74b;
 	--warning: #ff9f0a;
 	--error: #ff453a;
 
-	/* legacy aliases (consumed by session components) */
+	/* ---- surfaces ---- */
 	--panel: var(--surface);
 	--bg-raised: var(--surface2);
-	--bg-inset: #0e0e11;
-	--bg-overlay: #232329;
-	--glass: rgba(20, 20, 23, 0.82);
-	--hover: rgba(255, 255, 255, 0.045);
-	--selected: rgba(10, 132, 255, 0.14);
+	--bg-inset: #0f0f13;
+	--bg-overlay: #26262d;
+	--surface-strong: #26262d;
+
+	/* glass: translucent bar material (pair with --blur-surface) */
+	--glass: rgba(18, 18, 23, 0.72);
+
+	/* interaction states */
+	--hover: rgba(255, 255, 255, 0.055);
+	--selected: rgba(10, 132, 255, 0.16);
+
+	/* text */
 	--fg-muted: var(--muted);
-	--fg-faint: #636368;
-	--fg-inverse: #0a0a0c;
+	--fg-faint: #6a6a72;
+	--fg-inverse: #f5f5f7;
+
+	/* accent system */
 	--accent-fg: #fff;
-	--accent-muted: rgba(10, 132, 255, 0.16);
+	--accent-muted: rgba(10, 132, 255, 0.18);
 	--accent-a: #64b5ff;
 	--accent-b: var(--accent);
 	--accent-gradient: linear-gradient(100deg, var(--accent-a), var(--accent-b));
-	--ambient-a: rgba(10, 132, 255, 0.06);
-	--ambient-b: rgba(48, 209, 88, 0.04);
+	--ambient-a: rgba(10, 132, 255, 0.07);
+	--ambient-b: rgba(50, 215, 75, 0.045);
+
+	/* status aliases */
 	--ok: var(--success);
 	--live: var(--success);
 	--warn: var(--warning);
 	--err: var(--error);
-	--border-strong: #3a3a41;
-	--edge-top: rgba(255, 255, 255, 0.12);
-	--edge-bottom: rgba(255, 255, 255, 0.04);
-	--ring: var(--accent);
-	--ring-soft: rgba(10, 132, 255, 0.22);
-	--success-muted: rgba(48, 209, 88, 0.16);
+	--success-muted: rgba(50, 215, 75, 0.16);
 	--warning-muted: rgba(255, 159, 10, 0.16);
 	--error-muted: rgba(255, 69, 58, 0.16);
 
-	/* type — system stack */
-	--font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+	/* hairlines & edges (0.5px @2x material separation) */
+	--border-strong: #3d3d46;
+	--hairline: rgba(255, 255, 255, 0.14);
+	--edge-top: rgba(255, 255, 255, 0.14);
+	--edge-bottom: rgba(255, 255, 255, 0.04);
+
+	/* focus rings */
+	--ring: var(--accent);
+	--ring-soft: rgba(10, 132, 255, 0.28);
+
+	/* ---- type — Apple system stack ---- */
+	--font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
 	--font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
-	/* radii: 12 inputs/chips · 16 cards · 999 pills */
+	/* iOS type scale */
+	--text-large-title: 30px;
+	--text-title: 22px;
+	--text-headline: 16px;
+	--text-body: 15px;
+	--text-subhead: 13px;
+	--text-footnote: 12px;
+	--text-caption: 11px;
+	--tracking-tight: -0.02em;
+	--tracking-caps: 0.06em;
+
+	/* ---- radii: 12 chips/inputs · 16 cards · 20 sheets ---- */
 	--radius-sm: 10px;
 	--radius: 12px;
 	--radius-lg: 16px;
-	--radius-xl: 16px;
+	--radius-xl: 20px;
 	--radius-pill: 999px;
 
-	/* layout */
+	/* ---- layout ---- */
 	--nav-h: 64px;
 	--topbar-h: 52px;
 	--tap: 44px;
-	--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-	--speed: 150ms;
 
-	--shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5);
-	--shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.7);
-	--rail-mobile-shadow: -12px 0 32px rgba(0, 0, 0, 0.6);
-	--backdrop: rgba(0, 0, 0, 0.55);
+	/* ---- motion ---- */
+	--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
+	--speed: 220ms;
+	--speed-fast: 150ms;
+
+	/* ---- elevation (soft, layered) ---- */
+	--shadow-card: 0 1px 2px rgba(0, 0, 0, 0.18), 0 8px 24px rgba(0, 0, 0, 0.12);
+	--shadow-overlay: 0 2px 8px rgba(0, 0, 0, 0.28), 0 24px 64px rgba(0, 0, 0, 0.5);
+	--rail-mobile-shadow: -8px 0 24px rgba(0, 0, 0, 0.4), -24px 0 64px rgba(0, 0, 0, 0.3);
+	--backdrop: rgba(0, 0, 0, 0.5);
+
+	/* ---- translucency materials (backdrop-filter shorthand values) ---- */
+	--blur-surface: blur(24px) saturate(160%);
+	--blur-strong: blur(40px) saturate(180%);
 }
 
 [data-theme="light"] {
@@ -78,37 +116,40 @@
 	--bg: #f2f2f7;
 	--surface: #ffffff;
 	--surface2: #ffffff;
-	--border: #e5e5ea;
-	--fg: #000000;
-	--muted: #6c6c70;
+	--border: #e3e3e8;
+	--fg: #0a0a0a;
+	--muted: #6d6d72;
 	--accent: #007aff;
 	--success: #34c759;
 	--warning: #ff9500;
 	--error: #ff3b30;
 
-	--bg-inset: #f2f2f7;
+	--bg-inset: #e9e9ee;
 	--bg-overlay: #ffffff;
-	--glass: rgba(255, 255, 255, 0.85);
-	--hover: rgba(0, 0, 0, 0.03);
+	--surface-strong: #ffffff;
+	--glass: rgba(248, 248, 251, 0.78);
+	--hover: rgba(0, 0, 0, 0.04);
 	--selected: rgba(0, 122, 255, 0.1);
 	--fg-faint: #9a9aa0;
 	--fg-inverse: #fff;
 	--accent-muted: rgba(0, 122, 255, 0.12);
 	--accent-a: var(--accent);
+	--accent-b: #3aa0ff;
 	--ambient-a: rgba(0, 122, 255, 0.05);
 	--ambient-b: rgba(52, 199, 89, 0.04);
-	--border-strong: #d1d1d6;
+	--border-strong: #cfcfd6;
+	--hairline: rgba(0, 0, 0, 0.1);
 	--edge-top: rgba(0, 0, 0, 0.08);
 	--edge-bottom: rgba(0, 0, 0, 0.03);
-	--ring-soft: rgba(0, 122, 255, 0.18);
+	--ring-soft: rgba(0, 122, 255, 0.2);
 	--success-muted: rgba(52, 199, 89, 0.14);
 	--warning-muted: rgba(255, 149, 0, 0.14);
 	--error-muted: rgba(255, 59, 48, 0.14);
 
-	--shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05);
-	--shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.14);
-	--rail-mobile-shadow: -12px 0 32px rgba(0, 0, 0, 0.1);
-	--backdrop: rgba(0, 0, 0, 0.25);
+	--shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+	--shadow-overlay: 0 2px 8px rgba(0, 0, 0, 0.08), 0 24px 64px rgba(0, 0, 0, 0.18);
+	--rail-mobile-shadow: -8px 0 24px rgba(0, 0, 0, 0.08), -24px 0 64px rgba(0, 0, 0, 0.1);
+	--backdrop: rgba(0, 0, 0, 0.3);
 }
 
 @media (prefers-color-scheme: light) {
@@ -118,36 +159,39 @@
 		--bg: #f2f2f7;
 		--surface: #ffffff;
 		--surface2: #ffffff;
-		--border: #e5e5ea;
-		--fg: #000000;
-		--muted: #6c6c70;
+		--border: #e3e3e8;
+		--fg: #0a0a0a;
+		--muted: #6d6d72;
 		--accent: #007aff;
 		--success: #34c759;
 		--warning: #ff9500;
 		--error: #ff3b30;
 
-		--bg-inset: #f2f2f7;
+		--bg-inset: #e9e9ee;
 		--bg-overlay: #ffffff;
-		--glass: rgba(255, 255, 255, 0.85);
-		--hover: rgba(0, 0, 0, 0.03);
+		--surface-strong: #ffffff;
+		--glass: rgba(248, 248, 251, 0.78);
+		--hover: rgba(0, 0, 0, 0.04);
 		--selected: rgba(0, 122, 255, 0.1);
 		--fg-faint: #9a9aa0;
 		--fg-inverse: #fff;
 		--accent-muted: rgba(0, 122, 255, 0.12);
 		--accent-a: var(--accent);
+		--accent-b: #3aa0ff;
 		--ambient-a: rgba(0, 122, 255, 0.05);
 		--ambient-b: rgba(52, 199, 89, 0.04);
-		--border-strong: #d1d1d6;
+		--border-strong: #cfcfd6;
+		--hairline: rgba(0, 0, 0, 0.1);
 		--edge-top: rgba(0, 0, 0, 0.08);
 		--edge-bottom: rgba(0, 0, 0, 0.03);
-		--ring-soft: rgba(0, 122, 255, 0.18);
+		--ring-soft: rgba(0, 122, 255, 0.2);
 		--success-muted: rgba(52, 199, 89, 0.14);
 		--warning-muted: rgba(255, 149, 0, 0.14);
 		--error-muted: rgba(255, 59, 48, 0.14);
 
-		--shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05);
-		--shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.14);
-		--rail-mobile-shadow: -12px 0 32px rgba(0, 0, 0, 0.1);
-		--backdrop: rgba(0, 0, 0, 0.25);
+		--shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+		--shadow-overlay: 0 2px 8px rgba(0, 0, 0, 0.08), 0 24px 64px rgba(0, 0, 0, 0.18);
+		--rail-mobile-shadow: -8px 0 24px rgba(0, 0, 0, 0.08), -24px 0 64px rgba(0, 0, 0, 0.1);
+		--backdrop: rgba(0, 0, 0, 0.3);
 	}
 }

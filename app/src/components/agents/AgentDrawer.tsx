@@ -138,106 +138,110 @@ export function AgentDrawer(props: {
 			: null;
 
 	return (
-		<aside className="ag-drawer" role="dialog" aria-label={agent.displayName}>
-			<header className="ag-drawer-head">
-				<div className="ag-drawer-title">
-					<span className="ag-drawer-name">{agent.displayName}</span>
-					<span className={`ag-chip ag-chip--${agent.status}`}>{agent.status}</span>
-					{model ? <span className="ag-chip ag-chip--model">{model}</span> : null}
-				</div>
-				<div className="ag-drawer-actions">
-					{agent.status === "running" && !readOnly ? (
-						<button
-							type="button"
-							className="ag-btn ag-btn--danger"
-							onClick={() => client.sendAgentCmd("kill", agent.id)}
-						>
-							<OctagonX size={13} aria-hidden />
-							kill
-						</button>
-					) : null}
-					{(agent.status === "parked" || agent.status === "aborted") && !readOnly ? (
-						<button type="button" className="ag-btn" onClick={() => client.sendAgentCmd("revive", agent.id)}>
-							<RotateCcw size={13} aria-hidden />
-							revive
-						</button>
-					) : null}
-					<button type="button" className="ag-iconbtn" aria-label="close" onClick={onClose}>
-						<X size={15} aria-hidden />
-					</button>
-				</div>
-			</header>
-			{p ? (
-				<div className="ag-stats">
-					<span className="ag-stat">
-						<span className="ag-stat-label">tok</span>
-						<span className="ag-stat-value">{fmtTokens(p.tokens)}</span>
-					</span>
-					{ctxPct !== null ? (
-						<span className="ag-stat" title={`context ${fmtTokens(p.contextTokens ?? 0)}`}>
-							<span className="ag-stat-label">ctx</span>
-							<span className="ag-gauge">
-								<span
-									className={ctxPct > 80 ? "ag-gauge-fill ag-gauge-fill--warn" : "ag-gauge-fill"}
-									style={{ width: `${ctxPct}%` }}
-								/>
-							</span>
-						</span>
-					) : null}
-					<span className="ag-stat">
-						<span className="ag-stat-label">cost</span>
-						<span className="ag-stat-value">{fmtCost(p.cost)}</span>
-					</span>
-					<span className="ag-stat">
-						<span className="ag-stat-label">tools</span>
-						<span className="ag-stat-value">{p.toolCount}</span>
-					</span>
-					<span className="ag-stat">
-						<span className="ag-stat-value">{fmtDuration(p.durationMs)}</span>
-					</span>
-				</div>
-			) : null}
-			<div className="ag-drawer-body">
-				{agent.hasSessionFile ? (
-					<>
-						<Transcript
-							compact
-							entries={entries}
-							stream={null}
-							streamDone={false}
-							activeTools={EMPTY_TOOLS}
-							working={agent.status === "running" && fetchError === null}
-							host={host}
-						/>
-						{fetchError !== null ? (
-							<div className="ag-fetch-error" role="alert">
-								transcript unavailable: {fetchError}
-							</div>
+		<>
+			<div className="ag-drawer-backdrop" onClick={onClose} aria-hidden="true" />
+			<aside className="ag-drawer" role="dialog" aria-modal="true" aria-label={agent.displayName}>
+				<span className="ag-grabber" aria-hidden="true" />
+				<header className="ag-drawer-head">
+					<div className="ag-drawer-title">
+						<span className="ag-drawer-name">{agent.displayName}</span>
+						<span className={`ag-chip ag-chip--${agent.status}`}>{agent.status}</span>
+						{model ? <span className="ag-chip ag-chip--model">{model}</span> : null}
+					</div>
+					<div className="ag-drawer-actions">
+						{agent.status === "running" && !readOnly ? (
+							<button
+								type="button"
+								className="ag-btn ag-btn--danger"
+								onClick={() => client.sendAgentCmd("kill", agent.id)}
+							>
+								<OctagonX size={15} aria-hidden />
+								kill
+							</button>
 						) : null}
-					</>
-				) : (
-					<div className="ag-empty">no transcript available</div>
+						{(agent.status === "parked" || agent.status === "aborted") && !readOnly ? (
+							<button type="button" className="ag-btn" onClick={() => client.sendAgentCmd("revive", agent.id)}>
+								<RotateCcw size={15} aria-hidden />
+								revive
+							</button>
+						) : null}
+						<button type="button" className="ag-iconbtn" aria-label="close" onClick={onClose}>
+							<X size={18} aria-hidden />
+						</button>
+					</div>
+				</header>
+				{p ? (
+					<div className="ag-stats">
+						<span className="ag-stat">
+							<span className="ag-stat-label">tok</span>
+							<span className="ag-stat-value">{fmtTokens(p.tokens)}</span>
+						</span>
+						{ctxPct !== null ? (
+							<span className="ag-stat" title={`context ${fmtTokens(p.contextTokens ?? 0)}`}>
+								<span className="ag-stat-label">ctx</span>
+								<span className="ag-gauge">
+									<span
+										className={ctxPct > 80 ? "ag-gauge-fill ag-gauge-fill--warn" : "ag-gauge-fill"}
+										style={{ width: `${ctxPct}%` }}
+									/>
+								</span>
+							</span>
+						) : null}
+						<span className="ag-stat">
+							<span className="ag-stat-label">cost</span>
+							<span className="ag-stat-value">{fmtCost(p.cost)}</span>
+						</span>
+						<span className="ag-stat">
+							<span className="ag-stat-label">tools</span>
+							<span className="ag-stat-value">{p.toolCount}</span>
+						</span>
+						<span className="ag-stat">
+							<span className="ag-stat-value">{fmtDuration(p.durationMs)}</span>
+						</span>
+					</div>
+				) : null}
+				<div className="ag-drawer-body">
+					{agent.hasSessionFile ? (
+						<>
+							<Transcript
+								compact
+								entries={entries}
+								stream={null}
+								streamDone={false}
+								activeTools={EMPTY_TOOLS}
+								working={agent.status === "running" && fetchError === null}
+								host={host}
+							/>
+							{fetchError !== null ? (
+								<div className="ag-fetch-error" role="alert">
+									transcript unavailable: {fetchError}
+								</div>
+							) : null}
+						</>
+					) : (
+						<div className="ag-empty">no transcript available</div>
+					)}
+				</div>
+				{!readOnly && (
+					<form
+						className="ag-chat"
+						onSubmit={e => {
+							e.preventDefault();
+							sendChat();
+						}}
+					>
+						<input
+							className="ag-chat-input"
+							value={draft}
+							placeholder={`message ${agent.displayName}…`}
+							onChange={e => setDraft(e.target.value)}
+						/>
+						<button type="submit" className="ag-iconbtn" aria-label="send" disabled={draft.trim().length === 0}>
+							<SendHorizontal size={17} aria-hidden />
+						</button>
+					</form>
 				)}
-			</div>
-			{!readOnly && (
-				<form
-					className="ag-chat"
-					onSubmit={e => {
-						e.preventDefault();
-						sendChat();
-					}}
-				>
-					<input
-						className="ag-chat-input"
-						value={draft}
-						placeholder={`message ${agent.displayName}…`}
-						onChange={e => setDraft(e.target.value)}
-					/>
-					<button type="submit" className="ag-iconbtn" aria-label="send" disabled={draft.trim().length === 0}>
-						<SendHorizontal size={15} aria-hidden />
-					</button>
-				</form>
-			)}
-		</aside>
+			</aside>
+		</>
 	);
 }

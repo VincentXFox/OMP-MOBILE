@@ -5,11 +5,37 @@ import type { HostInfo } from "../../lib/gateway";
 import type { GuestClient } from "../../lib/client";
 import { useGuestSnapshot } from "../../lib/use-guest";
 import type { SessionEntry } from "@oh-my-pi/pi-wire";
+import "./activity.css";
 
 interface ActivityRow {
 	id: string;
 	kind: "tool" | "message" | "error";
 	title: string;
+	ts: string;
+}
+
+interface ActivitySection {
+	label: string;
+	rows: ActivityRow[];
+}
+
+const TIME_FMT = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
+const DAY_MS = 86_400_000;
+
+function rowTime(timestamp: string): string {
+	const date = new Date(timestamp);
+	return Number.isNaN(date.getTime()) ? "" : TIME_FMT.format(date);
+}
+
+function sectionLabel(timestamp: string): string {
+	const date = new Date(timestamp);
+	if (Number.isNaN(date.getTime())) return "Раньше";
+	const now = new Date();
+	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+	const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+	if (day === today) return "Сегодня";
+	if (day === today - DAY_MS) return "Вчера";
+	return date.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
 }
 
 function entryTitle(entry: SessionEntry): string {
@@ -47,27 +73,46 @@ function ActivityFeed(props: { client: GuestClient; onOpenSession: () => void })
 		for (const entry of snap.entries) {
 			if (entry.type === "message") {
 				const msg = entry.message as { role?: string } | undefined;
-				if (msg?.role === "toolCall") list.push({ id: entry.id, kind: "tool", title: entryTitle(entry) });
-				else list.push({ id: entry.id, kind: entryKind(entry), title: entryTitle(entry) });
+				if (msg?.role === "toolCall") list.push({ id: entry.id, kind: "tool", title: entryTitle(entry), ts: entry.timestamp });
+				else list.push({ id: entry.id, kind: entryKind(entry), title: entryTitle(entry), ts: entry.timestamp });
 			}
 		}
 		return list.slice(-50);
 	}, [snap.entries]);
 
+	const sections = useMemo<ActivitySection[]>(() => {
+		const out: ActivitySection[] = [];
+		for (const row of rows) {
+			const label = sectionLabel(row.ts);
+			const last = out[out.length - 1];
+			if (last && last.label === label) last.rows.push(row);
+			else out.push({ label, rows: [row] });
+		}
+		return out;
+	}, [rows]);
+
 	return (
-		<div className="pk-list" onClick={props.onOpenSession}>
+		<div className="ac-feed" onClick={props.onOpenSession}>
 			{rows.length === 0 ? (
-				<div className="pk-empty">
-					<div className="pk-empty-text">Пока нет активности в этой сессии.</div>
+				<div className="ac-empty">
+					<div className="ac-empty-text">Пока нет активности в этой сессии.</div>
 				</div>
 			) : (
-				rows.map(r => (
-					<button key={r.id} className="pk-row">
-						<span className={`pk-row-icon pk-row-icon--${r.kind}`}>
-							{r.kind === "tool" ? <Wrench size={16} /> : r.kind === "error" ? <AlertTriangle size={16} /> : <MessageCircle size={16} />}
-						</span>
-						<span className="pk-row-title">{r.title || "…"}</span>
-					</button>
+				sections.map(section => (
+					<section key={`${section.label}:${section.rows[0]?.id ?? ""}`} className="ac-section">
+						<div className="ac-section-title">{section.label}</div>
+						<div className="ac-section-rows">
+							{section.rows.map(r => (
+								<button key={r.id} type="button" className="ac-row">
+									<span className={`ac-row-icon ac-row-icon--${r.kind}`}>
+										{r.kind === "tool" ? <Wrench size={15} /> : r.kind === "error" ? <AlertTriangle size={15} /> : <MessageCircle size={15} />}
+									</span>
+									<span className="ac-row-title">{r.title || "…"}</span>
+									{r.ts !== "" && <span className="ac-row-time">{rowTime(r.ts)}</span>}
+								</button>
+							))}
+						</div>
+					</section>
 				))
 			)}
 		</div>
@@ -81,9 +126,9 @@ export function ActivityScreen(props: {
 }): ReactNode {
 	if (!props.client) {
 		return (
-			<div className="pk-empty">
-				<div className="pk-empty-title">Нет открытой сессии</div>
-				<div className="pk-empty-text">Открой агента, чтобы увидеть активность.</div>
+			<div className="ac-empty">
+				<div className="ac-empty-title">Нет открытой сессии</div>
+				<div className="ac-empty-text">Открой агента, чтобы увидеть активность.</div>
 			</div>
 		);
 	}

@@ -1,0 +1,90 @@
+/* memory screen */
+.mem-screen {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding-bottom: 16px;
+}
+
+.mem-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	max-width: 640px;
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0 auto;
+	padding: 8px 12px 0;
+}
+
+.mem-row .pk-chip {
+	border: none;
+	cursor: pointer;
+}
+
+.mem-count {
+	color: var(--fg-faint, var(--muted));
+	font-size: 11px;
+}
+
+.mem-toolbar {
+	max-width: 640px;
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0 auto;
+	padding: 8px 12px 4px;
+}
+
+.mem-search {
+	width: 100%;
+	box-sizing: border-box;
+}
+
+.mem-card {
+	cursor: pointer;
+}
+
+.mem-title {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--accent);
+	margin-bottom: 4px;
+	word-break: break-word;
+}
+
+.mem-body {
+	font-size: 13.5px;
+	line-height: 1.45;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: var(--fg);
+	display: -webkit-box;
+	-webkit-line-clamp: 8;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.mem-body--open {
+	display: block;
+	-webkit-line-clamp: unset;
+	overflow: visible;
+}
+
+.mem-meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.mem-when {
+	font-size: 12px;
+	color: var(--muted);
+}
+
+.mem-more {
+	align-self: center;
+	margin: 12px auto 0;
+	display: block;
+}

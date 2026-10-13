@@ -17,6 +17,7 @@ import {
 	TTS_RATE_MAX,
 	TTS_RATE_MIN,
 } from "../../lib/tts";
+import "./settings.css";
 
 const PUSH_LABEL: Record<PushState, string> = {
 	unsupported: "не поддерживается",
@@ -103,15 +104,19 @@ function PushSection(): ReactNode {
 			<div className="pk-section-body">
 				<div className="pk-fieldrow">
 					<span>Оповещения об агентах</span>
-					<span className="pk-muted">{PUSH_LABEL[state]}</span>
+					<span className="set-row-end">
+						<span className="pk-muted">{PUSH_LABEL[state]}</span>
+						<button
+							type="button"
+							role="switch"
+							aria-checked={state === "subscribed"}
+							aria-label="Оповещения об агентах"
+							className={`set-switch${state === "subscribed" ? " set-switch--on" : ""}`}
+							disabled={state === "unsupported" || state === "denied"}
+							onClick={() => void toggle()}
+						/>
+					</span>
 				</div>
-				<button
-					className="pk-btn"
-					disabled={state === "unsupported" || state === "denied"}
-					onClick={() => void toggle()}
-				>
-					{state === "subscribed" ? "Выключить" : "Включить"}
-				</button>
 			</div>
 		</section>
 	);
@@ -135,16 +140,24 @@ function TtsSection(): ReactNode {
 			<div className="pk-section-body">
 				<div className="pk-fieldrow">
 					<span>Озвучивать ответы</span>
-					<span className="pk-muted">{on ? "включено" : "выключено"}</span>
+					<span className="set-row-end">
+						<span className="pk-muted">{on ? "включено" : "выключено"}</span>
+						<button
+							type="button"
+							role="switch"
+							aria-checked={on}
+							aria-label="Озвучивать ответы"
+							className={`set-switch${on ? " set-switch--on" : ""}`}
+							onClick={toggle}
+						/>
+					</span>
 				</div>
-				<button className="pk-btn" onClick={toggle}>
-					{on ? "Выключить" : "Включить"}
-				</button>
 				{on && hint && <div className="pk-check pk-check--ok">Готово — новые ответы агента будут произноситься голосом системы.</div>}
 				{on && (
 					<label className="pk-field">
 						<span>Темп ({rate.toFixed(2)}×)</span>
 						<input
+							className="set-slider"
 							type="range"
 							min={TTS_RATE_MIN}
 							max={TTS_RATE_MAX}
@@ -215,7 +228,7 @@ function DisplaySection(): ReactNode {
 
 export function SettingsScreen(): ReactNode {
 	return (
-		<div className="pk-list">
+		<div className="pk-list set-screen">
 			<ConnectionSection />
 			<PushSection />
 			<TtsSection />

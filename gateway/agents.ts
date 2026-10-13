@@ -1,8 +1,37 @@
-import { statSync } from "node:fs";
-import { basename } from "node:path";
+import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { listHosts } from "./hosts.ts";
 
 const POCKET_WORKSPACE_LABEL = "pocket";
+
+/**
+ * Instances started through this checkout's gateway endpoints. Gates /api/agents/stop:
+ * the omp collab registry is machine-global, so any gateway instance (or a runaway
+ * automation loop against one) could otherwise SIGTERM agents started elsewhere.
+ * Persists across gateway restarts; unknown ids require explicit force.
+ */
+const STARTED_FILE = join(new URL(".", import.meta.url).pathname, "started-instances.json");
+
+function loadStarted(): Set<string> {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(STARTED_FILE, "utf8"));
+		return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : []);
+	} catch {
+		return new Set();
+	}
+}
+
+function recordStarted(instanceId: string): void {
+	const merged = loadStarted();
+	merged.add(instanceId);
+	const tmp = `${STARTED_FILE}.${process.pid}.tmp`;
+	try {
+		writeFileSync(tmp, JSON.stringify([...merged], null, "\t"));
+		renameSync(tmp, STARTED_FILE);
+	} catch {
+		// best-effort bookkeeping; stop still reachable via explicit force
+	}
+}
 const REGISTER_TIMEOUT_MS = 10_000;
 const REGISTER_POLL_MS = 1_000;
 const STOP_POLL_MS = 500;
@@ -104,7 +133,12 @@ async function waitHostGone(instanceId: string, timeoutMs: number): Promise<bool
   }
 }
 
-async function startAgentOnce(cwd: string, model: string | undefined, label: string | undefined): Promise<StartOutcome> {
+async function launchAgentOnce(
+	cwd: string,
+	model: string | undefined,
+	label: string | undefined,
+	ompArgs: readonly string[],
+): Promise<StartOutcome> {
   let cwdOk = false;
   try {
     cwdOk = statSync(cwd).isDirectory();
@@ -125,7 +159,8 @@ async function startAgentOnce(cwd: string, model: string | undefined, label: str
   if (!paneId) return { kind: "failed", error: "herdr tab create returned no pane_id" };
 
   const startArgs = ["agent", "start", name, "--kind", "omp", "--pane", paneId];
-  if (model) startArgs.push("--", "--model", model);
+  const passthrough = [...(model ? ["--model", model] : []), ...ompArgs];
+  if (passthrough.length > 0) startArgs.push("--", ...passthrough);
   const started = unwrapHerdr(await runHerdr(startArgs, 60_000));
   if (!started.ok) {
     await runHerdr(["pane", "close", paneId], 5000);
@@ -138,18 +173,47 @@ async function startAgentOnce(cwd: string, model: string | undefined, label: str
     await runHerdr(["pane", "close", paneId], 5000);
     return { kind: "failed", error: "agent started but did not join the collab registry within 10s" };
   }
+  recordStarted(instanceId);
   return { kind: "started", instanceId, note: `agent ${name} started in ${cwd}` };
 }
 
-export function startAgent(cwd: string, model: string | undefined, label: string | undefined): Promise<StartOutcome> {
-  const run = startQueue.then(() => startAgentOnce(cwd, model, label), () => startAgentOnce(cwd, model, label));
-  startQueue = run.catch(() => {});
-  return run;
+function enqueueLaunch(run: () => Promise<StartOutcome>): Promise<StartOutcome> {
+  const result = startQueue.then(run, run);
+  startQueue = result.catch(() => {});
+  return result;
 }
 
-export async function stopAgent(instanceId: string): Promise<{ found: boolean; killed: boolean }> {
-  const host = (await listHosts()).hosts.find((h) => h.instanceId === instanceId);
-  if (!host) return { found: false, killed: false };
+export function startAgent(cwd: string, model: string | undefined, label: string | undefined): Promise<StartOutcome> {
+  return enqueueLaunch(() => launchAgentOnce(cwd, model, label, []));
+}
+
+/** Resume a persisted session jsonl in a fresh herdr pane (`omp --resume <path>`). */
+export function resumeAgent(
+  cwd: string,
+  sessionPath: string,
+  model: string | undefined,
+  label: string | undefined,
+): Promise<StartOutcome> {
+  let exists = false;
+  try {
+    exists = statSync(sessionPath).isFile();
+  } catch {
+    exists = false;
+  }
+  if (!exists) return Promise.resolve({ kind: "bad_cwd", error: `session file not found: ${sessionPath}` });
+  const fallbackLabel = `resume-${basename(sessionPath).replace(/\.jsonl$/, "").slice(-18)}`;
+  return enqueueLaunch(() => launchAgentOnce(cwd, model, label ?? fallbackLabel, ["--resume", sessionPath]));
+}
+
+export async function stopAgent(
+	instanceId: string,
+	opts: { force?: boolean } = {},
+): Promise<{ found: boolean; killed: boolean; scoped: boolean }> {
+	if (!opts.force && !loadStarted().has(instanceId)) {
+		return { found: false, killed: false, scoped: true };
+	}
+	const host = (await listHosts()).hosts.find((h) => h.instanceId === instanceId);
+	if (!host) return { found: false, killed: false, scoped: false };
 
   const signal = (sig: "SIGTERM" | "SIGKILL") => {
     try {
@@ -160,8 +224,8 @@ export async function stopAgent(instanceId: string): Promise<{ found: boolean; k
   };
 
   signal("SIGTERM");
-  if (await waitHostGone(instanceId, 5_000)) return { found: true, killed: true };
+  if (await waitHostGone(instanceId, 5_000)) return { found: true, killed: true, scoped: false };
   signal("SIGKILL");
-  if (await waitHostGone(instanceId, 5_000)) return { found: true, killed: true };
-  return { found: true, killed: false };
+  if (await waitHostGone(instanceId, 5_000)) return { found: true, killed: true, scoped: false };
+  return { found: true, killed: false, scoped: false };
 }

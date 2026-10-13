@@ -1,5 +1,5 @@
-import type { Token } from "@oh-my-pi/pi-utils/marked";
-import { Marked } from "@oh-my-pi/pi-utils/marked";
+import type { Token, Tokens } from "@oh-my-pi/pi-utils/marked";
+import { Marked, Parser } from "@oh-my-pi/pi-utils/marked";
 import { listMayContinueAt } from "@oh-my-pi/pi-utils/marked-list";
 import type { ReactNode } from "react";
 import { memo, useMemo, useRef } from "react";
@@ -72,6 +72,15 @@ const md = new Marked({
 			if (url === null) return inner;
 			const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
 			return `<a href="${escapeHtml(url)}"${titleAttr} target="_blank" rel="noopener">${inner}</a>`;
+		},
+		// Tables render inside a horizontally scrollable wrapper so wide tables
+		// never stretch the transcript column.
+		table(token: Tokens.Table): string {
+			const head = `<thead><tr>${token.header.map(cell => `<th>${Parser.parseInline(cell.tokens, md.defaults)}</th>`).join("")}</tr></thead>`;
+			const body = `<tbody>${token.rows
+				.map(cells => `<tr>${cells.map(cell => `<td>${Parser.parseInline(cell.tokens, md.defaults)}</td>`).join("")}</tr>`)
+				.join("")}</tbody>`;
+			return `<div class="tr-tablewrap"><table>${head}${body}</table></div>`;
 		},
 	},
 	breaks: true,

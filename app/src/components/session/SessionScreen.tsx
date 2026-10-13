@@ -3,7 +3,19 @@ import type {
 	CollabUiRequest,
 	SubagentProgressPayload,
 } from "@oh-my-pi/pi-wire";
-import { ArrowDown, ArrowUp, ChevronLeft, ImagePlus, Info, Square, Terminal, TriangleAlert, X } from "lucide-react";
+import {
+	ArrowDown,
+	ArrowUp,
+	ChevronLeft,
+	FileText,
+	ImagePlus,
+	Info,
+	Paperclip,
+	Square,
+	Terminal,
+	TriangleAlert,
+	X,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { GuestClient, GuestSnapshot } from "../../lib/client";
@@ -12,8 +24,10 @@ import { getTerminal, stopAgent } from "../../lib/gateway";
 import { cancelSpeech, isTtsEnabled, speakAssistantText } from "../../lib/tts";
 import { useGuestSnapshot } from "../../lib/use-guest";
 import { FilesScreen } from "../files/FilesScreen";
+import { VoiceRecorder } from "../shell/VoiceRecorder";
 import { TerminalScreen } from "../terminal/TerminalScreen";
 import { Transcript } from "../transcript/Transcript";
+import "./session-attach.css";
 import "./session.css";
 
 interface PendingImage {
@@ -25,6 +39,23 @@ interface PendingImage {
 const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 4 * 1024 * 1024;
 const MAX_IMAGE_DIM = 1568;
+
+/** Text files ride in the prompt as fenced blocks; max 3 pending, 256 КБ each. */
+const MAX_TEXT_FILES = 3;
+const MAX_TEXT_FILE_BYTES = 256 * 1024;
+const ACCEPT_TEXT_FILES =
+	"text/*,.txt,.md,.json,.csv,.log,.yaml,.yml,.ts,.tsx,.js,.py,.sh,.ini,.conf,.xml,.html,.css,.sql";
+
+interface PendingImage {
+	data: string;
+	mimeType: string;
+	url: string;
+}
+
+interface PendingTextFile {
+	name: string;
+	content: string;
+}
 
 async function readAsDataUrl(file: Blob): Promise<string> {
 	const reader = new FileReader();
@@ -73,6 +104,59 @@ async function fileToPendingImage(file: File): Promise<PendingImage | null> {
 	return null;
 }
 
+const TEXT_FILE_EXTENSIONS: Record<string, true> = {
+	txt: true,
+	md: true,
+	json: true,
+	csv: true,
+	log: true,
+	yaml: true,
+	yml: true,
+	ts: true,
+	tsx: true,
+	js: true,
+	py: true,
+	sh: true,
+	ini: true,
+	conf: true,
+	xml: true,
+	html: true,
+	css: true,
+	sql: true,
+};
+const TEXT_MIME_RE = /^(text\/|application\/(json|xml|javascript|yaml|x-yaml|sql))/;
+
+/** Text-like by extension or MIME; everything else counts as binary. */
+function isTextLikeFile(file: File): boolean {
+	if (TEXT_MIME_RE.test(file.type)) return true;
+	const dot = file.name.lastIndexOf(".");
+	if (dot < 0) return false;
+	return TEXT_FILE_EXTENSIONS[file.name.slice(dot + 1).toLowerCase()] === true;
+}
+
+function readFileAsText(file: File): Promise<string> {
+	const reader = new FileReader();
+	const { promise, resolve, reject } = Promise.withResolvers<string>();
+	reader.onload = () => {
+		if (typeof reader.result === "string") resolve(reader.result);
+		else reject(new Error("Не удалось прочитать файл"));
+	};
+	reader.onerror = () => reject(reader.error ?? new Error("Не удалось прочитать файл"));
+	reader.readAsText(file);
+	return promise;
+}
+
+/** Fence language hint from the file extension (empty name → txt). */
+function extForFileName(name: string): string {
+	const dot = name.lastIndexOf(".");
+	return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "txt";
+}
+
+/** «Файл: имя» heading line + fenced block, appended to the prompt at send time. */
+function textFileBlock(file: PendingTextFile): string {
+	return `Файл: ${file.name}\n\`\`\`${extForFileName(file.name)}\n${file.content}\n\`\`\``;
+}
+
 type OptionTone = "success" | "error" | "neutral";
 
 function optionTone(label: string): OptionTone {
@@ -95,6 +179,51 @@ function AgentChip({ agent, onTap }: { agent: AgentSnapshot; onTap: () => void }
 			<span className={`ss-agent-dot ss-agent-dot--${agent.status}`} />
 			<span className="ss-agent-name">{agent.displayName}</span>
 		</button>
+	);
+}
+
+const MAX_ACTIVE_CHIPS = 3;
+
+/** Chips row: active subagents only (max 3 + «+N»), or one muted summary chip. */
+function AgentChipsRow({
+	subagents,
+	onOpen,
+}: {
+	subagents: AgentSnapshot[];
+	onOpen: (id: string) => void;
+}): ReactNode {
+	const active = subagents.filter(a => a.status === "running");
+	if (active.length === 0) {
+		const latest = subagents.reduce((a, b) => (b.lastActivity > a.lastActivity ? b : a));
+		return (
+			<div className="ss-agent-row ss-agent-row--quiet">
+				<button
+					type="button"
+					className="ss-agent-chip ss-agent-chip--summary"
+					onClick={() => onOpen(latest.id)}
+				>
+					{subagents.length} сабагентов
+				</button>
+			</div>
+		);
+	}
+	const shown = active.slice(0, MAX_ACTIVE_CHIPS);
+	const hidden = active.length - shown.length;
+	return (
+		<div className="ss-agent-row">
+			{shown.map(agent => (
+				<AgentChip key={agent.id} agent={agent} onTap={() => onOpen(agent.id)} />
+			))}
+			{hidden > 0 && (
+				<button
+					type="button"
+					className="ss-agent-chip ss-agent-chip--more"
+					onClick={() => onOpen(shown[shown.length - 1].id)}
+				>
+					+{hidden}
+				</button>
+			)}
+		</div>
 	);
 }
 
@@ -153,48 +282,54 @@ function AgentDrawer({
 
 	return (
 		<>
-			<div className="ss-sheet-backdrop" onClick={onClose} />
+			<div className="ss-sheet-backdrop ss-agent-backdrop" onClick={onClose} />
 			<div className="ss-agent-drawer" role="dialog" aria-label={agent.displayName}>
+				<div className="ss-agent-drawer-handle" />
 				<div className="ss-agent-drawer-head">
-					<span className={`ss-agent-dot ss-agent-dot--${agent.status}`} />
 					<strong>{agent.displayName}</strong>
-					<span className="ss-agent-status-text">{agent.status}</span>
+					<span className={`ss-agent-pill ss-agent-pill--${agent.status}`}>{agent.status}</span>
 					<button type="button" className="ss-icon-btn" onClick={onClose} aria-label="Закрыть">
 						<X size={16} />
 					</button>
 				</div>
-				{liveLine !== null && <div className="ss-agent-live">Сейчас: {liveLine}</div>}
-				{transcript === null ? (
-					<button type="button" className="ss-opt ss-opt--editor-send" disabled={loadingTranscript} onClick={() => void loadTranscript()}>
-						{loadingTranscript ? "Загружаю…" : "Загрузить транскрипт"}
-					</button>
-				) : (
-					<pre ref={preRef} className="ss-agent-transcript">
-						{transcript}
-					</pre>
-				)}
-				{transcriptError != null && <div className="ss-agent-line ss-agent-transcript-error">{transcriptError}</div>}
-				<div className="ss-agent-actions">
-					{confirmingKill ? (
-						<>
-							<span className="ss-agent-line ss-agent-line--empty">Убить агента?</span>
-							<button type="button" className="ss-opt ss-opt--danger" onClick={kill}>
-								Да, убить
-							</button>
-							<button type="button" className="ss-opt ss-opt--editor-cancel" onClick={() => setConfirmingKill(false)}>
-								Отмена
-							</button>
-						</>
-					) : (
-						<>
-							<button type="button" className="ss-opt ss-opt--danger" onClick={() => setConfirmingKill(true)}>
+				<div className="ss-agent-drawer-body">
+					{liveLine !== null && (
+						<div className="ss-agent-progress-card">
+							<span className="ss-agent-progress-label">Сейчас:</span> {liveLine}
+						</div>
+					)}
+					<div className="ss-agent-actions">
+						<button type="button" className="ss-agent-btn" disabled={loadingTranscript} onClick={() => void loadTranscript()}>
+							{loadingTranscript ? "Загрузка…" : "Транскрипт"}
+						</button>
+						{confirmingKill ? (
+							<>
+								<button type="button" className="ss-agent-btn ss-agent-btn--danger-fill" onClick={kill}>
+									Убить?
+								</button>
+								<button type="button" className="ss-agent-btn" onClick={() => setConfirmingKill(false)}>
+									Отмена
+								</button>
+							</>
+						) : (
+							<button
+								type="button"
+								className="ss-agent-btn ss-agent-btn--danger"
+								onClick={() => setConfirmingKill(true)}
+							>
 								Убить
 							</button>
-							<button type="button" className="ss-opt ss-opt--success" onClick={revive}>
-								Возродить
-							</button>
-						</>
+						)}
+						<button type="button" className="ss-agent-btn ss-agent-btn--success" onClick={revive}>
+							Возродить
+						</button>
+					</div>
+					{transcript !== null && (
+						<pre ref={preRef} className="ss-agent-transcript">
+							{transcript}
+						</pre>
 					)}
+					{transcriptError != null && <div className="ss-agent-line ss-agent-transcript-error">{transcriptError}</div>}
 				</div>
 				<div className="ss-agent-chat">
 					<input
@@ -203,14 +338,18 @@ function AgentDrawer({
 						placeholder="Сообщение сабагенту…"
 						value={chatDraft}
 						onChange={e => setChatDraft(e.currentTarget.value)}
+						onKeyDown={e => {
+							if (e.key === "Enter") sendChat();
+						}}
 					/>
 					<button
 						type="button"
-						className="ss-opt ss-opt--editor-send"
+						className="ss-agent-send"
+						aria-label="Отправить"
 						disabled={chatDraft.trim().length === 0}
 						onClick={sendChat}
 					>
-						Чат
+						<ArrowUp size={18} />
 					</button>
 				</div>
 			</div>
@@ -307,7 +446,19 @@ function InfoSheet(props: {
 		setStopping(true);
 		setStopError(null);
 		try {
-			await stopAgent(host.instanceId);
+			const outcome = await stopAgent(host.instanceId);
+			if (outcome === "missing") {
+				onLeave();
+				return;
+			}
+			if (outcome === "not_started_here") {
+				const confirmed = window.confirm("Агент запущен вне Pocket. Точно убить его?");
+				if (!confirmed) {
+					setStopping(false);
+					return;
+				}
+				if (await stopAgent(host.instanceId, true) !== "ok") throw new Error("Не удалось остановить агент");
+			}
 			onLeave();
 		} catch (err) {
 			setStopError(err instanceof Error ? err.message : String(err));
@@ -417,7 +568,10 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 	const [images, setImages] = useState<PendingImage[]>([]);
 	const [sending, setSending] = useState(false);
 	const [attachError, setAttachError] = useState<string | null>(null);
+	const [textFiles, setTextFiles] = useState<PendingTextFile[]>([]);
+	const [attachMenuOpen, setAttachMenuOpen] = useState(false);
 	const fileRef = useRef<HTMLInputElement | null>(null);
+	const anyFileRef = useRef<HTMLInputElement | null>(null);
 	const taRef = useRef<HTMLTextAreaElement | null>(null);
 	// Auto-grow 1..6 rows (20px line-height + 16px padding).
 	useLayoutEffect(() => {
@@ -431,19 +585,24 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 
 	const send = useCallback(() => {
 		const text = draft.trim();
-		if (text.length === 0 && images.length === 0) return;
+		if (text.length === 0 && images.length === 0 && textFiles.length === 0) return;
 		if (readOnly || !isLive || sending) return;
-		if (images.length > 0) client.sendPromptWithImages(text, images);
-		else client.sendPrompt(text);
+		// User text first, then attached files as «Файл: имя» + fenced blocks.
+		const fullText = [text, ...textFiles.map(textFileBlock)]
+			.filter(part => part.length > 0)
+			.join("\n\n");
+		if (images.length > 0) client.sendPromptWithImages(fullText, images);
+		else client.sendPrompt(fullText);
 		setDraft("");
 		setImages([]);
+		setTextFiles([]);
 		tailLock.current = true;
 		// Brief composer lock so the (potentially large) frame lands cleanly.
 		setSending(true);
 		window.setTimeout(() => setSending(false), 600);
-	}, [client, draft, images, isLive, readOnly, sending]);
+	}, [client, draft, images, textFiles, isLive, readOnly, sending]);
 
-	const pickFiles = useCallback(async (files: FileList | null) => {
+	const pickFiles = useCallback(async (files: FileList | File[] | null) => {
 		if (!files || files.length === 0) return;
 		setAttachError(null);
 		const slots = MAX_IMAGES - images.length;
@@ -466,6 +625,19 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		client.sendAbort();
 	}, [client]);
 
+	const [voiceActive, setVoiceActive] = useState(false);
+	const sendVoice = useCallback(
+		(text: string) => {
+			const t = text.trim();
+			if (t.length === 0 || readOnly || !isLive || sending) return;
+			client.sendPrompt(t);
+			tailLock.current = true;
+			setSending(true);
+			window.setTimeout(() => setSending(false), 600);
+		},
+		[client, isLive, readOnly, sending],
+	);
+
 	const [infoOpen, setInfoOpen] = useState(false);
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [filesOpen, setFilesOpen] = useState(false);
@@ -481,6 +653,47 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 			if (toastTimer.current != null) window.clearTimeout(toastTimer.current);
 		},
 		[],
+	);
+
+	const removeTextFile = useCallback((index: number) => {
+		setTextFiles(prev => prev.filter((_, i) => i !== index));
+	}, []);
+
+	// «Файл» menu path: text files become pending chips (inlined at send time);
+	// photos picked here fall through to the photo pipeline; the rest is binary.
+	const pickAnyFiles = useCallback(
+		async (files: FileList | null) => {
+			if (!files || files.length === 0) return;
+			const all = Array.from(files);
+			const photos = all.filter(file => file.type.startsWith("image/"));
+			if (photos.length > 0) void pickFiles(photos);
+			const docs = all.filter(file => !file.type.startsWith("image/"));
+			let slots = MAX_TEXT_FILES - textFiles.length;
+			for (const file of docs) {
+				if (slots <= 0) {
+					showToast(`Не больше ${MAX_TEXT_FILES} файлов`);
+					break;
+				}
+				if (!isTextLikeFile(file)) {
+					showToast("Бинарные файлы агент пока не принимает — пришли текст или скриншот");
+					continue;
+				}
+				if (file.size > MAX_TEXT_FILE_BYTES) {
+					showToast("Файл больше 256 КБ — вставь фрагмент");
+					continue;
+				}
+				try {
+					const content = await readFileAsText(file);
+					setTextFiles(prev =>
+						prev.length >= MAX_TEXT_FILES ? prev : [...prev, { name: file.name, content }],
+					);
+					slots -= 1;
+				} catch {
+					showToast("Не удалось прочитать файл");
+				}
+			}
+		},
+		[pickFiles, textFiles.length, showToast],
 	);
 
 	// Terminal is herdr-only: probe before opening, keep the sheet closed on refusal.
@@ -587,13 +800,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 				)}
 			</header>
 
-			{subagents.length > 0 && (
-				<div className="ss-agent-row">
-					{subagents.map(agent => (
-						<AgentChip key={agent.id} agent={agent} onTap={() => setOpenAgentId(agent.id)} />
-					))}
-				</div>
-			)}
+			{subagents.length > 0 && <AgentChipsRow subagents={subagents} onOpen={setOpenAgentId} />}
 
 			<div className="ss-transcript-wrap">
 				<div ref={scrollRef} className="ss-transcript" onScroll={onScroll}>
@@ -621,6 +828,24 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 					<div className="ss-queued-row">
 						{/* Removing queued messages is host-RPC-only; chip is display-only. */}
 						<span className="ss-queued-chip">В очереди: {queuedCount}</span>
+					</div>
+				)}
+				{textFiles.length > 0 && (
+					<div className="sa-chip-row">
+						{textFiles.map((file, i) => (
+							<span key={`${i}:${file.name}`} className="sa-chip">
+								<FileText size={12} className="sa-chip-icon" />
+								<span className="sa-chip-name">{file.name}</span>
+								<button
+									type="button"
+									className="sa-chip-x"
+									aria-label="Убрать файл"
+									onClick={() => removeTextFile(i)}
+								>
+									<X size={12} />
+								</button>
+							</span>
+						))}
 					</div>
 				)}
 				{images.length > 0 && (
@@ -658,29 +883,51 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 							e.target.value = "";
 						}}
 					/>
+					<input
+						ref={anyFileRef}
+						type="file"
+						accept={ACCEPT_TEXT_FILES}
+						multiple
+						hidden
+						onChange={e => {
+							void pickAnyFiles(e.target.files);
+							e.target.value = "";
+						}}
+					/>
 					<button
 						type="button"
 						className="ss-icon-btn ss-attach"
-						aria-label="Прикрепить фото"
-						disabled={readOnly || !isLive || images.length >= MAX_IMAGES}
-						onClick={() => fileRef.current?.click()}
-					>
-						<ImagePlus size={20} />
-					</button>
-					<textarea
-						ref={taRef}
-						className="ss-input"
-						rows={1}
-						value={draft}
-						placeholder="Сообщение агенту…"
+						aria-label="Прикрепить"
+						aria-expanded={attachMenuOpen}
 						disabled={readOnly || !isLive || sending}
-						onChange={e => setDraft(e.target.value)}
-					/>
+						onClick={() => setAttachMenuOpen(true)}
+					>
+						<Paperclip size={20} />
+					</button>
+					{!voiceActive ? (
+						<textarea
+							ref={taRef}
+							className="ss-input"
+							rows={1}
+							value={draft}
+							placeholder="Сообщение агенту…"
+							disabled={readOnly || !isLive || sending}
+							onChange={e => setDraft(e.target.value)}
+						/>
+					) : (
+						<span className="ss-input" aria-hidden="true" />
+					)}
+					<VoiceRecorder onSend={sendVoice} onActiveChange={setVoiceActive} disabled={readOnly || !isLive || sending} />
 					{images.length > 0 && <span className="ss-attach-hint">{images.length} фото</span>}
 					<button
 						type="button"
 						className="ss-send"
-						disabled={(draft.trim().length === 0 && images.length === 0) || readOnly || !isLive || sending}
+						disabled={
+							(draft.trim().length === 0 && images.length === 0 && textFiles.length === 0) ||
+							readOnly ||
+							!isLive ||
+							sending
+						}
 						onClick={send}
 						aria-label="Отправить"
 					>
@@ -719,6 +966,39 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 				/>
 			)}
 			{filesOpen && host && <FilesScreen root={host.cwd} onBack={() => setFilesOpen(false)} />}
+			{attachMenuOpen && (
+				<>
+					<div className="sa-backdrop" onClick={() => setAttachMenuOpen(false)} />
+					<div className="sa-sheet" role="dialog" aria-modal="true" aria-label="Прикрепить">
+						<div className="sa-handle" />
+						<button
+							type="button"
+							className="sa-item"
+							onClick={() => {
+								setAttachMenuOpen(false);
+								fileRef.current?.click();
+							}}
+						>
+							<ImagePlus size={18} />
+							Фото или видео
+						</button>
+						<button
+							type="button"
+							className="sa-item"
+							onClick={() => {
+								setAttachMenuOpen(false);
+								anyFileRef.current?.click();
+							}}
+						>
+							<FileText size={18} />
+							Файл
+						</button>
+						<button type="button" className="sa-item sa-item--cancel" onClick={() => setAttachMenuOpen(false)}>
+							Отмена
+						</button>
+					</div>
+				</>
+			)}
 			{toast !== null && <div className="ss-toast">{toast}</div>}
 		</div>
 	);

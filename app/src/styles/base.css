@@ -1,4 +1,5 @@
-/* Base reset + globals. Token vars only. */
+/* Base reset + globals. Token vars only. Apple-style defaults: system type,
+ * iOS motion curves, press feedback, respect for reduced motion. */
 *,
 *::before,
 *::after {
@@ -22,14 +23,15 @@ body,
 }
 
 body {
-	font: 400 15px / 1.45 var(--font-ui);
+	font: 400 var(--text-body) / 1.47 var(--font-ui);
+	letter-spacing: -0.01em;
 	background: var(--bg);
 	color: var(--fg);
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 	text-rendering: optimizeLegibility;
 	overflow: hidden;
-	transition: background var(--speed) var(--ease-out);
+	transition: background var(--speed) var(--ease-ios);
 }
 
 button,
@@ -75,17 +77,18 @@ textarea {
 	background: var(--accent-muted);
 }
 
-/* tap-friendly interactive primitives */
+/* tap-friendly interactive primitives: iOS press = scale + fade */
 button {
 	min-height: var(--tap);
 	transition:
-		opacity var(--speed) var(--ease-out),
-		background var(--speed) var(--ease-out),
-		transform var(--speed) var(--ease-out);
+		opacity var(--speed-fast) var(--ease-ios),
+		background var(--speed-fast) var(--ease-ios),
+		transform 180ms var(--ease-ios);
 }
 
 button:active {
 	transform: scale(0.97);
+	opacity: 0.8;
 }
 
 /* subtle scrollbars */

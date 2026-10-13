@@ -1,0 +1,121 @@
+/* Attach menu + pending text-file chips (session screen composer).
+   Owns all `sa-` classes; z-index above the ss- sheets (40/41), below ss-toast (90). */
+
+.sa-backdrop {
+	position: fixed;
+	inset: 0;
+	background: var(--backdrop);
+	z-index: 42;
+	animation: sa-fade 0.2s var(--ease-ios);
+}
+@keyframes sa-fade {
+	from {
+		opacity: 0;
+	}
+}
+
+.sa-sheet {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 43;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+	background: var(--bg-raised);
+	border-top: 1px solid var(--edge-top);
+	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+	box-shadow: var(--shadow-overlay);
+	animation: sa-slide-up 0.25s var(--ease-ios);
+}
+@keyframes sa-slide-up {
+	from {
+		transform: translateY(100%);
+	}
+}
+
+.sa-handle {
+	flex: none;
+	width: 36px;
+	height: 4px;
+	margin: 2px auto 2px;
+	border-radius: var(--radius-pill);
+	background: var(--hairline);
+}
+
+.sa-item {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-height: var(--tap);
+	padding: 0 16px;
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius);
+	background: var(--surface2);
+	color: var(--fg);
+	font-size: var(--text-body);
+	text-align: left;
+	transition: background var(--speed-fast) var(--ease-ios);
+}
+.sa-item > svg {
+	flex: none;
+	color: var(--fg-muted);
+}
+.sa-item:active {
+	background: var(--hover);
+}
+
+.sa-item--cancel {
+	justify-content: center;
+	color: var(--accent);
+	font-weight: 600;
+}
+
+/* Pending text files: chips above the composer, removable until send. */
+.sa-chip-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 0 16px 6px;
+}
+
+.sa-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: 220px;
+	padding: 4px 4px 4px 10px;
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-pill);
+	background: var(--surface2);
+	font-size: var(--text-footnote);
+	color: var(--fg);
+}
+.sa-chip-icon {
+	flex: none;
+	color: var(--fg-muted);
+}
+.sa-chip-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.sa-chip-x {
+	flex: none;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	border-radius: var(--radius-pill);
+	background: var(--hover);
+	color: var(--fg-muted);
+	transition: background var(--speed-fast) var(--ease-ios);
+}
+.sa-chip-x:active {
+	background: var(--error-muted);
+	color: var(--err);
+}

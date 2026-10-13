@@ -93,13 +93,16 @@ export function TerminalScreen(props: { instanceId: string; label: string; onBac
 	return (
 		<div className="ts-root">
 			<header className="ts-header">
-				<button type="button" className="ts-icon-btn" onClick={onBack} aria-label="Назад">
-					<ArrowLeft size={20} />
-				</button>
-				<div className="ts-title">Терминал · {label}</div>
-				<button type="button" className="ts-icon-btn" onClick={() => void refresh()} aria-label="Обновить">
-					<RefreshCw size={18} />
-				</button>
+				<div className="ts-nav">
+					<button type="button" className="ts-icon-btn" onClick={onBack} aria-label="Назад">
+						<ArrowLeft size={22} />
+					</button>
+					<button type="button" className="ts-icon-btn" onClick={() => void refresh()} aria-label="Обновить">
+						<RefreshCw size={20} />
+					</button>
+				</div>
+				<h1 className="ts-title">Терминал</h1>
+				<div className="ts-label">{label}</div>
 			</header>
 
 			{error != null && <div className="ts-error">{error}</div>}

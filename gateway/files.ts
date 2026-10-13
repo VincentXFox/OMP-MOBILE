@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { listHosts } from "./hosts.ts";
 import type { OmpHost } from "./hosts.ts";
@@ -170,8 +171,30 @@ export interface ProjectListing {
   hasGit: boolean;
 }
 
+const HOME = homedir();
+
+/**
+ * Project paths may only be real directories inside $HOME (no dot-dirs at any
+ * level: blocks ~/.ssh, ~/.omp, ~/.config, …) or inside /tmp (agent scratch).
+ * Everything else — /etc, other users, hidden config — is rejected.
+ */
+export function isAllowedProjectPath(dir: string): boolean {
+	let resolved: string;
+	try {
+		resolved = realpathSync(dir);
+	} catch {
+		return false;
+	}
+	if (!statSync(resolved).isDirectory()) return false;
+	const home = HOME + "/";
+	if (resolved === HOME || !resolved.startsWith(home)) return resolved.startsWith("/tmp/") && !resolved.slice(5).split("/").some(s => s.startsWith("."));
+	const rest = resolved.slice(home.length);
+	return !rest.split("/").some(s => s.startsWith("."));
+}
+
 export function listProjectFiles(dir: string): ProjectListing {
-  const dirents = readdirSync(dir, { withFileTypes: true });
+	if (!isAllowedProjectPath(dir)) throw new Error("path not allowed");
+	const dirents = readdirSync(dir, { withFileTypes: true });
   const entries: ProjectEntry[] = [];
   for (const dirent of dirents) {
     if (dirent.name.startsWith(".")) continue; // hidden files are skipped; .git is reported via hasGit
@@ -196,7 +219,8 @@ export type GitOutcome =
   | { kind: "failed"; error: string };
 
 export async function projectGit(dir: string, mode: "status" | "diff"): Promise<GitOutcome> {
-  const args = mode === "status" ? ["-C", dir, "status", "--porcelain=v1"] : ["-C", dir, "diff", "--unified=2"];
+	if (!isAllowedProjectPath(dir)) return { kind: "failed", error: "path not allowed" };
+	const args = mode === "status" ? ["-C", dir, "status", "--porcelain=v1"] : ["-C", dir, "diff", "--unified=2"];
   const res = await runGit(args);
   if (res.code !== 0) return { kind: "failed", error: `git ${mode} failed: ${truncateError(res.stderr || res.stdout)}` };
   let text = res.stdout;

@@ -3,5 +3,6 @@ dist/
 gateway/config.json
 gateway/subscriptions.json
 gateway/update-state.json
+gateway/started-instances.json
 backups/
 *.log

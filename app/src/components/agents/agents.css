@@ -1,25 +1,28 @@
-/* Agents rail + drawer (T3). `ag-*` prefix; design-token vars only. */
+/* Agents rail + agent sheet. `ag-*` prefix; design tokens only.
+ * Press/focus/tap-target primitives come from base.css (button rules). */
 
-/* ── Panel ────────────────────────────────────────────────────────── */
+/* ── Panel (rail list of agent cards) ─────────────────────────────── */
 
 .ag-panel {
 	display: flex;
 	flex-direction: column;
-	gap: 1px;
+	gap: 8px;
 	min-height: 0;
-	padding: 4px 0 8px;
+	padding: 8px 12px 12px;
 	overflow-y: auto;
-	font-size: 13px;
+	font-size: var(--text-subhead);
 }
 
 .ag-heading {
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	padding: 12px 10px 6px;
+	padding: 12px 4px 2px;
 	color: var(--fg-faint);
-	font-size: 12px;
-	font-weight: 500;
+	font-size: var(--text-footnote);
+	font-weight: 600;
+	letter-spacing: var(--tracking-caps);
+	text-transform: uppercase;
 }
 
 .ag-heading:first-child {
@@ -27,50 +30,49 @@
 }
 
 .ag-heading-count {
-	padding: 0 6px;
-	border-radius: 999px;
+	padding: 0 7px;
+	border-radius: var(--radius-pill);
 	background: var(--bg-raised);
-	border: 1px solid var(--border);
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
-	font-size: 10.5px;
-	line-height: 16px;
+	font-size: var(--text-caption);
+	font-variant-numeric: tabular-nums;
+	line-height: 18px;
 }
 
 .ag-row {
 	display: flex;
 	flex-direction: column;
-	gap: 3px;
+	gap: 4px;
 	width: 100%;
-	padding: 8px 10px;
-	border: 1px solid transparent;
-	border-radius: var(--radius);
-	background: none;
+	padding: 10px 12px;
+	border-radius: var(--radius-lg);
+	background: var(--bg-raised);
 	color: var(--fg);
 	font: inherit;
 	text-align: left;
-	cursor: pointer;
-	transition: background 150ms ease-out;
+	box-shadow:
+		inset 0 0 0 0.5px var(--hairline),
+		var(--shadow-card);
+	transition: background var(--speed-fast) var(--ease-ios);
 }
 
 .ag-row:hover {
-	background: var(--hover);
+	background: var(--bg-overlay);
 }
 
 .ag-row--selected {
-	border-color: var(--border);
 	background: var(--selected);
-}
-
-.ag-row:focus-visible {
-	outline: 2px solid var(--ring);
-	outline-offset: 2px;
+	box-shadow:
+		inset 0 0 0 0.5px var(--hairline),
+		inset 0 0 0 1px var(--ring-soft),
+		var(--shadow-card);
 }
 
 .ag-row-head {
 	display: flex;
 	align-items: center;
-	gap: 7px;
+	gap: 8px;
 	min-width: 0;
 }
 
@@ -78,17 +80,19 @@
 	flex: 1;
 	min-width: 0;
 	overflow: hidden;
-	font-weight: 500;
+	font-size: var(--text-body);
+	font-weight: 600;
+	letter-spacing: var(--tracking-tight);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
 .ag-row-activity {
 	overflow: hidden;
-	padding-left: 15px;
+	padding-left: 16px;
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
-	font-size: 11.5px;
+	font-size: var(--text-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -96,10 +100,11 @@
 .ag-row-meta {
 	display: flex;
 	gap: 10px;
-	padding-left: 15px;
+	padding-left: 16px;
 	color: var(--fg-faint);
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: var(--text-caption);
+	font-variant-numeric: tabular-nums;
 }
 
 .ag-row-meta-when {
@@ -107,22 +112,22 @@
 }
 
 .ag-empty {
-	margin: 2px 4px;
-	padding: 14px 10px;
+	margin: 2px 0;
+	padding: 14px 12px;
 	color: var(--fg-faint);
-	font-size: 12.5px;
+	font-size: var(--text-subhead);
 	text-align: center;
 	border: 1px dashed var(--border-strong);
-	border-radius: var(--radius);
+	border-radius: var(--radius-lg);
 }
 
 /* Terminal transcript-read failure reported by the host (drawer stops polling). */
 .ag-fetch-error {
-	padding: 10px;
+	padding: 10px 0;
 	color: var(--err);
-	font-size: 12px;
+	font-size: var(--text-footnote);
 	text-align: center;
-	border-top: 1px solid color-mix(in srgb, var(--err) 25%, transparent);
+	border-top: 0.5px solid color-mix(in srgb, var(--err) 25%, transparent);
 	overflow-wrap: anywhere;
 }
 
@@ -163,28 +168,33 @@
 
 .ag-chip {
 	flex: none;
-	padding: 0 7px;
-	border: 1px solid var(--border);
-	border-radius: 999px;
+	padding: 0 8px;
+	border: 0.5px solid var(--hairline);
+	border-radius: var(--radius-pill);
+	background: var(--hover);
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
-	font-size: 10.5px;
-	line-height: 17px;
+	font-size: var(--text-caption);
+	font-variant-numeric: tabular-nums;
+	line-height: 18px;
 	white-space: nowrap;
 }
 
 .ag-chip--running {
 	border-color: color-mix(in srgb, var(--ok) 35%, transparent);
+	background: var(--success-muted);
 	color: var(--ok);
 }
 
 .ag-chip--parked {
 	border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+	background: var(--warning-muted);
 	color: var(--warn);
 }
 
 .ag-chip--aborted {
 	border-color: color-mix(in srgb, var(--err) 35%, transparent);
+	background: var(--error-muted);
 	color: var(--err);
 }
 
@@ -195,14 +205,16 @@
 	text-overflow: ellipsis;
 }
 
-/* ── Drawer ───────────────────────────────────────────────────────── */
+/* ── Agent sheet (iOS bottom sheet) ───────────────────────────────── */
 
 .ag-drawer-backdrop {
 	position: fixed;
 	inset: 0;
-	z-index: 35;
+	z-index: 45;
 	background: var(--backdrop);
-	animation: ag-fade-in 150ms ease-out;
+	backdrop-filter: var(--blur-surface);
+	-webkit-backdrop-filter: var(--blur-surface);
+	animation: ag-fade-in 0.25s var(--ease-ios);
 }
 
 @keyframes ag-fade-in {
@@ -216,55 +228,66 @@
 
 .ag-drawer {
 	position: fixed;
-	top: 8px;
-	right: 8px;
-	bottom: 8px;
-	z-index: 40;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 46;
 	display: flex;
 	flex-direction: column;
-	width: min(520px, calc(100vw - 16px));
-	overflow: hidden;
-	border: 1px solid var(--border-strong);
-	border-radius: var(--radius-xl);
-	background: var(--glass);
-	backdrop-filter: blur(20px) saturate(170%);
-	-webkit-backdrop-filter: blur(20px) saturate(170%);
-	box-shadow: var(--shadow-overlay);
-	animation: ag-drawer-in 360ms var(--ease-out);
+	width: min(560px, 100vw);
+	max-height: 88vh;
+	max-height: 88dvh;
+	margin-inline: auto;
+	background: var(--bg-raised);
+	backdrop-filter: var(--blur-strong);
+	-webkit-backdrop-filter: var(--blur-strong);
+	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+	box-shadow:
+		inset 0 0.5px 0 var(--hairline),
+		var(--shadow-overlay);
+	animation: ag-drawer-in 0.35s var(--ease-ios);
 }
 
 @keyframes ag-drawer-in {
 	from {
-		transform: translateX(24px);
-		opacity: 0;
+		transform: translateY(100%);
 	}
 	to {
 		transform: none;
-		opacity: 1;
 	}
+}
+
+.ag-grabber {
+	flex: none;
+	width: 36px;
+	height: 4px;
+	margin: 8px auto 0;
+	border-radius: var(--radius-pill);
+	background: var(--border-strong);
 }
 
 .ag-drawer-head {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 14px 14px 12px 18px;
-	border-bottom: 1px solid var(--border);
+	min-height: var(--tap);
+	padding: 6px 10px 12px 16px;
+	box-shadow: inset 0 -0.5px 0 var(--hairline);
 }
 
 .ag-drawer-title {
 	display: flex;
 	flex: 1;
 	align-items: center;
-	gap: 7px;
+	gap: 8px;
 	min-width: 0;
 }
 
 .ag-drawer-name {
 	overflow: hidden;
-	font-size: 15px;
-	font-weight: 600;
-	letter-spacing: -0.01em;
+	font-size: var(--text-headline);
+	font-weight: 700;
+	letter-spacing: var(--tracking-tight);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -282,42 +305,30 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	height: 28px;
-	padding: 0 10px;
+	height: var(--tap);
+	padding: 0 14px;
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius);
 	background: var(--bg-overlay);
 	color: var(--fg);
 	font: inherit;
-	font-size: 12.5px;
-	font-weight: 500;
-	cursor: pointer;
-	transition:
-		background 150ms ease-out,
-		color 150ms ease-out;
+	font-size: var(--text-subhead);
+	font-weight: 600;
 }
 
 .ag-btn:hover {
-	background: color-mix(in srgb, var(--bg-raised) 94%, var(--fg));
+	background: color-mix(in srgb, var(--bg-overlay) 94%, var(--fg));
 	color: var(--fg);
 }
 
-.ag-btn:active {
-	transform: scale(0.97);
-}
-
-.ag-btn:focus-visible {
-	outline: 2px solid var(--ring);
-	outline-offset: 2px;
-}
-
 .ag-btn--danger {
-	border-color: color-mix(in srgb, var(--err) 30%, transparent);
-	background: color-mix(in srgb, var(--err) 12%, transparent);
+	border-color: color-mix(in srgb, var(--err) 35%, transparent);
+	background: var(--error-muted);
 	color: var(--err);
 }
 
 .ag-btn--danger:hover {
+	background: color-mix(in srgb, var(--error-muted) 70%, var(--err) 12%);
 	color: var(--err);
 }
 
@@ -325,14 +336,11 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 28px;
-	height: 28px;
-	border: none;
+	flex: none;
+	width: var(--tap);
+	height: var(--tap);
 	border-radius: var(--radius);
-	background: none;
 	color: var(--fg-muted);
-	cursor: pointer;
-	transition: color 150ms ease-out;
 }
 
 .ag-iconbtn:hover {
@@ -340,13 +348,8 @@
 	background: var(--hover);
 }
 
-.ag-iconbtn:active {
-	transform: scale(0.97);
-}
-
-.ag-iconbtn:focus-visible {
-	outline: 2px solid var(--ring);
-	outline-offset: 2px;
+.ag-iconbtn:disabled {
+	opacity: 0.4;
 }
 
 /* ── Stats strip ──────────────────────────────────────────────────── */
@@ -356,11 +359,12 @@
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 14px;
-	padding: 10px 18px;
-	border-bottom: 1px solid var(--border);
+	padding: 10px 16px;
+	box-shadow: inset 0 -0.5px 0 var(--hairline);
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
-	font-size: 11.5px;
+	font-size: var(--text-caption);
+	font-variant-numeric: tabular-nums;
 }
 
 .ag-stat {
@@ -383,7 +387,7 @@
 	align-self: center;
 	width: 72px;
 	height: 4px;
-	border-radius: 2px;
+	border-radius: var(--radius-pill);
 	background: var(--border-strong);
 }
 
@@ -398,36 +402,36 @@
 	background: var(--warn);
 }
 
-/* ── Drawer body & chat ───────────────────────────────────────────── */
+/* ── Sheet body & chat ────────────────────────────────────────────── */
 
 .ag-drawer-body {
 	display: flex;
 	flex: 1;
 	flex-direction: column;
 	min-height: 0;
-	padding: 10px 14px;
+	padding: 12px 16px;
 	overflow-y: auto;
 }
 
 .ag-chat {
 	display: flex;
 	flex: none;
-	gap: 6px;
-	padding: 12px 14px;
-	border-top: 1px solid var(--border);
+	gap: 8px;
+	padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+	box-shadow: inset 0 0.5px 0 var(--hairline);
 }
 
 .ag-chat-input {
 	flex: 1;
 	min-width: 0;
-	height: 32px;
-	padding: 0 11px;
-	border: 1px solid var(--border-strong);
+	height: var(--tap);
+	padding: 0 14px;
+	border: 1px solid var(--border);
 	border-radius: var(--radius);
 	background: var(--bg-inset);
 	color: var(--fg);
 	font: inherit;
-	font-size: 13px;
+	font-size: var(--text-body);
 }
 
 .ag-chat-input::placeholder {
@@ -436,7 +440,6 @@
 
 .ag-chat-input:focus-visible {
 	outline: 2px solid transparent;
-	outline-offset: 0;
 }
 
 .ag-chat-input:focus {
@@ -444,17 +447,27 @@
 	box-shadow: 0 0 0 3px var(--ring-soft);
 }
 
+.ag-chat .ag-iconbtn {
+	color: var(--accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
-	.ag-drawer {
+	.ag-drawer,
+	.ag-drawer-backdrop {
 		animation: none;
 	}
 	.ag-dot--running {
 		animation: none;
 	}
+	.ag-row,
+	.ag-btn,
+	.ag-iconbtn {
+		transition: none;
+	}
 }
 
 @media (any-pointer: coarse) {
 	.ag-chat-input {
-		font-size: 16px;
+		font-size: 16px; /* prevent iOS focus zoom */
 	}
 }

@@ -1,0 +1,293 @@
+/* super agent screen */
+.su-screen {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-width: 640px;
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0 auto;
+	padding: 10px 12px 16px;
+}
+
+.su-composer {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.su-task {
+	width: 100%;
+	box-sizing: border-box;
+	resize: none;
+	min-height: 72px;
+	font-size: 15px;
+}
+
+.su-pick {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+.su-pick .pk-chips {
+	flex: 1;
+	margin-top: 0;
+}
+
+.su-pick-chip {
+	cursor: pointer;
+}
+
+.su-all {
+	flex-shrink: 0;
+	font-size: 12px;
+	color: var(--accent);
+	background: none;
+	border: none;
+	padding: 6px 2px;
+	cursor: pointer;
+}
+
+.su-none {
+	font-size: 12.5px;
+	color: var(--muted);
+	align-self: center;
+}
+
+.su-send {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+}
+
+.su-results {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.su-result {
+	font-size: 12.5px;
+	color: var(--success);
+	word-break: break-word;
+}
+
+.su-result--err {
+	color: var(--error, var(--warn, #e5484d));
+}
+
+.su-error {
+	font-size: 13px;
+	color: var(--error, var(--warn, #e5484d));
+	padding: 0 4px;
+	word-break: break-word;
+}
+
+.su-loading,
+.su-empty {
+	font-size: 13.5px;
+	color: var(--muted);
+	text-align: center;
+	padding: 24px 0;
+}
+
+.su-card {
+	cursor: default;
+}
+
+.su-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--fg);
+	cursor: pointer;
+	text-align: left;
+}
+
+.su-name {
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--accent);
+}
+
+.su-status {
+	font-size: 12px;
+	color: var(--muted);
+}
+
+.su-toggle {
+	margin-left: auto;
+	color: var(--muted);
+	display: flex;
+}
+
+.su-chevron--up {
+	transform: rotate(180deg);
+}
+
+.su-title {
+	font-size: 13px;
+	color: var(--fg);
+	margin-top: 6px;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	word-break: break-word;
+}
+
+.su-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-top: 6px;
+	font-size: 12px;
+	color: var(--muted);
+	word-break: break-word;
+}
+
+.su-flag--live {
+	color: var(--accent);
+}
+
+.su-subs {
+	margin-top: 8px;
+}
+
+.su-sub {
+	cursor: default;
+	max-width: 100%;
+}
+
+.su-sub :first-child {
+	flex-shrink: 0;
+}
+
+.su-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+.su-dot--idle {
+	background: var(--success);
+}
+
+.su-dot--working {
+	background: var(--accent);
+}
+
+.su-dot--blocked {
+	background: var(--warning, #f5a623);
+}
+
+.su-dot--done {
+	background: var(--success);
+}
+
+.su-dot--unknown {
+	background: var(--muted);
+}
+
+.su-dot--pulse {
+	animation: su-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes su-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+
+.su-detail {
+	margin-top: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.su-sublist {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.su-subrow {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	font-size: 12.5px;
+	min-width: 0;
+}
+
+.su-subrow .pk-dot {
+	align-self: center;
+}
+
+.su-subrow-name {
+	font-weight: 600;
+	color: var(--fg);
+	flex-shrink: 0;
+}
+
+.su-subrow-act {
+	color: var(--muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+	min-width: 0;
+}
+
+.su-subrow-when {
+	color: var(--muted);
+	font-size: 11.5px;
+	flex-shrink: 0;
+}
+
+.su-tail {
+	margin: 0;
+	padding: 10px;
+	background: var(--bg-inset);
+	border: 1px solid var(--border);
+	border-radius: var(--radius, 8px);
+	font-family: var(--font-mono, monospace);
+	font-size: 11.5px;
+	line-height: 1.45;
+	color: var(--fg);
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 220px;
+	overflow-y: auto;
+}
+
+.su-tail--loading {
+	font-family: inherit;
+	color: var(--muted);
+}
+
+.su-open {
+	align-self: flex-start;
+	font-size: 13.5px;
+	padding: 8px 14px;
+	min-height: 38px;
+}
+
+.su-orphans {
+	font-size: 12px;
+	color: var(--muted);
+	text-align: center;
+	padding: 4px 0 0;
+	word-break: break-word;
+}

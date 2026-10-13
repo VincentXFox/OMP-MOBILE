@@ -40,19 +40,29 @@ export function fmtDuration(ms: number): string {
 	return `${h}h${String(min % 60).padStart(2, "0")}m`;
 }
 
-/** "now", "42s ago", "5m ago", "3h ago", "2d ago". Input: epoch ms. */
+/** «только что», «5 мин назад», «2 ч назад», «3 дн назад». Input: epoch ms. */
 export function relTime(tsMs: number): string {
 	if (!Number.isFinite(tsMs)) return "";
 	const delta = Date.now() - tsMs;
-	if (delta < 10_000) return "now";
-	const s = Math.floor(delta / 1000);
-	if (s < 60) return `${s}s ago`;
-	const min = Math.floor(s / 60);
-	if (min < 60) return `${min}m ago`;
+	if (delta < 60_000) return "только что";
+	const min = Math.floor(delta / 60_000);
+	if (min < 60) return `${min} мин назад`;
 	const h = Math.floor(min / 60);
-	if (h < 24) return `${h}h ago`;
-	return `${Math.floor(h / 24)}d ago`;
+	if (h < 24) return `${h} ч назад`;
+	return `${Math.floor(h / 24)} дн назад`;
 }
+
+/** Русская плюрализация: pluralRu(1, "агент", "агента", "агентов") → "агент". */
+export function pluralRu(n: number, one: string, few: string, many: string): string {
+	const mod10 = n % 10;
+	const mod100 = n % 100;
+	if (mod10 === 1 && mod100 !== 11) return one;
+	if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+	return many;
+}
+
+/** Версия приложения — единственный источник для «О программе» (синхронна с package.json). */
+export const APP_VERSION = "0.1.0";
 
 /** "73%" from a 0–100 percent; em dash for null/non-finite. */
 export function fmtPercent(p: number | null | undefined): string {

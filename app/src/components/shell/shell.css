@@ -100,10 +100,10 @@
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius);
 	transition:
-		background 120ms ease-out,
-		color 120ms ease-out,
-		border-color 120ms ease-out,
-		transform 120ms ease-out;
+		background var(--speed-fast) var(--ease-ios),
+		color var(--speed-fast) var(--ease-ios),
+		border-color var(--speed-fast) var(--ease-ios),
+		transform 180ms var(--ease-ios);
 }
 
 .sh-btn:hover:not(:disabled) {
@@ -251,9 +251,10 @@
 	min-height: var(--topbar-h);
 	padding: 8px 12px 8px 16px;
 	padding-top: calc(8px + env(safe-area-inset-top, 0px));
-	background: color-mix(in srgb, var(--bg) 72%, transparent);
-	backdrop-filter: blur(14px) saturate(160%);
-	-webkit-backdrop-filter: blur(14px) saturate(160%);
+	background: var(--glass);
+	backdrop-filter: var(--blur-surface);
+	-webkit-backdrop-filter: var(--blur-surface);
+	box-shadow: inset 0 -0.5px 0 var(--hairline);
 }
 
 .sh-header-left {
@@ -271,8 +272,9 @@
 }
 
 .sh-title {
-	font-size: 14px;
-	font-weight: 500;
+	font-size: 16px;
+	font-weight: 600;
+	letter-spacing: var(--tracking-tight);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -328,7 +330,7 @@
 	height: 100%;
 	background: var(--accent-gradient);
 	border-radius: inherit;
-	transition: width 360ms var(--ease-out);
+	transition: width 360ms var(--ease-ios);
 }
 
 .sh-gauge-warn .sh-gauge-fill {
@@ -337,6 +339,7 @@
 
 .sh-gauge-pct {
 	font: 400 11.5px / 1 var(--font-mono);
+	font-variant-numeric: tabular-nums;
 	color: var(--fg-muted);
 }
 
@@ -423,7 +426,7 @@
 		linear-gradient(var(--bg-raised), var(--bg-raised)) padding-box,
 		linear-gradient(180deg, var(--edge-top), var(--edge-bottom) 60%) border-box;
 	box-shadow: var(--shadow-card);
-	transition: box-shadow 160ms ease-out;
+	transition: box-shadow 260ms var(--ease-ios);
 }
 
 .sh-composer-inner:focus-within {
@@ -496,8 +499,13 @@
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
 	transition:
-		border-color 120ms ease-out,
-		background 120ms ease-out;
+		border-color var(--speed-fast) var(--ease-ios),
+		background var(--speed-fast) var(--ease-ios),
+		transform 180ms var(--ease-ios);
+}
+
+.sh-ask-option:active {
+	transform: scale(0.98);
 }
 
 .sh-ask-option:hover {
@@ -566,12 +574,12 @@
 	white-space: nowrap;
 	color: var(--fg);
 	background: var(--glass);
-	backdrop-filter: blur(14px) saturate(160%);
-	-webkit-backdrop-filter: blur(14px) saturate(160%);
+	backdrop-filter: var(--blur-surface);
+	-webkit-backdrop-filter: var(--blur-surface);
 	border: 1px solid var(--border-strong);
 	border-radius: 999px;
 	box-shadow: var(--shadow-overlay);
-	animation: rise 360ms var(--ease-out) backwards;
+	animation: rise 360ms var(--ease-ios) backwards;
 }
 
 .sh-banner-dot {
@@ -600,12 +608,12 @@
 	flex-direction: column;
 	gap: 8px;
 	background: var(--glass);
-	backdrop-filter: blur(20px) saturate(170%);
-	-webkit-backdrop-filter: blur(20px) saturate(170%);
+	backdrop-filter: var(--blur-strong);
+	-webkit-backdrop-filter: var(--blur-strong);
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius-xl);
 	box-shadow: var(--shadow-overlay);
-	animation: rise 360ms var(--ease-out) backwards;
+	animation: rise 360ms var(--ease-ios) backwards;
 }
 
 .sh-ended-title {
@@ -647,12 +655,12 @@
 	font-size: 12.5px;
 	color: var(--fg);
 	background: var(--glass);
-	backdrop-filter: blur(16px) saturate(160%);
-	-webkit-backdrop-filter: blur(16px) saturate(160%);
+	backdrop-filter: var(--blur-surface);
+	-webkit-backdrop-filter: var(--blur-surface);
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius-lg);
 	box-shadow: var(--shadow-overlay);
-	animation: rise 360ms var(--ease-out) backwards;
+	animation: rise 360ms var(--ease-ios) backwards;
 }
 
 .sh-toast::before {
@@ -735,7 +743,7 @@
 		linear-gradient(var(--bg-raised), var(--bg-raised)) padding-box,
 		linear-gradient(180deg, var(--edge-top), var(--edge-bottom) 45%) border-box;
 	box-shadow: var(--shadow-overlay);
-	animation: rise 420ms var(--ease-out) backwards;
+	animation: rise 420ms var(--ease-ios) backwards;
 }
 
 .sh-connect-head {
@@ -746,10 +754,10 @@
 }
 
 .sh-connect-title {
-	font-size: 22px;
-	font-weight: 600;
-	letter-spacing: -0.02em;
-	line-height: 1.2;
+	font-size: 26px;
+	font-weight: 700;
+	letter-spacing: var(--tracking-tight);
+	line-height: 1.15;
 }
 
 .sh-connect-sub {
@@ -789,8 +797,8 @@
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius);
 	transition:
-		border-color 120ms ease-out,
-		box-shadow 120ms ease-out;
+		border-color var(--speed-fast) var(--ease-ios),
+		box-shadow var(--speed-fast) var(--ease-ios);
 }
 
 .sh-input::placeholder {
@@ -858,8 +866,8 @@
 		margin: 0;
 		padding: 6px;
 		background: var(--glass);
-		backdrop-filter: blur(18px) saturate(160%);
-		-webkit-backdrop-filter: blur(18px) saturate(160%);
+		backdrop-filter: var(--blur-strong);
+		-webkit-backdrop-filter: var(--blur-strong);
 		border: 1px solid var(--border-strong);
 		border-radius: var(--radius-xl);
 		box-shadow: var(--rail-mobile-shadow);

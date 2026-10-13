@@ -1,0 +1,86 @@
+/* sessions screen */
+.sess-groups {
+	display: flex;
+	flex-direction: column;
+	gap: var(--sp-4);
+	max-width: 640px;
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0 auto;
+	padding: 0 var(--sp-3) var(--sp-4);
+}
+
+.sess-sk {
+	display: block;
+	height: 13px;
+	border-radius: 7px;
+}
+
+.sess-sk--title {
+	width: 55%;
+}
+
+.sess-sk--meta {
+	width: 35%;
+	height: 11px;
+	margin-top: var(--sp-2);
+}
+
+.sess-resume-error {
+	margin-bottom: 2px;
+}
+
+.sess-group {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.sess-group-label {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--muted);
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	font-family: var(--font-mono);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sess-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.sess-row-main {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.sess-title {
+	font-size: 14.5px;
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sess-chip--dead {
+	color: var(--warning);
+	border-color: var(--warning);
+}
+
+.sess-meta {
+	margin-top: 4px;
+	font-size: 12.5px;
+	color: var(--muted);
+}
+
+.sess-resume {
+	margin-top: 10px;
+	width: 100%;
+}

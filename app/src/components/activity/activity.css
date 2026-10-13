@@ -1,0 +1,146 @@
+/* Activity screen — timeline feed grouped into day sections, mono tabular times. */
+
+.ac-feed {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	width: 100%;
+	max-width: 640px;
+	margin: 0 auto;
+}
+
+.ac-section {
+	display: flex;
+	flex-direction: column;
+}
+
+.ac-section-title {
+	padding: 14px 16px 6px;
+	color: var(--fg-faint);
+	font-size: var(--text-footnote);
+	font-weight: 600;
+	letter-spacing: var(--tracking-caps);
+	text-transform: uppercase;
+}
+
+.ac-section-rows {
+	display: flex;
+	flex-direction: column;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-card);
+	overflow: hidden;
+}
+
+/* ---- timeline row ---- */
+
+.ac-row {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	min-height: var(--tap);
+	padding: 8px 14px;
+	background: none;
+	color: var(--fg);
+	text-align: left;
+	font-size: var(--text-body);
+	transition: background var(--speed-fast) var(--ease-ios);
+}
+
+/* vertical rail through the icon column */
+.ac-row::before {
+	content: "";
+	position: absolute;
+	left: 27.5px;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	background: var(--hairline);
+	transform: scaleX(0.5);
+	pointer-events: none;
+}
+
+.ac-row:first-child::before {
+	top: 22px;
+}
+
+.ac-row:last-child::before {
+	bottom: 22px;
+}
+
+.ac-row:only-child::before {
+	display: none;
+}
+
+.ac-row:active {
+	transform: none;
+	opacity: 1;
+	background: var(--hover);
+}
+
+.ac-row-icon {
+	position: relative;
+	z-index: 1;
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 9px;
+	background: var(--surface2);
+	color: var(--muted);
+}
+
+.ac-row-icon--tool {
+	background: var(--accent-muted);
+	color: var(--accent);
+}
+
+.ac-row-icon--error {
+	background: var(--error-muted);
+	color: var(--error);
+}
+
+.ac-row-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ac-row-time {
+	flex: 0 0 auto;
+	color: var(--fg-faint);
+	font-family: var(--font-mono);
+	font-size: var(--text-caption);
+	font-variant-numeric: tabular-nums;
+}
+
+/* ---- HIG empty / no-session states ---- */
+
+.ac-empty {
+	width: 100%;
+	max-width: 640px;
+	margin: 0 auto;
+	padding: 48px 16px;
+	text-align: center;
+	animation: rise var(--speed) var(--ease-ios);
+}
+
+.ac-empty-title {
+	font-size: var(--text-headline);
+	font-weight: 600;
+	letter-spacing: var(--tracking-tight);
+}
+
+.ac-empty-text {
+	margin-top: 6px;
+	color: var(--fg-faint);
+	font-size: var(--text-subhead);
+	line-height: 1.5;
+}
