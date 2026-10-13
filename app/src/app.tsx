@@ -63,6 +63,7 @@ export function App(): ReactNode {
 	const [filterCwd, setFilterCwd] = useState<string | null>(null);
 	const [client, setClient] = useState<GuestClient | null>(null);
 	const clientRef = useRef<GuestClient | null>(null);
+	const [activeInstanceId, setActiveInstanceId] = useState<string | null>(null);
 	const [opening, setOpening] = useState(false);
 
 	// hash ⇄ screen sync
@@ -116,6 +117,7 @@ export function App(): ReactNode {
 				clientRef.current?.close();
 				clientRef.current = next;
 				setClient(next);
+				setActiveInstanceId(host.instanceId);
 				goto("session");
 			} catch (err) {
 				const status = err instanceof GatewayError ? err.status : 0;
@@ -135,14 +137,31 @@ export function App(): ReactNode {
 		clientRef.current?.close();
 		clientRef.current = null;
 		setClient(null);
+		setActiveInstanceId(null);
 		goto("agents");
 	}, [goto]);
+
+	const refreshHosts = useCallback((): void => {
+		void (async () => {
+			try {
+				setHosts(await fetchHosts());
+				setHostsError(null);
+			} catch {
+				// polling effect reports errors; silent here
+			}
+		})();
+	}, []);
+
+	const activeHost = useMemo(
+		() => hosts?.find(h => h.instanceId === activeInstanceId),
+		[hosts, activeInstanceId],
+	);
 
 	const body = useMemo<ReactNode>(() => {
 		switch (screen) {
 			case "session":
-				if (client) return <SessionScreen client={client} onLeave={leaveSession} />;
-				return <AgentsScreen hosts={hosts} error={hostsError} filterCwd={filterCwd} onClearFilter={() => setFilterCwd(null)} onOpen={h => void openHost(h)} />;
+				if (client) return <SessionScreen client={client} onLeave={leaveSession} host={activeHost} />;
+				return <AgentsScreen hosts={hosts} error={hostsError} filterCwd={filterCwd} onClearFilter={() => setFilterCwd(null)} onOpen={h => void openHost(h)} onRefresh={refreshHosts} />;
 			case "projects":
 				return (
 					<ProjectsScreen
@@ -161,9 +180,9 @@ export function App(): ReactNode {
 			case "settings":
 				return <SettingsScreen />;
 			default:
-				return <AgentsScreen hosts={hosts} error={hostsError} filterCwd={filterCwd} onClearFilter={() => setFilterCwd(null)} onOpen={h => void openHost(h)} />;
+				return <AgentsScreen hosts={hosts} error={hostsError} filterCwd={filterCwd} onClearFilter={() => setFilterCwd(null)} onOpen={h => void openHost(h)} onRefresh={refreshHosts} />;
 		}
-	}, [screen, client, hosts, hostsError, filterCwd, openHost, leaveSession, goto]);
+	}, [screen, client, hosts, hostsError, filterCwd, openHost, leaveSession, goto, activeHost, refreshHosts]);
 
 	const navIcon: Record<Exclude<Screen, "session">, ReactNode> = {
 		agents: <Bot size={22} />,

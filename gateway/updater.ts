@@ -574,7 +574,7 @@ export class Updater {
         if (v === null) throw new Error("не удалось получить последнюю версию OMP из npm-реестра");
         return v;
       });
-      await this.#step(`Установка OMP ${latest}`, () => this.#installOmp(latest));
+      await this.#step(`Установка OMP ${latest}`, async () => this.#installOmp(latest));
       await this.#step("Проверка версии", async () => {
         const now = await this.#ompVersion();
         if (now !== latest) {

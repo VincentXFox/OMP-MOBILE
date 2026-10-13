@@ -217,6 +217,14 @@ export class GuestClient {
 		this.#socket.send({ t: "prompt", text });
 	}
 
+	sendPromptWithImages(text: string, images: ReadonlyArray<{ data: string; mimeType: string }>): void {
+		this.#socket.send({
+			t: "prompt",
+			text,
+			images: images.map(i => ({ type: "image", data: i.data, mimeType: i.mimeType })),
+		});
+	}
+
 	sendUiResponse(reqId: number, value?: CollabUiResponseValue): void {
 		this.#socket.send({ t: "ui-response", reqId, value });
 		if (this.#uiRequest?.reqId === reqId) {

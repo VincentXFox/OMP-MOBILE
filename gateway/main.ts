@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { loadConfig } from "./config.ts";
 import { listHosts, mintLink } from "./hosts.ts";
 import type { OmpHostsOutput } from "./hosts.ts";
+import { startAgent, stopAgent } from "./agents.ts";
 import { PushManager } from "./push.ts";
 import { Updater, LIVE_UPDATER_PATHS, isComponentId } from "./updater.ts";
 
@@ -152,6 +153,26 @@ async function route(req: Request, url: URL): Promise<Response> {
     if (outcome.kind === "no_previous") return json(404, { error: "no previous" });
     if (outcome.kind === "job_running") return json(409, { error: "job_running" });
     return json(202, { ok: true, job: true });
+  }
+
+  if (url.pathname === "/api/agents/start" && req.method === "POST") {
+    const body = (await readJson<{ cwd?: unknown; model?: unknown; label?: unknown }>(req)) ?? {};
+    if (typeof body.cwd !== "string" || body.cwd.trim() === "") return json(400, { error: "cwd required" });
+    const model = typeof body.model === "string" && body.model.trim() !== "" ? body.model.trim() : undefined;
+    const label = typeof body.label === "string" && body.label.trim() !== "" ? body.label.trim() : undefined;
+    const outcome = await startAgent(body.cwd, model, label);
+    if (outcome.kind === "bad_cwd") return json(400, { error: outcome.error });
+    if (outcome.kind === "failed") return json(502, { error: outcome.error });
+    return json(200, { ok: true, instanceId: outcome.instanceId, note: outcome.note });
+  }
+
+  if (url.pathname === "/api/agents/stop" && req.method === "POST") {
+    const body = (await readJson<{ instanceId?: unknown }>(req)) ?? {};
+    if (typeof body.instanceId !== "string" || body.instanceId.trim() === "") return json(400, { error: "instanceId required" });
+    const outcome = await stopAgent(body.instanceId);
+    if (!outcome.found) return json(404, { error: "host not found" });
+    if (!outcome.killed) return json(502, { error: "process did not exit" });
+    return json(200, { ok: true, killed: true });
   }
 
   return json(404, { error: "not found" });

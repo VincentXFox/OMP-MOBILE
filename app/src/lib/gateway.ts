@@ -129,6 +129,38 @@ export async function deletePushSubscription(endpoint: string): Promise<void> {
 	});
 }
 
+/* ---- agent lifecycle ---- */
+
+export type AgentStartResult = { ok: true; instanceId: string } | { ok: false; error: string };
+
+export async function startAgent(cwd: string, model: string | undefined, label: string | undefined): Promise<AgentStartResult> {
+	try {
+		const data = await request<{ ok?: boolean; instanceId?: unknown; error?: unknown }>("/api/agents/start", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ cwd, model, label }),
+		});
+		if (typeof data.instanceId === "string") return { ok: true, instanceId: data.instanceId };
+		return { ok: false, error: typeof data.error === "string" ? data.error : "Некорректный ответ шлюза" };
+	} catch (err) {
+		return { ok: false, error: err instanceof Error ? err.message : String(err) };
+	}
+}
+
+export async function stopAgent(instanceId: string): Promise<boolean> {
+	try {
+		await request<{ ok: boolean }>("/api/agents/stop", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ instanceId }),
+		});
+		return true;
+	} catch (err) {
+		if (err instanceof GatewayError && err.status === 404) return false;
+		throw err;
+	}
+}
+
 /* ---- update center ---- */
 
 export type UpdateComponentId = "omp" | "gateway" | "frontend";
