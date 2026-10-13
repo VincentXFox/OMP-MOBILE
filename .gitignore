@@ -2,5 +2,6 @@ node_modules/
 dist/
 gateway/config.json
 gateway/subscriptions.json
+gateway/update-state.json
 backups/
 *.log

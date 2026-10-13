@@ -1,21 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bot, Folder, Settings, Activity } from "lucide-react";
+import { Bot, Folder, Settings, Activity, RefreshCw } from "lucide-react";
 import { AgentsScreen } from "./components/agents/AgentsScreen";
 import { ActivityScreen } from "./components/activity/ActivityScreen";
 import { ProjectsScreen } from "./components/projects/ProjectsScreen";
 import { SettingsScreen } from "./components/settings/SettingsScreen";
 import { SessionScreen } from "./components/session/SessionScreen";
+import { UpdatesScreen } from "./components/updates/UpdatesScreen";
 import type { HostInfo } from "./lib/gateway";
 import { fetchHosts, GatewayError, mintLink } from "./lib/gateway";
 import { GuestClient } from "./lib/client";
 import "./components/shell/pocket.css";
 
-type Screen = "agents" | "projects" | "activity" | "settings" | "session";
+type Screen = "agents" | "projects" | "activity" | "updates" | "settings" | "session";
 
 const SCREENS: readonly { id: Exclude<Screen, "session">; label: string }[] = [
 	{ id: "agents", label: "Агенты" },
 	{ id: "projects", label: "Проекты" },
 	{ id: "activity", label: "Активность" },
+	{ id: "updates", label: "Обновления" },
 	{ id: "settings", label: "Настройки" },
 ];
 
@@ -23,6 +25,7 @@ const SCREEN_TITLE: Record<Screen, string> = {
 	agents: "Агенты",
 	projects: "Проекты",
 	activity: "Активность",
+	updates: "Обновления",
 	settings: "Настройки",
 	session: "Сессия",
 };
@@ -37,7 +40,7 @@ function storedName(): string {
 
 function screenFromHash(): Screen {
 	const hash = window.location.hash.replace(/^#\/?/, "");
-	return hash === "projects" || hash === "activity" || hash === "settings" ? hash : "agents";
+	return hash === "projects" || hash === "activity" || hash === "updates" || hash === "settings" ? hash : "agents";
 }
 
 export function App(): ReactNode {
@@ -140,6 +143,8 @@ export function App(): ReactNode {
 				);
 			case "activity":
 				return <ActivityScreen client={client} onOpenSession={() => goto("session")} hosts={hosts} />;
+			case "updates":
+				return <UpdatesScreen />;
 			case "settings":
 				return <SettingsScreen />;
 			default:
@@ -151,6 +156,7 @@ export function App(): ReactNode {
 		agents: <Bot size={22} />,
 		projects: <Folder size={22} />,
 		activity: <Activity size={22} />,
+		updates: <RefreshCw size={22} />,
 		settings: <Settings size={22} />,
 	};
 

@@ -4,6 +4,7 @@ import { loadConfig } from "./config.ts";
 import { listHosts, mintLink } from "./hosts.ts";
 import type { OmpHostsOutput } from "./hosts.ts";
 import { PushManager } from "./push.ts";
+import { Updater, LIVE_UPDATER_PATHS, isComponentId } from "./updater.ts";
 
 const DIST_DIR = new URL("../app/dist/", import.meta.url).pathname;
 const HOSTS_CACHE_MS = 2000;
@@ -88,6 +89,18 @@ const poller = setInterval(() => {
 }, POLL_INTERVAL_MS);
 poller.unref();
 
+const updater = new Updater(LIVE_UPDATER_PATHS, push);
+void updater.boot().catch(() => {});
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const updateTimer = setInterval(() => {
+  updater.checkAndNotify().catch(() => {});
+}, UPDATE_CHECK_INTERVAL_MS);
+updateTimer.unref();
+const updateBootCheck = setTimeout(() => {
+  updater.checkAndNotify().catch(() => {});
+}, 60_000);
+updateBootCheck.unref();
+
 async function route(req: Request, url: URL): Promise<Response> {
   if (!url.pathname.startsWith("/api/")) return serveStatic(url.pathname);
 
@@ -115,6 +128,30 @@ async function route(req: Request, url: URL): Promise<Response> {
       const body = await readJson<{ endpoint?: unknown }>(req);
       return json(200, push.remove(body?.endpoint));
     }
+  }
+
+  if (url.pathname === "/api/update/status" && req.method === "GET") return json(200, await updater.status());
+
+  if (url.pathname === "/api/update/job" && req.method === "GET") return json(200, updater.jobState());
+
+  if (url.pathname === "/api/update/backup" && req.method === "POST") return json(200, await updater.backup());
+
+  if (url.pathname === "/api/update/apply" && req.method === "POST") {
+    const body = (await readJson<{ id?: unknown; confirmBusy?: unknown }>(req)) ?? {};
+    if (!isComponentId(body.id)) return json(400, { error: "unknown id" });
+    const outcome = await updater.apply(body.id, body.confirmBusy === true);
+    if (outcome.kind === "job_running") return json(409, { error: "job_running" });
+    if (outcome.kind === "busy") return json(409, { error: "busy", agents: outcome.agents });
+    return json(202, { job: true });
+  }
+
+  if (url.pathname === "/api/update/rollback" && req.method === "POST") {
+    const body = (await readJson<{ id?: unknown }>(req)) ?? {};
+    if (!isComponentId(body.id)) return json(400, { error: "unknown id" });
+    const outcome = await updater.rollback(body.id);
+    if (outcome.kind === "no_previous") return json(404, { error: "no previous" });
+    if (outcome.kind === "job_running") return json(409, { error: "job_running" });
+    return json(202, { ok: true, job: true });
   }
 
   return json(404, { error: "not found" });

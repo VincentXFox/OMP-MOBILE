@@ -10,6 +10,8 @@ interface PushPayload {
   url: string;
 }
 
+export type { PushPayload };
+
 interface HostEdge {
   generation: number;
   inputRequired: boolean;
@@ -77,7 +79,8 @@ export class PushManager {
     }
   }
 
-  async #broadcast(payload: PushPayload): Promise<void> {
+  /** Public broadcast; reused by the update center for its own notifications. */
+  async broadcast(payload: PushPayload): Promise<void> {
     await Promise.all(this.#subscriptions.map((s) => this.#send(s, payload)));
   }
 
@@ -98,15 +101,15 @@ export class PushManager {
       if (this.#firstRun || (prev && prev.generation !== host.generation)) continue; // skip boot + rotated instances
       const label = PushManager.#label(host);
       if (!prev?.inputRequired && host.inputRequired) {
-        await this.#broadcast({ title: "Требуется разрешение", body: `${label}: агент ждёт решения`, url: "/" });
+        await this.broadcast({ title: "Требуется разрешение", body: `${label}: агент ждёт решения`, url: "/" });
       } else if (prev?.busy && !host.busy) {
-        await this.#broadcast({ title: "Агент завершил", body: label, url: "/" });
+        await this.broadcast({ title: "Агент завершил", body: label, url: "/" });
       }
     }
     for (const [id] of this.#edges) {
       if (seen.has(id)) continue;
       this.#edges.delete(id);
-      if (!this.#firstRun) await this.#broadcast({ title: "Сессия закрыта", body: id, url: "/" });
+      if (!this.#firstRun) await this.broadcast({ title: "Сессия закрыта", body: id, url: "/" });
     }
     this.#firstRun = false;
   }

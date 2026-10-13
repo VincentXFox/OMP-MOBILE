@@ -1,6 +1,9 @@
 # OMP Pocket — деплой на мини-ПК
 
-Мобильный центр управления OMP-агентами: PWA (~/omp-mobile/app) + Bun-gateway (~/omp-mobile/gateway) + Caddy (TLS).
+Два независимых клиента управления агентами:
+
+1. **Herdr Mobile** (основной, готовое решение) — агенты живут в Herdr, телефон через herdr-mobile-relay. См. раздел «Herdr» ниже.
+2. **OMP Pocket** (собственный лёгкий PWA, этот репозиторий) — управление любыми интерактивными сессиями OMP через нативный OMP Collab: живой транскрипт, подтверждения, пуши. Слои не конфликтуют и работают параллельно.
 
 Слой управления агентами — **нативный OMP Collab**: каждая интерактивная сессия OMP публикует E2E-шифрованную комнату (AES-256-GCM, ключ внутри ссылки), gateway по реестру `omp collab list --json` показывает живые сессии и выдаёт ссылки `omp collab link`. Трафик сессий идёт напрямую телефон → релей (`my.omp.sh`, content-blind, сквозное шифрование) — управляющее API OMP наружу не открыто.
 
@@ -58,3 +61,35 @@ omp config set tools.approvalMode write   # правки файлов — сам
 | `~/omp-mobile/gateway` | API реестра + выдача ссылок + Web Push + статика |
 | `~/.config/systemd/user/omp-pocket-gateway.service` | user-юнит gateway |
 | `/etc/caddy/Caddyfile` | TLS-фронт |
+
+## Herdr + herdr-mobile-relay (основной мобильный клиент)
+
+Установлено: Herdr 0.9.3 (`~/.local/bin/herdr`), плагин herdr-mobile-relay 0.22.9, интеграция omp.
+
+```bash
+herdr                      # запустить рантайм (терминал-менеджер); агенты живут в его панелях
+herdr agent start <имя> --kind omp --pane <PANE_ID>   # агент OMP внутри herdr
+```
+
+Setup-меню релея (QR/транспорт/сервис):
+
+```bash
+herdr plugin pane open --plugin herdr-mobile-relay.events --entrypoint setup --placement zoomed --focus
+```
+
+Постоянный транспорт (временный trycloudflare умирает при перезапуске) — выбрать в setup-меню:
+- **Stable Tunnel** (постоянный hostname, нужен домен на Cloudflare), или
+- **Deploy Your Own WebRTC Gateway** на VPS (рекомендуется: свой сервер уже есть), или
+- origin приложения на `vincentfox.ru`: Caddy уже стоит; отдать `~/.local/share/herdr-mobile-relay/releases/*/web` (SPA требует корень хоста) + проброс 443.
+
+Фоновый сервис релея (переживает перезапуск): пункт `install-service` в setup-меню.
+
+Подтверждения: приложение показывает вопросы агентов (Approve/Deny). Чтобы они появлялись, режим OMP не должен быть `yolo`:
+`omp config set tools.approvalMode write` (bash/exec — спрашивает, правки файлов — нет).
+
+## Центр обновлений (внутри OMP Pocket)
+
+Вкладка «Обновления» в PWA: проверка версий **OMP** (официальный установщик omp.sh, пин версии, SHA-256), **Gateway** и **Фронтенд** (этот git-репозиторий: pull + build + рестарт systemd-юнита). Перед каждым обновлением — автоматический бэкап конфигов в `~/omp-mobile/backups/`, есть откат к предыдущей версии. Обновление OMP блокируется, пока хоть один агент занят (`busy`), либо требует явного подтверждения. О новых версиях приходит push (проверка раз в 6 ч).
+
+Чтобы обновления кода Gateway/Фронта работали, добавьте remote: `git -C ~/omp-mobile remote add origin <url>`.
+
