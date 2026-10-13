@@ -1,0 +1,492 @@
+/* Session screen — mobile chassis + transcript adaptation layer.
+ * Overrides only spacing/sizing of transcript/tool-render; structure untouched.
+ * transcript.css itself ships with the <Transcript> component import. */
+
+.ss-root {
+	display: flex;
+	flex-direction: column;
+	height: 100dvh;
+	background: var(--bg);
+	color: var(--fg);
+	font-size: 14px;
+	position: relative;
+	overflow: hidden;
+}
+
+/* ---- header ---- */
+.ss-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: calc(8px + env(safe-area-inset-top, 0px)) 10px 8px;
+	background: var(--glass);
+	backdrop-filter: blur(14px);
+	border-bottom: 1px solid var(--border);
+	position: sticky;
+	top: 0;
+	z-index: 20;
+	transition: box-shadow 0.3s var(--ease-out);
+}
+.ss-header--attention {
+	box-shadow: inset 0 2px 0 0 var(--accent);
+}
+.ss-header-titles {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+.ss-header-title {
+	font-size: 15px;
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.ss-header-status {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--fg-muted);
+}
+.ss-pulse-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--fg-faint);
+	flex: none;
+}
+.ss-pulse-dot--on {
+	background: var(--live);
+	animation: ss-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ss-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.35; }
+}
+.ss-stop {
+	color: var(--err);
+}
+
+.ss-icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 38px;
+	height: 38px;
+	border: none;
+	border-radius: var(--radius);
+	background: transparent;
+	color: var(--fg);
+	cursor: pointer;
+	flex: none;
+}
+.ss-icon-btn:active {
+	background: var(--hover);
+}
+
+/* ---- subagent chips ---- */
+.ss-agent-row {
+	display: flex;
+	gap: 6px;
+	padding: 6px 10px;
+	overflow-x: auto;
+	border-bottom: 1px solid var(--border);
+	background: var(--panel);
+	scrollbar-width: none;
+	flex: none;
+}
+.ss-agent-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 10px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: var(--bg-raised);
+	color: var(--fg);
+	font-size: 12px;
+	white-space: nowrap;
+	cursor: pointer;
+	flex: none;
+}
+.ss-agent-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--fg-faint);
+	flex: none;
+}
+.ss-agent-dot--running { background: var(--live); }
+.ss-agent-dot--aborted { background: var(--err); }
+.ss-agent-dot--idle, .ss-agent-dot--parked { background: var(--fg-faint); }
+.ss-agent-hint {
+	color: var(--fg-muted);
+}
+.ss-agent-status-text {
+	color: var(--fg-muted);
+	font-size: 12px;
+}
+
+/* ---- transcript ---- */
+.ss-transcript-wrap {
+	flex: 1;
+	min-height: 0;
+	position: relative;
+	display: flex;
+	flex-direction: column;
+}
+.ss-transcript {
+	flex: 1;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding: 10px 10px 16px;
+}
+
+/* adaptation layer: compact transcript spacing on mobile */
+.ss-transcript .tr-row {
+	padding: 4px 0;
+	gap: 8px;
+	max-width: 100%;
+}
+.ss-transcript .tr-body {
+	max-width: 100%;
+	min-width: 0;
+	font-size: 14px;
+	line-height: 1.45;
+}
+.ss-transcript pre,
+.ss-transcript code {
+	max-width: 100%;
+}
+.ss-transcript pre {
+	overflow-x: auto;
+	font-size: 13px;
+}
+.ss-transcript table {
+	display: block;
+	overflow-x: auto;
+	max-width: 100%;
+}
+/* tool cards: spacing/sizes only */
+.ss-transcript .tool-render,
+.ss-transcript [class*="tool-"] {
+	max-width: 100%;
+	font-size: 13px;
+}
+
+.ss-jump {
+	position: absolute;
+	right: 14px;
+	bottom: 14px;
+	width: 42px;
+	height: 42px;
+	border-radius: 50%;
+	border: 1px solid var(--border-strong);
+	background: var(--bg-overlay);
+	color: var(--fg);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	box-shadow: var(--shadow-card);
+	z-index: 5;
+}
+
+.ss-phase-banner {
+	position: absolute;
+	top: 10px;
+	left: 50%;
+	transform: translateX(-50%);
+	padding: 6px 14px;
+	border-radius: 999px;
+	background: var(--bg-overlay);
+	border: 1px solid var(--border-strong);
+	color: var(--warn);
+	font-size: 13px;
+	z-index: 6;
+	white-space: nowrap;
+}
+
+/* ---- composer ---- */
+.ss-composer-zone {
+	flex: none;
+	background: var(--panel);
+	border-top: 1px solid var(--border);
+	padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+}
+.ss-queued-row {
+	display: flex;
+	gap: 6px;
+	padding-bottom: 6px;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+.ss-queued-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 3px 10px;
+	border-radius: 999px;
+	background: var(--accent-muted);
+	color: var(--accent);
+	font-size: 12px;
+	white-space: nowrap;
+}
+.ss-composer {
+	display: flex;
+	align-items: flex-end;
+	gap: 8px;
+}
+.ss-input {
+	flex: 1;
+	min-width: 0;
+	resize: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	background: var(--bg-raised);
+	color: var(--fg);
+	font: inherit;
+	font-size: 15px;
+	line-height: 20px;
+	padding: 8px 12px;
+	max-height: 136px;
+}
+.ss-input:focus {
+	outline: none;
+	border-color: var(--ring-soft);
+}
+.ss-input:disabled {
+	opacity: 0.5;
+}
+.ss-interrupt {
+	color: var(--err);
+	margin-bottom: 2px;
+}
+.ss-send {
+	width: 48px;
+	height: 48px;
+	border-radius: 50%;
+	border: none;
+	background: var(--accent-gradient);
+	color: var(--accent-fg);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	flex: none;
+}
+.ss-send:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+
+/* ---- approval sheet ---- */
+.ss-sheet-backdrop {
+	position: fixed;
+	inset: 0;
+	background: var(--backdrop);
+	z-index: 40;
+	animation: ss-fade 0.2s var(--ease-out);
+}
+@keyframes ss-fade {
+	from { opacity: 0; }
+}
+.ss-sheet {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 41;
+	background: var(--bg-raised);
+	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+	border-top: 1px solid var(--edge-top);
+	box-shadow: var(--shadow-overlay);
+	padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+	animation: ss-slide-up 0.2s var(--ease-out);
+	max-height: 85dvh;
+	overflow-y: auto;
+}
+@keyframes ss-slide-up {
+	from { transform: translateY(40%); opacity: 0.4; }
+}
+.ss-sheet-handle {
+	width: 36px;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--border-strong);
+	margin: 4px auto 12px;
+}
+.ss-sheet-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--warn);
+	margin-bottom: 8px;
+}
+.ss-sheet-warn {
+	color: var(--warn);
+}
+.ss-sheet-title {
+	font-family: var(--font-mono);
+	font-size: 13px;
+	line-height: 1.45;
+	white-space: pre-wrap;
+	word-break: break-word;
+	background: var(--bg-inset);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 10px 12px;
+	margin-bottom: 12px;
+	max-height: 35dvh;
+	overflow-y: auto;
+}
+.ss-sheet-options {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.ss-opt {
+	width: 100%;
+	min-height: 52px;
+	border-radius: var(--radius-lg);
+	border: 1px solid var(--border-strong);
+	background: var(--bg-overlay);
+	color: var(--fg);
+	font-size: 15px;
+	font-weight: 600;
+	cursor: pointer;
+	padding: 8px 14px;
+}
+.ss-opt:active {
+	filter: brightness(1.15);
+}
+.ss-opt--success {
+	background: var(--ok);
+	border-color: transparent;
+	color: var(--fg-inverse);
+}
+.ss-opt--error {
+	background: transparent;
+	border-color: var(--err);
+	color: var(--err);
+}
+.ss-opt--neutral {
+	background: var(--bg-overlay);
+}
+.ss-opt--dismiss {
+	min-height: 40px;
+	font-weight: 400;
+	color: var(--fg-muted);
+	background: transparent;
+	border-color: transparent;
+}
+.ss-opt--editor-send {
+	background: var(--accent-gradient);
+	border-color: transparent;
+	color: var(--accent-fg);
+}
+.ss-opt--editor-cancel {
+	min-height: 44px;
+	font-weight: 400;
+	color: var(--fg-muted);
+	background: transparent;
+}
+.ss-editor-input {
+	width: 100%;
+	resize: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-inset);
+	color: var(--fg);
+	font: inherit;
+	font-size: 14px;
+	padding: 10px 12px;
+	margin-bottom: 10px;
+}
+.ss-editor-input:focus {
+	outline: none;
+	border-color: var(--ring-soft);
+}
+.ss-sheet-editor-actions {
+	display: flex;
+	gap: 8px;
+}
+.ss-sheet-editor-actions .ss-opt {
+	width: auto;
+	flex: 1;
+}
+
+/* ---- agent drawer ---- */
+.ss-agent-drawer {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 41;
+	background: var(--bg-raised);
+	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+	border-top: 1px solid var(--edge-top);
+	padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+	animation: ss-slide-up 0.2s var(--ease-out);
+	max-height: 60dvh;
+	overflow-y: auto;
+}
+.ss-agent-drawer-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+.ss-agent-drawer-head .ss-icon-btn {
+	margin-left: auto;
+	width: 30px;
+	height: 30px;
+}
+.ss-agent-drawer-body {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.ss-agent-line {
+	font-size: 13px;
+	color: var(--fg-muted);
+	word-break: break-word;
+}
+.ss-agent-line--empty {
+	font-style: italic;
+}
+
+/* ---- ended ---- */
+.ss-root--ended {
+	align-items: center;
+	justify-content: center;
+}
+.ss-ended-card {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	align-items: center;
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	padding: 28px 24px;
+	min-width: 260px;
+	text-align: center;
+}
+.ss-ended-title {
+	font-size: 16px;
+	font-weight: 600;
+}
+.ss-ended-reason {
+	font-size: 13px;
+	color: var(--fg-muted);
+	word-break: break-word;
+}
+.ss-ended-card .ss-opt {
+	min-width: 160px;
+}

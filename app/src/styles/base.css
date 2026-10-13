@@ -1,0 +1,174 @@
+/* Base reset + globals. Token vars only. */
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+* {
+	margin: 0;
+}
+
+html {
+	height: 100%;
+	-webkit-text-size-adjust: 100%;
+	text-size-adjust: 100%;
+	overscroll-behavior-y: none;
+}
+
+body,
+#root {
+	height: 100%;
+}
+
+body {
+	font: 400 15px / 1.45 var(--font-ui);
+	background: var(--bg);
+	color: var(--fg);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-rendering: optimizeLegibility;
+	overflow: hidden;
+	transition: background var(--speed) var(--ease-out);
+}
+
+button,
+input,
+textarea,
+select,
+a {
+	font: inherit;
+	color: inherit;
+	-webkit-tap-highlight-color: transparent;
+	touch-action: manipulation;
+}
+
+button {
+	cursor: pointer;
+	background: none;
+	border: none;
+	padding: 0;
+}
+
+a {
+	color: var(--accent);
+}
+
+code,
+pre,
+kbd {
+	font-family: var(--font-mono);
+}
+
+:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+	border-radius: 4px;
+}
+
+input,
+textarea {
+	caret-color: var(--accent);
+}
+
+::selection {
+	background: var(--accent-muted);
+}
+
+/* tap-friendly interactive primitives */
+button {
+	min-height: var(--tap);
+	transition:
+		opacity var(--speed) var(--ease-out),
+		background var(--speed) var(--ease-out),
+		transform var(--speed) var(--ease-out);
+}
+
+button:active {
+	transform: scale(0.97);
+}
+
+/* subtle scrollbars */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+	background: var(--border-strong);
+	border: 2px solid transparent;
+	background-clip: padding-box;
+	border-radius: var(--radius-pill);
+}
+
+*::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* shared animations */
+@keyframes pk-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+
+@keyframes rise {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+
+@keyframes shimmer {
+	0% {
+		background-position: -200% 0;
+	}
+	100% {
+		background-position: 200% 0;
+	}
+}
+
+@keyframes ping {
+	0% {
+		transform: scale(1);
+		opacity: 0.7;
+	}
+	80%,
+	100% {
+		transform: scale(2.6);
+		opacity: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 1ms !important;
+		animation-delay: 0ms !important;
+		transition-duration: 1ms !important;
+	}
+}

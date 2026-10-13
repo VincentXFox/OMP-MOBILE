@@ -1,0 +1,10 @@
+# OMP Pocket — HTTPS front (automatic Let's Encrypt for vincentfox.ru).
+# Requires router port-forward 80+443 -> 192.168.1.88 (same as existing :8089 forward).
+# Reload after edits: sudo systemctl reload caddy
+
+vincentfox.ru, www.vincentfox.ru {
+	encode zstd gzip
+
+	# PWA static + API (gateway)
+	reverse_proxy 127.0.0.1:8088
+}
