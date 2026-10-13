@@ -7,7 +7,7 @@ import { SettingsScreen } from "./components/settings/SettingsScreen";
 import { SessionScreen } from "./components/session/SessionScreen";
 import { UpdatesScreen } from "./components/updates/UpdatesScreen";
 import type { HostInfo } from "./lib/gateway";
-import { fetchHosts, GatewayError, mintLink } from "./lib/gateway";
+import { fetchHosts, GatewayError, mintLink, setToken } from "./lib/gateway";
 import { GuestClient } from "./lib/client";
 import "./components/shell/pocket.css";
 
@@ -37,6 +37,19 @@ function storedName(): string {
 		return "guest";
 	}
 }
+
+// Deep link "#token=..." provisions auth on first open (the fragment is never sent to the server),
+// then routing takes over from "#/..." as usual.
+function provisionTokenFromHash(): void {
+	const hash = window.location.hash.replace(/^#/, "");
+	if (!hash.startsWith("token=")) return;
+	const token = new URLSearchParams(hash).get("token");
+	if (token) {
+		setToken(token);
+		history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/agents`);
+	}
+}
+provisionTokenFromHash();
 
 function screenFromHash(): Screen {
 	const hash = window.location.hash.replace(/^#\/?/, "");
