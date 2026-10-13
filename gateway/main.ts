@@ -4,6 +4,7 @@ import { loadConfig } from "./config.ts";
 import { listHosts, mintLink } from "./hosts.ts";
 import type { OmpHostsOutput } from "./hosts.ts";
 import { startAgent, stopAgent } from "./agents.ts";
+import { listProjectFiles, projectGit, readTerminal, sendTerminalKeys, sendTerminalText, MAX_TERMINAL_TEXT_BYTES } from "./files.ts";
 import { PushManager } from "./push.ts";
 import { Updater, LIVE_UPDATER_PATHS, isComponentId } from "./updater.ts";
 
@@ -173,6 +174,73 @@ async function route(req: Request, url: URL): Promise<Response> {
     if (!outcome.found) return json(404, { error: "host not found" });
     if (!outcome.killed) return json(502, { error: "process did not exit" });
     return json(200, { ok: true, killed: true });
+  }
+
+  const termMatch = /^\/api\/agents\/([^/]+)\/terminal$/.exec(url.pathname);
+  if (termMatch && req.method === "GET") {
+    const outcome = await readTerminal(decodeURIComponent(termMatch[1]));
+    if (outcome.kind === "not_found") return json(404, { error: outcome.error });
+    if (outcome.kind === "not_herdr") return json(404, { error: "not-herdr-agent" });
+    if (outcome.kind === "failed") return json(502, { error: outcome.error });
+    return json(200, { paneId: outcome.paneId, text: outcome.text });
+  }
+
+  const keysMatch = /^\/api\/agents\/([^/]+)\/terminal\/keys$/.exec(url.pathname);
+  if (keysMatch && req.method === "POST") {
+    const body = (await readJson<{ keys?: unknown }>(req)) ?? {};
+    const keys = Array.isArray(body.keys) ? body.keys : [];
+    if (keys.length === 0 || !keys.every((key): key is string => typeof key === "string")) {
+      return json(400, { error: "keys must be a non-empty string[]" });
+    }
+    const outcome = await sendTerminalKeys(decodeURIComponent(keysMatch[1]), keys);
+    if (outcome.kind === "bad_key") return json(400, { error: outcome.error });
+    if (outcome.kind === "not_found") return json(404, { error: outcome.error });
+    if (outcome.kind === "not_herdr") return json(404, { error: "not-herdr-agent" });
+    if (outcome.kind === "failed") return json(502, { error: outcome.error });
+    return json(200, { ok: true });
+  }
+
+  const textMatch = /^\/api\/agents\/([^/]+)\/terminal\/text$/.exec(url.pathname);
+  if (textMatch && req.method === "POST") {
+    const body = (await readJson<{ text?: unknown }>(req)) ?? {};
+    if (typeof body.text !== "string") return json(400, { error: "text required" });
+    if (Buffer.byteLength(body.text, "utf8") > MAX_TERMINAL_TEXT_BYTES) return json(400, { error: "text too large (max 8KB)" });
+    const outcome = await sendTerminalText(decodeURIComponent(textMatch[1]), body.text);
+    if (outcome.kind === "not_found") return json(404, { error: outcome.error });
+    if (outcome.kind === "not_herdr") return json(404, { error: "not-herdr-agent" });
+    if (outcome.kind === "failed") return json(502, { error: outcome.error });
+    return json(200, { ok: true });
+  }
+
+  if (url.pathname === "/api/project/files" && req.method === "GET") {
+    const dir = url.searchParams.get("path");
+    if (dir === null || !dir.startsWith("/")) return json(400, { error: "absolute path required" });
+    let stat: { isDirectory(): boolean };
+    try {
+      stat = statSync(dir);
+    } catch {
+      return json(400, { error: `path does not exist: ${dir}` });
+    }
+    if (!stat.isDirectory()) return json(400, { error: "not a directory" });
+    return json(200, listProjectFiles(dir));
+  }
+
+  if (url.pathname === "/api/project/git" && req.method === "GET") {
+    const dir = url.searchParams.get("path");
+    if (dir === null || !dir.startsWith("/")) return json(400, { error: "absolute path required" });
+    let isDir = false;
+    try {
+      isDir = statSync(dir).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    if (!isDir) return json(400, { error: "path is not a directory" });
+    const mode = url.searchParams.get("mode");
+    if (mode !== "status" && mode !== "diff") return json(400, { error: "mode must be status or diff" });
+    if (!existsSync(join(dir, ".git"))) return json(404, { error: "no-git" });
+    const outcome = await projectGit(dir, mode);
+    if (outcome.kind === "failed") return json(502, { error: outcome.error });
+    return json(200, { text: outcome.text });
   }
 
   return json(404, { error: "not found" });

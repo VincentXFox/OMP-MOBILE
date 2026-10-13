@@ -1,0 +1,126 @@
+.ts-root {
+	position: fixed;
+	inset: 0;
+	z-index: 60;
+	display: flex;
+	flex-direction: column;
+	background: var(--bg, #000);
+	color: #e6e6e6;
+}
+
+.ts-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 12px;
+	background: #111;
+	border-bottom: 1px solid #2a2a2a;
+}
+
+.ts-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.ts-icon-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 34px;
+	height: 34px;
+	border: none;
+	border-radius: 10px;
+	background: #1d1d1d;
+	color: #e6e6e6;
+}
+
+.ts-error {
+	padding: 6px 12px;
+	font-size: 12px;
+	color: #ff8a80;
+	background: #2a1414;
+}
+
+.ts-screen {
+	flex: 1;
+	overflow: auto;
+	margin: 0;
+	padding: 10px 12px;
+	font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+	font-size: 12px;
+	line-height: 1.45;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+.ts-keys-zone {
+	background: #111;
+	border-top: 1px solid #2a2a2a;
+	padding-bottom: env(safe-area-inset-bottom);
+}
+
+.ts-key-row {
+	display: flex;
+	gap: 6px;
+	padding: 8px 10px 4px;
+	overflow-x: auto;
+}
+
+.ts-key {
+	flex: 0 0 auto;
+	min-width: 40px;
+	height: 34px;
+	padding: 0 10px;
+	border: none;
+	border-radius: 9px;
+	background: #1d1d1d;
+	color: #e6e6e6;
+	font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+	font-size: 13px;
+}
+
+.ts-key--wide {
+	background: #3a1d1d;
+	color: #ff9e94;
+}
+
+.ts-key:disabled,
+.ts-send:disabled {
+	opacity: 0.45;
+}
+
+.ts-input-row {
+	display: flex;
+	gap: 8px;
+	padding: 6px 10px 10px;
+}
+
+.ts-input {
+	flex: 1;
+	min-width: 0;
+	height: 38px;
+	padding: 0 12px;
+	border: 1px solid #2a2a2a;
+	border-radius: 10px;
+	background: #000;
+	color: #e6e6e6;
+	font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+	font-size: 13px;
+}
+
+.ts-send {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 38px;
+	height: 38px;
+	border: none;
+	border-radius: 10px;
+	background: var(--accent, #4f7cff);
+	color: #fff;
+}

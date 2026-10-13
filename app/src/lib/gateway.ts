@@ -288,3 +288,78 @@ export async function rollbackUpdate(id: UpdateComponentId): Promise<boolean> {
 export async function fetchUpdateJob(): Promise<UpdateJob> {
 	return request<UpdateJob>("/api/update/job");
 }
+
+/* ---- terminal (herdr agents) ---- */
+
+export type TerminalResult = { paneId: string; text: string } | { error: "not-herdr-agent" };
+
+/** Terminal pane snapshot. `null` = unknown host; `{error}` = agent is not herdr-managed. */
+export async function getTerminal(instanceId: string): Promise<TerminalResult | null> {
+	try {
+		const data = await request<{ paneId?: unknown; text?: unknown }>(
+			`/api/agents/${encodeURIComponent(instanceId)}/terminal`,
+		);
+		if (typeof data.paneId === "string" && typeof data.text === "string") {
+			return { paneId: data.paneId, text: data.text };
+		}
+		return null;
+	} catch (err) {
+		if (err instanceof GatewayError && err.status === 404) {
+			if (err.message === "not-herdr-agent") return { error: "not-herdr-agent" };
+			return null; // host not found
+		}
+		throw err;
+	}
+}
+
+export async function sendTerminalKeys(instanceId: string, keys: string[]): Promise<void> {
+	await request<{ ok: boolean }>(`/api/agents/${encodeURIComponent(instanceId)}/terminal/keys`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ keys }),
+	});
+}
+
+export async function sendTerminalText(instanceId: string, text: string): Promise<void> {
+	await request<{ ok: boolean }>(`/api/agents/${encodeURIComponent(instanceId)}/terminal/text`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ text }),
+	});
+}
+
+/* ---- project files / git ---- */
+
+export interface ProjectFileEntry {
+	name: string;
+	type: "dir" | "file";
+	size: number | null;
+}
+
+export async function listProjectFiles(path: string): Promise<{ entries: ProjectFileEntry[]; hasGit: boolean }> {
+	const data = await request<{ entries?: unknown; hasGit?: unknown }>(
+		`/api/project/files?path=${encodeURIComponent(path)}`,
+	);
+	const entries: ProjectFileEntry[] = Array.isArray(data.entries)
+		? data.entries.flatMap(item => {
+				if (!item || typeof item !== "object" || !("name" in item) || typeof item.name !== "string") return [];
+				const rec = item as { name: string; type?: unknown; size?: unknown };
+				const type = rec.type === "dir" ? "dir" : "file";
+				const size = typeof rec.size === "number" ? rec.size : null;
+				return [{ name: rec.name, type, size }];
+			})
+		: [];
+	return { entries, hasGit: data.hasGit === true };
+}
+
+export async function projectGit(path: string, mode: "status" | "diff"): Promise<string | null> {
+	try {
+		const data = await request<{ text?: unknown }>(
+			`/api/project/git?path=${encodeURIComponent(path)}&mode=${mode}`,
+		);
+		return typeof data.text === "string" ? data.text : null;
+	} catch (err) {
+		if (err instanceof GatewayError && err.status === 404) return null; // no-git
+		throw err;
+	}
+}

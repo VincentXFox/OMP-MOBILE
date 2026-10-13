@@ -1,11 +1,18 @@
-import type { AgentSnapshot, CollabUiRequest } from "@oh-my-pi/pi-wire";
-import { ArrowDown, ArrowUp, ChevronLeft, ImagePlus, Info, Square, TriangleAlert, X } from "lucide-react";
+import type {
+	AgentSnapshot,
+	CollabUiRequest,
+	SubagentProgressPayload,
+} from "@oh-my-pi/pi-wire";
+import { ArrowDown, ArrowUp, ChevronLeft, ImagePlus, Info, Square, Terminal, TriangleAlert, X } from "lucide-react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { GuestClient, GuestSnapshot } from "../../lib/client";
 import type { HostInfo } from "../../lib/gateway";
-import { stopAgent } from "../../lib/gateway";
+import { getTerminal, stopAgent } from "../../lib/gateway";
+import { cancelSpeech, isTtsEnabled, speakAssistantText } from "../../lib/tts";
 import { useGuestSnapshot } from "../../lib/use-guest";
+import { FilesScreen } from "../files/FilesScreen";
+import { TerminalScreen } from "../terminal/TerminalScreen";
 import { Transcript } from "../transcript/Transcript";
 import "./session.css";
 
@@ -93,13 +100,57 @@ function AgentChip({ agent, onTap }: { agent: AgentSnapshot; onTap: () => void }
 
 function AgentDrawer({
 	agent,
-	lines,
+	client,
+	progress,
 	onClose,
 }: {
 	agent: AgentSnapshot;
-	lines: string[];
+	client: GuestClient;
+	progress: SubagentProgressPayload | undefined;
 	onClose: () => void;
 }): ReactNode {
+	const [transcript, setTranscript] = useState<string | null>(null);
+	const [loadingTranscript, setLoadingTranscript] = useState(false);
+	const [transcriptError, setTranscriptError] = useState<string | null>(null);
+	const [chatDraft, setChatDraft] = useState("");
+	const [confirmingKill, setConfirmingKill] = useState(false);
+	const preRef = useRef<HTMLPreElement | null>(null);
+
+	const loadTranscript = useCallback(async () => {
+		setLoadingTranscript(true);
+		setTranscriptError(null);
+		const result = await client.fetchTranscript(agent.id, 0);
+		if (result === null) setTranscriptError("Не удалось загрузить транскрипт");
+		else if (result.kind === "error") setTranscriptError(result.message);
+		else setTranscript(result.text);
+		setLoadingTranscript(false);
+	}, [client, agent.id]);
+
+	useEffect(() => {
+		const el = preRef.current;
+		if (el) el.scrollTop = el.scrollHeight;
+	}, [transcript]);
+
+	const sendChat = useCallback(() => {
+		const text = chatDraft.trim();
+		if (text.length === 0) return;
+		client.sendAgentCmd("chat", agent.id, text);
+		setChatDraft("");
+	}, [chatDraft, client, agent.id]);
+
+	const kill = useCallback(() => {
+		setConfirmingKill(false);
+		client.sendAgentCmd("kill", agent.id);
+	}, [client, agent.id]);
+
+	const revive = useCallback(() => {
+		client.sendAgentCmd("revive", agent.id);
+	}, [client, agent.id]);
+
+	const liveLine = progress
+		? progress.progress.lastIntent ?? progress.progress.currentTool ?? progress.progress.task
+		: null;
+
 	return (
 		<>
 			<div className="ss-sheet-backdrop" onClick={onClose} />
@@ -112,16 +163,55 @@ function AgentDrawer({
 						<X size={16} />
 					</button>
 				</div>
-				<div className="ss-agent-drawer-body">
-					{lines.length === 0 ? (
-						<div className="ss-agent-line ss-agent-line--empty">Пока нет данных.</div>
+				{liveLine !== null && <div className="ss-agent-live">Сейчас: {liveLine}</div>}
+				{transcript === null ? (
+					<button type="button" className="ss-opt ss-opt--editor-send" disabled={loadingTranscript} onClick={() => void loadTranscript()}>
+						{loadingTranscript ? "Загружаю…" : "Загрузить транскрипт"}
+					</button>
+				) : (
+					<pre ref={preRef} className="ss-agent-transcript">
+						{transcript}
+					</pre>
+				)}
+				{transcriptError != null && <div className="ss-agent-line ss-agent-transcript-error">{transcriptError}</div>}
+				<div className="ss-agent-actions">
+					{confirmingKill ? (
+						<>
+							<span className="ss-agent-line ss-agent-line--empty">Убить агента?</span>
+							<button type="button" className="ss-opt ss-opt--danger" onClick={kill}>
+								Да, убить
+							</button>
+							<button type="button" className="ss-opt ss-opt--editor-cancel" onClick={() => setConfirmingKill(false)}>
+								Отмена
+							</button>
+						</>
 					) : (
-						lines.map((line, i) => (
-							<div key={i} className="ss-agent-line">
-								{line}
-							</div>
-						))
+						<>
+							<button type="button" className="ss-opt ss-opt--danger" onClick={() => setConfirmingKill(true)}>
+								Убить
+							</button>
+							<button type="button" className="ss-opt ss-opt--success" onClick={revive}>
+								Возродить
+							</button>
+						</>
 					)}
+				</div>
+				<div className="ss-agent-chat">
+					<input
+						className="ss-agent-chat-input"
+						type="text"
+						placeholder="Сообщение сабагенту…"
+						value={chatDraft}
+						onChange={e => setChatDraft(e.currentTarget.value)}
+					/>
+					<button
+						type="button"
+						className="ss-opt ss-opt--editor-send"
+						disabled={chatDraft.trim().length === 0}
+						onClick={sendChat}
+					>
+						Чат
+					</button>
 				</div>
 			</div>
 		</>
@@ -199,8 +289,15 @@ function InfoRow(props: { label: string; value: ReactNode; mono?: boolean }): Re
 	);
 }
 
-function InfoSheet(props: { snap: GuestSnapshot; host: HostInfo | undefined; onLeave: () => void; onClose: () => void }): ReactNode {
-	const { snap, host, onLeave, onClose } = props;
+function InfoSheet(props: {
+	snap: GuestSnapshot;
+	host: HostInfo | undefined;
+	onLeave: () => void;
+	onOpenTerminal: () => void;
+	onOpenFiles: () => void;
+	onClose: () => void;
+}): ReactNode {
+	const { snap, host, onLeave, onOpenTerminal, onOpenFiles, onClose } = props;
 	const [confirming, setConfirming] = useState(false);
 	const [stopping, setStopping] = useState(false);
 	const [stopError, setStopError] = useState<string | null>(null);
@@ -243,6 +340,16 @@ function InfoSheet(props: { snap: GuestSnapshot; host: HostInfo | undefined; onL
 				<InfoRow label="Фаза" value={`${PHASE_TEXT[snap.phase]}${state?.isStreaming ? " · отвечает" : ""}`} />
 				{host && <InfoRow label="Запущен" value={`${new Intl.RelativeTimeFormat("ru", { numeric: "auto" }).format(Math.round((host.startedAt - Date.now()) / 60000), "minute")} · ${new Date(host.startedAt).toLocaleString()}`} />}
 				<InfoRow label="Память агента" value="~/.omp/agent" mono />
+				{host && (
+					<button type="button" className="ss-opt ss-opt--accent" onClick={onOpenTerminal}>
+						<Terminal size={16} /> Терминал
+					</button>
+				)}
+				{host && (
+					<button type="button" className="ss-opt ss-opt--accent" onClick={onOpenFiles}>
+						Файлы проекта
+					</button>
+				)}
 				{host && !confirming && (
 					<button type="button" className="ss-opt ss-opt--danger" onClick={() => setConfirming(true)}>
 						Закрыть агента
@@ -354,9 +461,43 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		setImages(prev => prev.filter((_, i) => i !== index));
 	}, []);
 
-	const abort = useCallback(() => client.sendAbort(), [client]);
+	const abort = useCallback(() => {
+		cancelSpeech();
+		client.sendAbort();
+	}, [client]);
 
 	const [infoOpen, setInfoOpen] = useState(false);
+	const [terminalOpen, setTerminalOpen] = useState(false);
+	const [filesOpen, setFilesOpen] = useState(false);
+	const [toast, setToast] = useState<string | null>(null);
+	const toastTimer = useRef<number | null>(null);
+	const showToast = useCallback((message: string): void => {
+		setToast(message);
+		if (toastTimer.current != null) window.clearTimeout(toastTimer.current);
+		toastTimer.current = window.setTimeout(() => setToast(null), 5000);
+	}, []);
+	useEffect(
+		() => () => {
+			if (toastTimer.current != null) window.clearTimeout(toastTimer.current);
+		},
+		[],
+	);
+
+	// Terminal is herdr-only: probe before opening, keep the sheet closed on refusal.
+	const openTerminal = useCallback(async () => {
+		if (!host) return;
+		setInfoOpen(false);
+		try {
+			const result = await getTerminal(host.instanceId);
+			if (result !== null && !("error" in result)) {
+				setTerminalOpen(true);
+				return;
+			}
+			showToast("Терминал доступен только для Herdr-агентов");
+		} catch (err) {
+			showToast(err instanceof Error ? err.message : String(err));
+		}
+	}, [host, showToast]);
 
 	// Locally dismissed uiRequest: the host clears it only after the response
 	// frame round-trips, so hide optimistically to keep the tap feeling instant.
@@ -374,25 +515,34 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 	}, [snap.uiRequest]);
 	const activeRequest = snap.uiRequest !== null && snap.uiRequest.reqId !== dismissedReq ? snap.uiRequest : null;
 
-	const subagents = useMemo(() => snap.agents.filter(a => a.kind === "sub"), [snap.agents]);
+	const subagents = snap.agents.filter(a => a.kind === "sub");
 	const [openAgentId, setOpenAgentId] = useState<string | null>(null);
 	const openAgent = subagents.find(a => a.id === openAgentId) ?? null;
-	const openAgentLines = useMemo(() => {
-		if (!openAgent) return [];
-		const lines: string[] = [];
-		const progress = snap.progress.get(openAgent.id);
-		if (progress) {
-			lines.push(`Задача: ${progress.progress.task}`);
-			if (progress.progress.currentTool) lines.push(`Инструмент: ${progress.progress.currentTool}`);
-			if (progress.progress.lastIntent) lines.push(`Сейчас: ${progress.progress.lastIntent}`);
-			lines.push(
-				`Токены: ${progress.progress.tokens} · Вызовы: ${progress.progress.toolCount} · Шаг ${progress.progress.index}`,
-			);
+	const openAgentProgress = openAgent ? snap.progress.get(openAgent.id) : undefined;
+
+	// TTS: remember the last final assistant text; speak it once when a NEW one lands.
+	const lastSpokenRef = useRef<string | null>(null);
+	const lastAssistantText = (() => {
+		for (let i = snap.entries.length - 1; i >= 0; i--) {
+			const entry = snap.entries[i];
+			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+			const texts: string[] = [];
+			for (const block of entry.message.content) {
+				if (block.type === "text") texts.push(block.text);
+			}
+			return texts.join("\n\n").trim();
 		}
-		const life = snap.lifecycle.get(openAgent.id);
-		if (life) lines.push(`Статус: ${life.status}`);
-		return lines;
-	}, [openAgent, snap.progress, snap.lifecycle]);
+		return null;
+	})();
+	useEffect(() => {
+		if (lastAssistantText === null || busy || snap.stream !== null) return;
+		const spoken = lastSpokenRef.current;
+		lastSpokenRef.current = lastAssistantText;
+		if (spoken === null || spoken === lastAssistantText || !isTtsEnabled()) return;
+		speakAssistantText(lastAssistantText);
+	}, [busy, snap.stream, lastAssistantText]);
+	// Stop speech when leaving the session screen.
+	useEffect(() => cancelSpeech, []);
 
 	const title =
 		snap.state?.sessionName ??
@@ -540,8 +690,36 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 			</div>
 
 			{activeRequest && <ApprovalSheet request={activeRequest} onAnswer={v => answerUi(activeRequest.reqId, v)} />}
-			{openAgent && <AgentDrawer agent={openAgent} lines={openAgentLines} onClose={() => setOpenAgentId(null)} />}
-			{infoOpen && <InfoSheet snap={snap} host={host} onLeave={onLeave} onClose={() => setInfoOpen(false)} />}
+			{openAgent && (
+				<AgentDrawer
+					agent={openAgent}
+					client={client}
+					progress={openAgentProgress}
+					onClose={() => setOpenAgentId(null)}
+				/>
+			)}
+			{infoOpen && (
+				<InfoSheet
+					snap={snap}
+					host={host}
+					onLeave={onLeave}
+					onOpenTerminal={() => void openTerminal()}
+					onOpenFiles={() => {
+						setInfoOpen(false);
+						setFilesOpen(true);
+					}}
+					onClose={() => setInfoOpen(false)}
+				/>
+			)}
+			{terminalOpen && host && (
+				<TerminalScreen
+					instanceId={host.instanceId}
+					label={host.sessionName ?? snap.header?.title ?? "агент"}
+					onBack={() => setTerminalOpen(false)}
+				/>
+			)}
+			{filesOpen && host && <FilesScreen root={host.cwd} onBack={() => setFilesOpen(false)} />}
+			{toast !== null && <div className="ss-toast">{toast}</div>}
 		</div>
 	);
 }

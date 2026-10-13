@@ -9,6 +9,14 @@ import {
 } from "../../lib/gateway";
 import { pushState, subscribePush, unsubscribePush, type PushState } from "../../lib/push";
 import { useThemePreference } from "../../lib/theme";
+import {
+	getTtsRate,
+	isTtsEnabled,
+	setTtsEnabled,
+	setTtsRate,
+	TTS_RATE_MAX,
+	TTS_RATE_MIN,
+} from "../../lib/tts";
 
 const PUSH_LABEL: Record<PushState, string> = {
 	unsupported: "не поддерживается",
@@ -109,6 +117,52 @@ function PushSection(): ReactNode {
 	);
 }
 
+function TtsSection(): ReactNode {
+	const [on, setOn] = useState(isTtsEnabled);
+	const [rate, setRate] = useState(getTtsRate);
+	const [hint, setHint] = useState(false);
+
+	const toggle = (): void => {
+		const next = !on;
+		setOn(next);
+		setTtsEnabled(next);
+		if (next) setHint(true);
+	};
+
+	return (
+		<section className="pk-section">
+			<h2 className="pk-section-title">Озвучка</h2>
+			<div className="pk-section-body">
+				<div className="pk-fieldrow">
+					<span>Озвучивать ответы</span>
+					<span className="pk-muted">{on ? "включено" : "выключено"}</span>
+				</div>
+				<button className="pk-btn" onClick={toggle}>
+					{on ? "Выключить" : "Включить"}
+				</button>
+				{on && hint && <div className="pk-check pk-check--ok">Готово — новые ответы агента будут произноситься голосом системы.</div>}
+				{on && (
+					<label className="pk-field">
+						<span>Темп ({rate.toFixed(2)}×)</span>
+						<input
+							type="range"
+							min={TTS_RATE_MIN}
+							max={TTS_RATE_MAX}
+							step={0.05}
+							value={rate}
+							onInput={e => {
+								const next = Number(e.currentTarget.value);
+								setRate(next);
+								setTtsRate(next);
+							}}
+						/>
+					</label>
+				)}
+			</div>
+		</section>
+	);
+}
+
 function DisplaySection(): ReactNode {
 	const [name, setName] = useState(() => {
 		try {
@@ -164,6 +218,7 @@ export function SettingsScreen(): ReactNode {
 		<div className="pk-list">
 			<ConnectionSection />
 			<PushSection />
+			<TtsSection />
 			<DisplaySection />
 			<section className="pk-section">
 				<h2 className="pk-section-title">О программе</h2>

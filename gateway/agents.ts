@@ -19,7 +19,7 @@ interface HerdrEnvelope {
 // Serialize start flows so each can attribute exactly one new collab host to its own tab.
 let startQueue: Promise<unknown> = Promise.resolve();
 
-async function runHerdr(args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
+export async function runHerdr(args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(["herdr", ...args], { stdout: "pipe", stderr: "pipe" });
   const timer = setTimeout(() => proc.kill(), timeoutMs);
   const { promise, resolve } = Promise.withResolvers<{ code: number; stdout: string; stderr: string }>();
@@ -33,7 +33,7 @@ async function runHerdr(args: string[], timeoutMs: number): Promise<{ code: numb
 }
 
 // herdr CLI prints a JSON envelope {id, result, type}; unwrap `result`, keep plain text as-is.
-function unwrapHerdr(out: { code: number; stdout: string; stderr: string }): { ok: true; result: unknown } | { ok: false; error: string } {
+export function unwrapHerdr(out: { code: number; stdout: string; stderr: string }): { ok: true; result: unknown } | { ok: false; error: string } {
   const text = out.stdout.trim();
   if (out.code !== 0) return { ok: false, error: out.stderr.trim() || text || `exit ${out.code}` };
   try {
