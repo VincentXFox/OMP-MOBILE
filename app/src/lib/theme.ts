@@ -9,10 +9,10 @@ const DARK_SCHEME_QUERY = "(prefers-color-scheme: dark)";
 function readStoredPreference(): ThemePreference {
 	try {
 		const stored = globalThis.localStorage.getItem(STORAGE_KEY);
-		return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+		return stored === "light" || stored === "dark" || stored === "system" ? stored : "dark";
 	} catch {
-		// Private-mode or blocked storage: fall back to following the system.
-		return "system";
+		// Private-mode or blocked storage: default to dark (ChatGPT-style new user).
+		return "dark";
 	}
 }
 
@@ -31,11 +31,18 @@ function emit(): void {
 	for (const listener of listeners) listener();
 }
 
+const THEME_COLOR: Record<SystemTheme, string> = {
+	dark: "#101114",
+	light: "#F7F8FA",
+};
+
 function applyResolvedTheme(): void {
 	resolved = preference === "system" ? getSystemTheme() : preference;
 	if (typeof document !== "undefined") {
 		document.documentElement.dataset.theme = resolved;
 		document.documentElement.style.colorScheme = resolved;
+		// Browser chrome / status bar follows the surface.
+		document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLOR[resolved]);
 	}
 }
 

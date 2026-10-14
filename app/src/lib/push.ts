@@ -2,19 +2,21 @@ import { deletePushSubscription, getVapidPublicKey, savePushSubscription } from 
 
 export type PushState = "unsupported" | "denied" | "subscribed" | "unsubscribed";
 
-function urlBase64ToUint8Array(base64: string): Uint8Array {
+/** base64url VAPID key → ArrayBuffer (BufferSource for pushManager.subscribe). */
+function urlBase64ToArrayBuffer(base64: string): ArrayBuffer {
 	const padding = "=".repeat((4 - (base64.length % 4)) % 4);
 	const b64 = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
 	const raw = atob(b64);
-	const out = new Uint8Array(raw.length);
-	for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+	const out = new ArrayBuffer(raw.length);
+	const bytes = new Uint8Array(out);
+	for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
 	return out;
 }
 
 async function registration(): Promise<ServiceWorkerRegistration | null> {
 	if (!("serviceWorker" in navigator)) return null;
 	try {
-		return await navigator.serviceWorker.getRegistration();
+		return (await navigator.serviceWorker.getRegistration()) ?? null;
 	} catch {
 		return null;
 	}
@@ -43,7 +45,7 @@ export async function subscribePush(): Promise<PushState> {
 		existing ??
 		(await reg.pushManager.subscribe({
 			userVisibleOnly: true,
-			applicationServerKey: urlBase64ToUint8Array(vapidKey),
+			applicationServerKey: urlBase64ToArrayBuffer(vapidKey),
 		}));
 	await savePushSubscription(sub.toJSON());
 	return "subscribed";

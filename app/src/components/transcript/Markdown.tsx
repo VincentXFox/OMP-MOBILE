@@ -73,19 +73,42 @@ const md = new Marked({
 			const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
 			return `<a href="${escapeHtml(url)}"${titleAttr} target="_blank" rel="noopener">${inner}</a>`;
 		},
-		// Tables render inside a horizontally scrollable wrapper so wide tables
-		// never stretch the transcript column.
-		table(token: Tokens.Table): string {
-			const head = `<thead><tr>${token.header.map(cell => `<th>${Parser.parseInline(cell.tokens, md.defaults)}</th>`).join("")}</tr></thead>`;
-			const body = `<tbody>${token.rows
-				.map(cells => `<tr>${cells.map(cell => `<td>${Parser.parseInline(cell.tokens, md.defaults)}</td>`).join("")}</tr>`)
-				.join("")}</tbody>`;
-			return `<div class="tr-tablewrap"><table>${head}${body}</table></div>`;
+		// Block code: wrapper with a language label and a copy button. The button
+		// carries the raw text in data-code; click handling is delegated on the
+		// container in {@link Markdown}. Inline code keeps the default codespan.
+		code({ text, lang, escaped }: Tokens.Code): string {
+			const label = lang ? escapeHtml(lang) : "код";
+			const body = escaped ? text : escapeHtml(text);
+			return `<div class="tr-code"><div class="tr-code-bar"><span class="tr-code-lang">${label}</span><button type="button" class="tr-code-copy" data-code="${encodeURIComponent(text)}">Копировать</button></div><pre><code class="language-${label}">${body}</code></pre></div>`;
 		},
 	},
 	breaks: true,
 });
 md.use(mathExtension);
+// ВАЖНО: `table` НЕ регистрируем в constructor-renderer — в форке marked
+// (pi-utils) Parser.parse вызывает this.renderer.table(token) напрямую, мимо
+// this.call(), и пользовательский оверрайд молча игнорируется. Extension
+// renderers (extensions.renderers[type]) проверяются ДО switch — этот путь
+// работает. См. node_modules/@oh-my-pi/pi-utils/src/marked/core.ts:1458.
+md.use({
+	extensions: [
+		{
+			// ≤4 колонок — переносим текст в ячейках (всё видно без свайпа),
+			// шире — горизонтальный скролл внутри обёртки.
+			name: "table",
+			renderer(this: { parser: unknown }, token: Tokens.Generic): string {
+				const t = token as Tokens.Table;
+				const cols = t.header.length;
+				const mod = cols <= 4 ? " tr-tablewrap--wrap" : " tr-tablewrap--scroll";
+				const head = `<thead><tr>${t.header.map(cell => `<th>${Parser.parseInline(cell.tokens, md.defaults)}</th>`).join("")}</tr></thead>`;
+				const body = `<tbody>${t.rows
+					.map(cells => `<tr>${cells.map(cell => `<td>${Parser.parseInline(cell.tokens, md.defaults)}</td>`).join("")}</tr>`)
+					.join("")}</tbody>`;
+				return `<div class="tr-tablewrap${mod}"><table>${head}${body}</table></div>`;
+			},
+		},
+	],
+});
 
 function renderMarkdown(text: string): string {
 	try {
@@ -95,9 +118,43 @@ function renderMarkdown(text: string): string {
 	}
 }
 
+/**
+ * Click-to-copy for block-code copy buttons. Rendered HTML is a string, so the
+ * handler is delegated on the container; fallback mirrors CopyButton.
+ */
+function handleCodeCopy(container: HTMLElement, event: Event): void {
+	const button = (event.target as HTMLElement | null)?.closest?.(".tr-code-copy");
+	if (!(button instanceof HTMLElement)) return;
+	const raw = button.dataset.code;
+	if (raw === undefined) return;
+	const text = decodeURIComponent(raw);
+	const finish = (): void => {
+		if (button.classList.contains("tr-code-copy--done")) return;
+		button.classList.add("tr-code-copy--done");
+		button.textContent = "Скопировано";
+		window.setTimeout(() => {
+			button.classList.remove("tr-code-copy--done");
+			button.textContent = "Копировать";
+		}, 1200);
+	};
+	if (navigator.clipboard?.writeText !== undefined) {
+		navigator.clipboard.writeText(text).then(finish, () => {});
+		return;
+	}
+	const ta = document.createElement("textarea");
+	ta.value = text;
+	ta.style.position = "fixed";
+	ta.style.opacity = "0";
+	document.body.append(ta);
+	ta.select();
+	document.execCommand("copy");
+	ta.remove();
+	finish();
+}
+
 export const Markdown = memo(function Markdown({ text }: { text: string }): ReactNode {
 	const html = useMemo(() => renderMarkdown(text), [text]);
-	return <div className="tr-md" dangerouslySetInnerHTML={{ __html: html }} />;
+	return <div className="tr-md" dangerouslySetInnerHTML={{ __html: html }} onClick={e => handleCodeCopy(e.currentTarget, e.nativeEvent)} />;
 });
 
 /**
@@ -209,5 +266,5 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({ text }: { tex
 		prefixRef.current = rendered.prefix;
 		return rendered.html;
 	}, [text]);
-	return <div className="tr-md" dangerouslySetInnerHTML={{ __html: html }} />;
+	return <div className="tr-md" dangerouslySetInnerHTML={{ __html: html }} onClick={e => handleCodeCopy(e.currentTarget, e.nativeEvent)} />;
 });

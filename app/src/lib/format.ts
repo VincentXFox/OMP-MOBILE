@@ -40,11 +40,13 @@ export function fmtDuration(ms: number): string {
 	return `${h}h${String(min % 60).padStart(2, "0")}m`;
 }
 
-/** «только что», «5 мин назад», «2 ч назад», «3 дн назад». Input: epoch ms. */
+/** «только что», «25 секунд назад», «5 мин назад», «2 ч назад», «3 дн назад». Input: epoch ms. */
 export function relTime(tsMs: number): string {
 	if (!Number.isFinite(tsMs)) return "";
 	const delta = Date.now() - tsMs;
-	if (delta < 60_000) return "только что";
+	const sec = Math.floor(delta / 1000);
+	if (sec < 10) return "только что";
+	if (delta < 60_000) return `${sec} ${pluralRu(sec, "секунду", "секунды", "секунд")} назад`;
 	const min = Math.floor(delta / 60_000);
 	if (min < 60) return `${min} мин назад`;
 	const h = Math.floor(min / 60);

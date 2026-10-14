@@ -4,9 +4,10 @@
 	height: 100%;
 	overflow-y: auto;
 	overflow-x: hidden;
+	overscroll-behavior: contain;
 	padding: 24px 24px 16px;
 	font-family: var(--font-ui);
-	font-size: 14px;
+	font-size: 1rem; /* спека: основной текст 16px */
 	line-height: 1.6;
 	color: var(--fg);
 }
@@ -15,36 +16,26 @@
 	padding: 48px 0;
 	text-align: center;
 	color: var(--fg-faint);
-	font-size: 13px;
+	font-size: 0.8125rem;
 }
 
 /* ---- rows ---- */
 
 .tr-row {
-	display: grid;
-	grid-template-columns: 64px minmax(0, 1fr);
-	gap: 0 16px;
-	padding: 7px 0;
-	animation: rise 320ms var(--ease-out) backwards;
+	display: flex;
+	flex-direction: column;
+	padding: 6px 0;
 }
 
-.tr-gutter {
-	padding-top: 3px;
-	text-align: right;
-	font-family: var(--font-mono);
-	font-size: 11.5px;
-	font-weight: 500;
-	color: var(--fg-faint);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	user-select: none;
+/* Автора различаем выравниванием и фоном пузыря; ярлыки не нужны.
+ * Спека: сообщение пользователя — мягкая подложка, ответ агента — на поверхности. */
+
+/* Rise only for freshly streamed tail rows; batch loads mount without animation. */
+.tr-row--append {
+	animation: rise 160ms var(--ease-out);
 }
 
-.tr-row--user .tr-gutter {
-	padding-top: 12px;
-	color: var(--fg-muted);
-}
+
 
 /* User turns: a raised card so prompts stand apart from agent prose. */
 .tr-row--user .tr-body {
@@ -97,11 +88,11 @@
 .tr-badge {
 	display: inline-block;
 	padding: 0 7px;
-	border-radius: 999px;
+	border-radius: 8px;
 	background: var(--accent-muted);
 	color: var(--accent);
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: 0.6875rem;
 	line-height: 18px;
 	text-transform: none;
 	letter-spacing: 0;
@@ -113,11 +104,11 @@
 	height: 20px;
 	padding: 0 8px;
 	border: 1px solid var(--border);
-	border-radius: 999px;
+	border-radius: 8px;
 	background: var(--bg-raised);
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: 0.6875rem;
 	white-space: nowrap;
 }
 
@@ -143,34 +134,35 @@
 .tr-stop-msg {
 	color: var(--err);
 	font-family: var(--font-mono);
-	font-size: 11.5px;
+	font-size: 0.8125rem;
 	white-space: pre-wrap;
 	word-break: break-word;
 }
 
 /* ---- thinking ---- */
 
-/* Muted inset panel: clearly secondary to the answer beside it. */
+/* Thin collapsible divider row — NOT a card: no surface, just a tap row. */
 .tr-think {
 	align-self: stretch;
-	padding: 6px 10px;
-	background: var(--bg-inset);
-	border: 1px solid var(--hairline);
-	border-radius: var(--radius);
 }
 
 .tr-think-head {
-	display: inline-flex;
+	display: flex;
 	align-items: center;
 	gap: 4px;
-	padding: 0;
+	width: 100%;
+	min-height: 44px;
+	padding: 0 2px;
 	border: none;
 	background: none;
 	cursor: pointer;
 	color: var(--fg-faint);
 	font-family: var(--font-ui);
-	font-size: 12px;
+	font-size: 0.8125rem;
 	font-style: italic;
+	text-align: left;
+	touch-action: manipulation;
+	-webkit-tap-highlight-color: transparent;
 }
 
 .tr-think-head:hover {
@@ -179,12 +171,12 @@
 
 .tr-think-body {
 	align-self: stretch;
-	margin: 2px 0;
-	padding: 2px 0 2px 10px;
+	margin: 0;
+	padding: 2px 0 8px 12px;
 	border-left: 2px solid var(--border);
 	color: var(--fg-muted);
 	font-style: italic;
-	font-size: 12px;
+	font-size: 0.75rem;
 	white-space: pre-wrap;
 	word-break: break-word;
 }
@@ -207,7 +199,7 @@
 	gap: 10px;
 	margin: 16px 0;
 	color: var(--fg-faint);
-	font-size: 12px;
+	font-size: 0.75rem;
 	user-select: none;
 }
 
@@ -222,7 +214,7 @@
 .tr-marker {
 	color: var(--fg-faint);
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: 0.6875rem;
 }
 
 .tr-earlier {
@@ -231,10 +223,10 @@
 	height: 28px;
 	padding: 0 14px;
 	border: 1px solid var(--border-strong);
-	border-radius: 999px;
+	border-radius: var(--radius-btn, 12px);
 	background: var(--bg-raised);
 	color: var(--fg-muted);
-	font-size: 12px;
+	font-size: 0.75rem;
 	cursor: pointer;
 }
 
@@ -245,20 +237,19 @@
 
 .tr-shimmer {
 	color: var(--fg-muted);
-	font-size: 12.5px;
-	animation: tr-pulse 1.4s ease-in-out infinite;
+	font-size: 0.8125rem;
+	opacity: 0.7;
 }
 
 /* ---- tool cards ----
  * Cards themselves are rendered by src/tool-render (tv-* namespace);
- * only host-level layout lives here. */
+ * only host-level layout lives here. The tool row is ONE surface:
+ * the tv-card border is it — no raised background layered on top. */
 
 .tr-body > .tv-card {
 	align-self: stretch;
 	max-width: 100%;
 	min-width: 0;
-	background: var(--bg-raised);
-	border-radius: var(--radius);
 }
 
 /* ---- markdown ---- */
@@ -301,21 +292,21 @@
 }
 
 .tr-md h1 {
-	font-size: 18px;
+	font-size: 1.125rem;
 }
 
 .tr-md h2 {
-	font-size: 16px;
+	font-size: 1rem;
 }
 
 .tr-md h3 {
-	font-size: 15px;
+	font-size: 0.9375rem;
 }
 
 .tr-md h4,
 .tr-md h5,
 .tr-md h6 {
-	font-size: 13px;
+	font-size: 0.8125rem;
 }
 
 .tr-md ul,
@@ -342,19 +333,64 @@
 .tr-md code {
 	padding: 2px 8px;
 	border: 1px solid var(--hairline);
-	border-radius: var(--radius-pill);
+	border-radius: 8px;
 	background: var(--surface2);
 	font-family: var(--font-mono);
 	font-size: 0.86em;
 }
 
-.tr-md pre {
+/* Block code: wrapper carries the frame; the bar holds a language label and a
+ * copy button (delegated click handler in Markdown.tsx). */
+.tr-code {
 	margin: 10px 0;
+	overflow: hidden;
+	border: 1px solid var(--hairline);
+	border-radius: 12px;
+	background: var(--bg-inset);
+}
+
+.tr-code-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 0 4px 0 12px;
+	border-bottom: 1px solid var(--hairline);
+	background: var(--surface2);
+}
+
+.tr-code-lang {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+}
+
+.tr-code-copy {
+	min-width: 32px;
+	min-height: 32px;
+	padding: 0 10px;
+	border: 0;
+	background: none;
+	font-size: 12px;
+	color: var(--fg-muted);
+	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.tr-code-copy:active,
+.tr-code-copy--done {
+	color: var(--accent);
+}
+
+.tr-md .tr-code pre {
+	margin: 0;
 	padding: 12px;
 	overflow-x: auto;
-	border: 1px solid var(--hairline);
-	border-radius: var(--radius);
-	background: var(--bg-inset);
+	border: 0;
+	border-radius: 0;
+	background: none;
 }
 
 .tr-md pre code {
@@ -362,7 +398,7 @@
 	border: 0;
 	border-radius: 0;
 	background: none;
-	font-size: 12px;
+	font-size: 0.75rem;
 	line-height: 1.5;
 }
 
@@ -376,12 +412,37 @@
 .tr-md table {
 	margin: 0;
 	border-collapse: collapse;
-	font-size: 13px;
+	font-size: 0.875rem;
 	width: max-content;
 	min-width: 100%;
 }
 
-/* Table wrapper: scrollable, hairline border, rounded — emitted by the table renderer. */
+/* Узкая таблица (≤4 колонок): не скроллим — переносим текст в ячейках,
+   вся таблица видна без горизонтального свайпа. Двойной класс — чтобы
+   перебить и базу ниже, и .ss-transcript .tr-tablewrap в session.css. */
+.tr-tablewrap--wrap,
+.ss-transcript .tr-tablewrap--wrap {
+	overflow-x: visible;
+	max-width: 100%;
+	mask-image: none;
+	-webkit-mask-image: none;
+}
+
+.tr-tablewrap--wrap table,
+.ss-transcript .tr-tablewrap--wrap table {
+	width: 100%;
+	min-width: 0;
+}
+
+.tr-tablewrap--wrap th,
+.tr-tablewrap--wrap td {
+	overflow-wrap: anywhere;
+	vertical-align: top;
+}
+
+/* Table wrapper: scrollable, hairline border, rounded — emitted by the table renderer.
+   Right-edge mask hints that wide tables scroll horizontally (fades under the
+   last cell, the wrapper border itself stays crisp because the mask is inset). */
 .tr-tablewrap {
 	margin: 10px 0;
 	max-width: 100%;
@@ -389,6 +450,8 @@
 	border: 1px solid var(--hairline);
 	border-radius: var(--radius);
 	scrollbar-width: thin;
+	mask-image: linear-gradient(to right, #000 calc(100% - 20px), rgba(0, 0, 0, 0.35) calc(100% - 6px), rgba(0, 0, 0, 0.12));
+	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), rgba(0, 0, 0, 0.35) calc(100% - 6px), rgba(0, 0, 0, 0.12));
 }
 
 .tr-md th,
@@ -425,6 +488,7 @@
 	max-width: 100%;
 	max-height: 320px;
 	border-radius: var(--radius-sm);
+	cursor: zoom-in;
 }
 
 /* Math is native MathML (see transcript/math.ts): it must opt out of the
@@ -446,7 +510,7 @@
 
 .tr-root--compact {
 	padding: 12px 14px 16px;
-	font-size: 13px;
+	font-size: 0.8125rem;
 }
 
 .tr-root--compact .tr-row {
@@ -455,8 +519,9 @@
 	padding: 3px 0;
 }
 
-.tr-root--compact .tr-gutter {
-	font-size: 10.5px;
+
+.tr-root--compact .tv-state-word {
+	display: none;
 }
 
 .tr-root--compact .tv-pre {
@@ -466,23 +531,13 @@
 
 /* ---- animation ---- */
 
-@keyframes tr-pulse {
-	0%,
-	100% {
-		opacity: 0.45;
-	}
-	50% {
-		opacity: 1;
-	}
-}
-
 @media (prefers-reduced-motion: reduce) {
-	.tr-row {
+	.tr-row,
+	.tr-row--append {
 		animation: none;
 	}
 	.tr-shimmer {
 		animation: none;
-		opacity: 0.7;
 	}
 	.tr-chev {
 		transition: none;
@@ -500,14 +555,137 @@
 	.tr-root {
 		padding: 16px 14px 12px;
 	}
-	.tr-gutter,
-	.tr-row--user .tr-gutter {
-		text-align: left;
-		padding-top: 0;
-		font-size: 11px;
-		margin-bottom: 2px;
+}
+
+/* Подпись гостя над коллаб-сообщением (вместо ярлыка в гуттере). */
+.tr-collab-from {
+	margin: 0 0 3px 2px;
+	font-size: var(--text-caption);
+	font-weight: 500;
+	color: var(--accent);
+}
+
+/* ---- tool groups · progressive disclosure (серии tool-карточек) ---- */
+
+.tr-group {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 44px;
+	padding: 0 12px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: var(--surface2);
+	color: var(--fg-muted);
+	font-family: var(--font-ui);
+	font-size: 0.8125rem;
+	text-align: left;
+	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.tr-group:active {
+	background: color-mix(in oklch, var(--surface2) 90%, var(--accent));
+}
+
+.tr-group-ico {
+	flex: none;
+	color: var(--fg-faint);
+}
+
+.tr-group-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tr-group .tr-chev {
+	flex: none;
+	color: var(--fg-faint);
+	transition: transform 160ms var(--ease-out);
+}
+
+.tr-group[aria-expanded="true"] .tr-chev {
+	transform: rotate(90deg);
+}
+
+/* Кнопка «Свернуть» под раскрытой серией. */
+.tr-group-collapse {
+	align-self: flex-start;
+	margin: 2px 0 0;
+	padding: 5px 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: transparent;
+	color: var(--fg-muted);
+	font-family: var(--font-ui);
+	font-size: 0.75rem;
+	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.tr-group .tr-chev {
+		transition: none;
 	}
-	.tr-gutter:empty {
-		display: none;
-	}
+}
+
+/* ---- просмотр картинок ленты (ImageViewer) ---- */
+.tr-msg-img {
+	cursor: zoom-in;
+}
+
+.tr-imgv {
+	position: fixed;
+	inset: 0;
+	z-index: 1000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(6, 7, 9, 0.92);
+	-webkit-tap-highlight-color: transparent;
+}
+
+.tr-imgv-img {
+	max-width: calc(100vw - 24px);
+	max-height: calc(100vh - 140px);
+	object-fit: contain;
+	border-radius: var(--radius-md);
+}
+
+.tr-imgv-close {
+	position: absolute;
+	top: max(10px, env(safe-area-inset-top));
+	right: 12px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	border: none;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.08);
+	color: #fff;
+}
+
+.tr-imgv-download {
+	position: absolute;
+	bottom: max(16px, env(safe-area-inset-bottom));
+	left: 50%;
+	transform: translateX(-50%);
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 48px;
+	padding: 0 24px;
+	border: none;
+	border-radius: 24px;
+	background: var(--accent);
+	color: #fff;
+	font-size: 0.9375rem;
+	font-weight: 600;
+	text-decoration: none;
 }

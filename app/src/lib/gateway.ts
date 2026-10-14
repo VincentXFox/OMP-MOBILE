@@ -4,6 +4,8 @@ export interface HostInfo {
 	pid: number;
 	sessionId: string;
 	sessionName: string | null;
+	/** Явное имя, заданное пользователем (кириллица, живёт по sessionId). */
+	displayName: string | null;
 	cwd: string;
 	model: { provider: string; id: string };
 	startedAt: number;
@@ -40,6 +42,18 @@ export function getToken(): string {
 	} catch {
 		return "";
 	}
+}
+
+/** Кладёт картинку на шлюз для видимости в ленте; урл секретный (UUID), без Bearer. */
+export async function uploadAttachment(bytes: Uint8Array, mimeType: string): Promise<string> {
+	const res = await fetch(`${getGatewayBase()}/api/attach`, {
+		method: "POST",
+		headers: { authorization: `Bearer ${getToken()}`, "content-type": mimeType },
+		body: bytes as BlobPart,
+	});
+	const data = (await res.json()) as { url?: string; error?: string };
+	if (!res.ok || !data.url) throw new Error(data.error ?? `шлюз вернул ${res.status}`);
+	return data.url;
 }
 
 export function setToken(v: string): void {
@@ -94,9 +108,46 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	return (await res.json()) as T;
 }
 
+/** Speech-to-text: raw webm/opus bytes → распознанный текст. 400 = >10 МБ; 502 = STT недоступен. */
+export async function transcribeAudio(blob: Blob, signal?: AbortSignal): Promise<string> {
+	const data = await request<{ ok?: boolean; text?: unknown; error?: unknown }>("/api/stt", {
+		method: "POST",
+		headers: { "Content-Type": blob.type || "audio/webm" },
+		body: blob,
+		signal,
+	});
+	if (typeof data.text === "string") return data.text;
+	throw new GatewayError(
+		502,
+		typeof data.error === "string" ? data.error : "STT вернул пустой ответ",
+	);
+}
+
 export async function fetchHosts(signal?: AbortSignal): Promise<HostInfo[]> {
 	const data = await request<{ hosts: HostInfo[] }>("/api/hosts", { signal });
 	return Array.isArray(data.hosts) ? data.hosts : [];
+}
+
+/** Переименовать herdr-агента (видно в списках приложения). */
+export function renameAgent(instanceId: string, name: string): Promise<void> {
+	return request<void>(`/api/agents/${encodeURIComponent(instanceId)}/rename`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ name }),
+	});
+}
+
+/* ---- локальные переопределения имён агентов (клиентский кэш) ---- */
+
+const nameOverrides = new Map<string, string>();
+
+export function nameOverride(instanceId: string): string | undefined {
+	return nameOverrides.get(instanceId);
+}
+
+export function setNameOverride(instanceId: string, name: string): void {
+	if (name.trim().length === 0) nameOverrides.delete(instanceId);
+	else nameOverrides.set(instanceId, name);
 }
 
 /* ---- agent memory (mnemopi banks) ---- */
@@ -141,9 +192,41 @@ export interface SessionSummary {
 	projectSlug: string;
 	cwd: string | null;
 	title: string | null;
+	titleSource: string | null;
+	/** Родительская сессия — форк/сиблинг после сбоя указывает на корень. */
+	parentId: string | null;
+	/** Первый пользовательский текст — кириллический предпросмотр без title. */
+	preview: string | null;
+	/** Время создания из имени файла (mtime прыгает при каждом resume). */
+	createdTs: number;
 	status: SessionStatus;
 	modified: number;
 	size: number;
+}
+
+/** Переименовать сессию кириллицей: title-слот omp + постоянное имя. */
+export async function renameSession(path: string, title: string): Promise<{ ok: true; title: string } | { ok: false; error: string }> {
+	try {
+		const data = await request<{ ok?: boolean; title?: unknown; error?: unknown }>("/api/sessions/rename", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ path, title }),
+		});
+		if (data.ok === true && typeof data.title === "string") return { ok: true, title: data.title };
+		return { ok: false, error: typeof data.error === "string" ? data.error : "Некорректный ответ шлюза" };
+	} catch (err) {
+		return { ok: false, error: err instanceof Error ? err.message : String(err) };
+	}
+}
+
+/** Старый instanceId → живой после автоворестора (null = сессия ещё мертва). */
+export async function remapSession(instanceId: string, signal?: AbortSignal): Promise<string | null> {
+	try {
+		const data = await request<{ instanceId?: unknown }>(`/api/sessions/remap?instanceId=${encodeURIComponent(instanceId)}`, { signal });
+		return typeof data.instanceId === "string" ? data.instanceId : null;
+	} catch {
+		return null;
+	}
 }
 
 export async function fetchSessions(signal?: AbortSignal): Promise<SessionSummary[]> {
@@ -153,12 +236,14 @@ export async function fetchSessions(signal?: AbortSignal): Promise<SessionSummar
 
 export type AgentResumeResult = { ok: true; instanceId: string } | { ok: false; error: string };
 
-export async function resumeSession(cwd: string, session: string, model?: string, label?: string): Promise<AgentResumeResult> {
+export type ResumeMode = "resume" | "restore";
+
+export async function resumeSession(cwd: string, session: string, opts: { model?: string; label?: string; mode?: ResumeMode } = {}): Promise<AgentResumeResult> {
 	try {
 		const data = await request<{ ok?: boolean; instanceId?: unknown; error?: unknown }>("/api/agents/resume", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ cwd, session, model, label }),
+			body: JSON.stringify({ cwd, session, model: opts.model, label: opts.label, mode: opts.mode }),
 		});
 		if (typeof data.instanceId === "string") return { ok: true, instanceId: data.instanceId };
 		return { ok: false, error: typeof data.error === "string" ? data.error : "Некорректный ответ шлюза" };
@@ -193,7 +278,7 @@ export async function getVapidPublicKey(): Promise<string> {
 	return data.publicKey;
 }
 
-export async function savePushSubscription(sub: unknown): Promise<void> {
+export async function savePushSubscription(sub: Record<string, unknown> | PushSubscriptionJSON): Promise<void> {
 	await request<{ ok: boolean }>("/api/push/subscribe", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -518,4 +603,12 @@ export async function projectGit(path: string, mode: "status" | "diff"): Promise
 		if (err instanceof GatewayError && err.status === 404) return null; // no-git
 		throw err;
 	}
+}
+
+/** Прочитать текстовый файл из проекта (для прикрепления к сообщению). */
+export async function readProjectFile(path: string, name: string): Promise<string> {
+	const data = await request<{ content?: unknown }>(
+		`/api/project/file?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`,
+	);
+	return typeof data.content === "string" ? data.content : "";
 }
