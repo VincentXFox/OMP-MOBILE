@@ -1,6 +1,7 @@
 import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { listHosts } from "./hosts.ts";
+import { resolveBin } from "./bins.ts";
 
 const POCKET_WORKSPACE_LABEL = "pocket";
 
@@ -32,7 +33,7 @@ function recordStarted(instanceId: string): void {
 		// best-effort bookkeeping; stop still reachable via explicit force
 	}
 }
-const REGISTER_TIMEOUT_MS = 10_000;
+const REGISTER_TIMEOUT_MS = 45_000;
 const REGISTER_POLL_MS = 1_000;
 const STOP_POLL_MS = 500;
 
@@ -49,7 +50,18 @@ interface HerdrEnvelope {
 let startQueue: Promise<unknown> = Promise.resolve();
 
 export async function runHerdr(args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(["herdr", ...args], { stdout: "pipe", stderr: "pipe" });
+  let herdrBin: string;
+  try {
+    herdrBin = await resolveBin("herdr");
+  } catch (err) {
+    throw new Error(`herdr недоступен: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
+  try {
+    proc = Bun.spawn([herdrBin, ...args], { stdout: "pipe", stderr: "pipe" });
+  } catch (err) {
+    throw new Error(`herdr недоступен: ${err instanceof Error ? err.message : String(err)}`);
+  }
   const timer = setTimeout(() => proc.kill(), timeoutMs);
   const { promise, resolve } = Promise.withResolvers<{ code: number; stdout: string; stderr: string }>();
   void Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]).then(
@@ -74,9 +86,32 @@ export function unwrapHerdr(out: { code: number; stdout: string; stderr: string 
   }
 }
 
+const RU_TRANSLIT: Record<string, string> = {
+	а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
+	й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t",
+	у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "",
+	э: "e", ю: "yu", я: "ya",
+};
+
+/** herdr принимает имена [a-z0-9_-]{1,32}; кириллицу и пробелы превращаем в слаг. */
 function sanitizeAgentName(label: string): string {
-  const cleaned = label.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-  return cleaned === "" ? "agent" : cleaned;
+	const lowered = label.toLowerCase().replace(/[а-яё]/g, (ch) => RU_TRANSLIT[ch] ?? "-");
+	const slug = lowered
+		.replace(/[^a-z0-9_-]+/g, "-")
+		.replace(/-{2,}/g, "-")
+		.replace(/^[-_]+/, "")
+		.slice(0, 32)
+		.replace(/[-_]+$/, "");
+	if (slug.length === 0 || !/^[a-z]/.test(slug)) return `agent-${slug.replace(/^[^a-z0-9]+/, "") || "x"}`.slice(0, 32);
+	return slug;
+}
+
+/** Русские формулировки для типовых отказов herdr. */
+function ruAgentStartError(raw: string): string {
+	if (/agent_name_taken/i.test(raw)) return "Имя агента уже занято — придумай другое";
+	if (/invalid_agent_name/i.test(raw)) return "Имя агента: только латиница, цифры, «-» и «_»";
+	if (/server_not_running/i.test(raw)) return "herdr не запущен — запусти его на мини-ПК";
+	return `Не удалось запустить агента: ${raw.slice(0, 160)}`;
 }
 
 function findWorkspaceId(result: unknown): string | null {
@@ -104,16 +139,22 @@ async function resolvePocketWorkspace(): Promise<string> {
   throw new Error("herdr workspace create returned no workspace_id");
 }
 
-async function waitForNewHost(cwd: string, knownIds: ReadonlySet<string>, timeoutMs: number): Promise<string | null> {
+async function waitForNewHost(
+  cwd: string,
+  knownIds: ReadonlySet<string>,
+  timeoutMs: number,
+): Promise<{ instanceId: string | null; lastPollError: string | null }> {
   const deadline = Date.now() + timeoutMs;
+  let lastPollError: string | null = null;
   for (;;) {
     try {
       const fresh = (await listHosts()).hosts.find((h) => h.cwd === cwd && !knownIds.has(h.instanceId));
-      if (fresh) return fresh.instanceId;
-    } catch {
-      // registry poll failure is retried until the deadline
+      if (fresh) return { instanceId: fresh.instanceId, lastPollError: null };
+    } catch (err) {
+      // реестр мог быть недоступен — запоминаем последнюю ошибку для финального сообщения
+      lastPollError = err instanceof Error ? err.message : String(err);
     }
-    if (Date.now() >= deadline) return null;
+    if (Date.now() >= deadline) return { instanceId: null, lastPollError };
     await Bun.sleep(REGISTER_POLL_MS);
   }
 }
@@ -148,7 +189,22 @@ async function launchAgentOnce(
   if (!cwdOk) return { kind: "bad_cwd", error: `cwd does not exist: ${cwd}` };
 
   const displayLabel = label?.trim() || basename(cwd);
-  const name = sanitizeAgentName(displayLabel);
+  // herdr требует уникальные имена: занятые получаем из списка и суффиксируем.
+  const takenNames = new Set<string>();
+  const agentList = unwrapHerdr(await runHerdr(["agent", "list"], 10_000));
+  if (agentList.ok && agentList.result !== null && typeof agentList.result === "object" && "agents" in agentList.result) {
+    const agents = agentList.result.agents;
+    if (Array.isArray(agents)) {
+      for (const entry of agents) {
+        if (entry !== null && typeof entry === "object" && "name" in entry && typeof entry.name === "string") {
+          takenNames.add(entry.name);
+        }
+      }
+    }
+  }
+  const baseName = sanitizeAgentName(displayLabel);
+  let name = baseName;
+  for (let i = 2; takenNames.has(name) && i < 10; i++) name = `${baseName}-${i}`;
   const before = await listHosts();
 
   const wsId = await resolvePocketWorkspace();
@@ -159,19 +215,36 @@ async function launchAgentOnce(
   if (!paneId) return { kind: "failed", error: "herdr tab create returned no pane_id" };
 
   const startArgs = ["agent", "start", name, "--kind", "omp", "--pane", paneId];
-  const passthrough = [...(model ? ["--model", model] : []), ...ompArgs];
+  // omp сам уходит во временный каталог при старте в ~ (registered cwd != cwd ->
+  // waitForNewHost не находит хост), поэтому рабочий каталог задаём явно
+  const passthrough = ["--cwd", cwd, "--allow-home", ...(model ? ["--model", model] : []), ...ompArgs];
   if (passthrough.length > 0) startArgs.push("--", ...passthrough);
   const started = unwrapHerdr(await runHerdr(startArgs, 60_000));
   if (!started.ok) {
     await runHerdr(["pane", "close", paneId], 5000);
-    return { kind: "failed", error: `herdr agent start failed: ${started.error}` };
+    return { kind: "failed", error: ruAgentStartError(started.error) };
   }
 
   const knownIds = new Set(before.hosts.map((h) => h.instanceId));
-  const instanceId = await waitForNewHost(cwd, knownIds, REGISTER_TIMEOUT_MS);
+  const { instanceId, lastPollError } = await waitForNewHost(cwd, knownIds, REGISTER_TIMEOUT_MS);
   if (!instanceId) {
+    // Панель может держать живого агента, который просто не успел/не смог
+    // зарегистрироваться — перед закрытием проверяем её состояние.
+    let paneAlive = false;
+    try {
+      const pane = await runHerdr(["pane", "get", paneId], 5000);
+      paneAlive = pane.code === 0;
+    } catch {
+      paneAlive = false;
+    }
+    const error = lastPollError
+      ? `реестр недоступен: ${lastPollError}`
+      : `агент не зарегистрировался за 45 с`;
+    if (paneAlive) {
+      return { kind: "failed", error: `агент запущен, но не зарегистрировался в collab — проверьте список агентов (${error})` };
+    }
     await runHerdr(["pane", "close", paneId], 5000);
-    return { kind: "failed", error: "agent started but did not join the collab registry within 10s" };
+    return { kind: "failed", error: `агент не запустился — панель закрыта (${error})` };
   }
   recordStarted(instanceId);
   return { kind: "started", instanceId, note: `agent ${name} started in ${cwd}` };
@@ -187,12 +260,17 @@ export function startAgent(cwd: string, model: string | undefined, label: string
   return enqueueLaunch(() => launchAgentOnce(cwd, model, label, []));
 }
 
-/** Resume a persisted session jsonl in a fresh herdr pane (`omp --resume <path>`). */
+export type ResumeMode = "resume" | "restore";
+
+/** Resume a persisted session jsonl in a fresh herdr pane. `restore` uses
+ * `omp --restore`: continues the interrupted turn and re-runs the subagents
+ * the crashed process left behind — the power-loss recovery path. */
 export function resumeAgent(
   cwd: string,
   sessionPath: string,
   model: string | undefined,
   label: string | undefined,
+  mode: ResumeMode = "resume",
 ): Promise<StartOutcome> {
   let exists = false;
   try {
@@ -202,7 +280,8 @@ export function resumeAgent(
   }
   if (!exists) return Promise.resolve({ kind: "bad_cwd", error: `session file not found: ${sessionPath}` });
   const fallbackLabel = `resume-${basename(sessionPath).replace(/\.jsonl$/, "").slice(-18)}`;
-  return enqueueLaunch(() => launchAgentOnce(cwd, model, label ?? fallbackLabel, ["--resume", sessionPath]));
+  const ompFlag = mode === "restore" ? "--restore" : "--resume";
+  return enqueueLaunch(() => launchAgentOnce(cwd, model, label ?? fallbackLabel, [ompFlag, sessionPath]));
 }
 
 export async function stopAgent(

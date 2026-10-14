@@ -1,0 +1,82 @@
+{
+	"01a1374c-d7ed-716c-bea7-87802f20a063": {
+		"instanceId": "4f4d61e58b027bc7",
+		"sessionId": "01a1374c-d7ed-716c-bea7-87802f20a063",
+		"cwd": "/home/vincentfox",
+		"model": "zai/glm-5.3-flash",
+		"name": "Test GigaAM2 STT service speed",
+		"updatedAt": 1791944993273
+	},
+	"01a13734-0544-70ed-8dfe-d8ef62a34271": {
+		"instanceId": "1f6c03e892cea0b5",
+		"sessionId": "01a13734-0544-70ed-8dfe-d8ef62a34271",
+		"cwd": "/tmp/omp-pocket-scratch",
+		"model": "zai/glm-5.3-flash",
+		"name": "🔀 MODEL: Switch model to flash-high",
+		"updatedAt": 1791934568079
+	},
+	"01a1178f-0dc7-75ea-b523-80df5b7eae9e": {
+		"instanceId": "29808e52dd5d4483",
+		"sessionId": "01a1178f-0dc7-75ea-b523-80df5b7eae9e",
+		"cwd": "/tmp",
+		"model": "zai/glm-5.3-flash",
+		"name": "Сделать более современный дизайн",
+		"updatedAt": 1791934568079
+	},
+	"01a13077-c803-7695-a0bf-2d5fd98e833a": {
+		"instanceId": "fe4619be0d663944",
+		"sessionId": "01a13077-c803-7695-a0bf-2d5fd98e833a",
+		"cwd": "/home/vincentfox",
+		"model": "zai/glm-5.3-flash",
+		"name": "📶 WR3000: Разблокировать Cudy WR3000",
+		"updatedAt": 1791934568079
+	},
+	"01a136a9-af92-7035-9905-8b20fd0c3b33": {
+		"instanceId": "c3fad65794f9a1b3",
+		"sessionId": "01a136a9-af92-7035-9905-8b20fd0c3b33",
+		"cwd": "/tmp/omp-pocket-scratch",
+		"model": "zai/glm-5.3-flash",
+		"name": "🔓 QR: OpenFlux нода в посёлке + QR",
+		"updatedAt": 1791934568079
+	},
+	"01a135ec-dc91-7016-b5bb-ed21149ec797": {
+		"instanceId": "a8f99b70a9a58b30",
+		"sessionId": "01a135ec-dc91-7016-b5bb-ed21149ec797",
+		"cwd": "/tmp/omp-pocket-scratch",
+		"model": "zai/glm-5.3-flash",
+		"name": "Add hold-to-record voice input",
+		"updatedAt": 1791934568079
+	},
+	"01a13783-bd51-7322-9753-e1bb798beb54": {
+		"instanceId": "bf814cbe993b01f4",
+		"sessionId": "01a13783-bd51-7322-9753-e1bb798beb54",
+		"cwd": "/home/vincentfox",
+		"model": "zai/glm-5.3-flash",
+		"name": "Fix Cyrillic session names and auto-recovery",
+		"updatedAt": 1791934568079
+	},
+	"01a13791-5bbd-7429-8167-468895d7dab5": {
+		"instanceId": "3154c27190af8f30",
+		"sessionId": "01a13791-5bbd-7429-8167-468895d7dab5",
+		"cwd": "/home/vincentfox",
+		"model": "zai/glm-5.3-flash",
+		"name": "Add discount display to feed tiles",
+		"updatedAt": 1791943873896
+	},
+	"01a1381d-96dc-75eb-964a-4cac3fdeaf12": {
+		"instanceId": "7d6fab290b450bbc",
+		"sessionId": "01a1381d-96dc-75eb-964a-4cac3fdeaf12",
+		"cwd": "/tmp/omp-pocket-scratch",
+		"model": "zai/glm-5.3-flash",
+		"name": null,
+		"updatedAt": 1791942828960
+	},
+	"01a13844-560d-742a-b9e1-28ad46033b05": {
+		"instanceId": "94ae280943569da0",
+		"sessionId": "01a13844-560d-742a-b9e1-28ad46033b05",
+		"cwd": "/home/vincentfox",
+		"model": "zai/glm-5.3-flash",
+		"name": null,
+		"updatedAt": 1791945368469
+	}
+}

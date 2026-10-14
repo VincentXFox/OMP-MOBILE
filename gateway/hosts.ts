@@ -1,3 +1,5 @@
+import { resolveBin } from "./bins.ts";
+
 export interface OmpHost {
   instanceId: string;
   generation: number;
@@ -20,7 +22,18 @@ export interface OmpHostsOutput {
 
 // omp CLI output is a verified stable JSON shape; assert at the process boundary.
 async function runOmp(args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(["omp", ...args], { stdout: "pipe", stderr: "pipe" });
+  let ompBin: string;
+  try {
+    ompBin = await resolveBin("omp");
+  } catch (err) {
+    throw new Error(`omp недоступен: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
+  try {
+    proc = Bun.spawn([ompBin, ...args], { stdout: "pipe", stderr: "pipe" });
+  } catch (err) {
+    throw new Error(`omp недоступен: ${err instanceof Error ? err.message : String(err)}`);
+  }
   const timer = setTimeout(() => proc.kill(), timeoutMs);
   const { promise, resolve } = Promise.withResolvers<{ code: number; stdout: string; stderr: string }>();
   void Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]).then(
