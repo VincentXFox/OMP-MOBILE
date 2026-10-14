@@ -1,473 +1,166 @@
-/* Agents rail + agent sheet. `ag-*` prefix; design tokens only.
- * Press/focus/tap-target primitives come from base.css (button rules). */
+/* Agents screen: host cards, list states, new-agent sheet adjunts.
+ * `ag-*` prefix. Shared primitives (.pk-card/.pk-list/.pk-sheet/.pk-field/
+ * .pk-chip/.pk-empty/.pk-skeleton/.pk-fab/.pk-dot/.pk-toast) live in
+ * shell/pocket.css — do not duplicate them here. */
 
-/* ── Panel (rail list of agent cards) ─────────────────────────────── */
+/* ── List: leave room for the FAB ─────────────────────────────────── */
 
-.ag-panel {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-	min-height: 0;
-	padding: 8px 12px 12px;
-	overflow-y: auto;
-	font-size: var(--text-subhead);
+.ag-list {
+	padding-bottom: 124px;
 }
 
-.ag-heading {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	padding: 12px 4px 2px;
-	color: var(--fg-faint);
-	font-size: var(--text-footnote);
+/* FAB above nav with breathing room; bumped specificity so this wins
+ * over the pocket.css default regardless of bundle order. */
+.pk-main .pk-fab {
+	bottom: calc(var(--nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 16px);
+}
+
+/* ── Host card hierarchy: name → status → meta ────────────────────── */
+
+.ag-name {
+	display: block;
+	font-size: 1.0625rem;
 	font-weight: 600;
-	letter-spacing: var(--tracking-caps);
-	text-transform: uppercase;
-}
-
-.ag-heading:first-child {
-	padding-top: 4px;
-}
-
-.ag-heading-count {
-	padding: 0 7px;
-	border-radius: var(--radius-pill);
-	background: var(--bg-raised);
-	color: var(--fg-muted);
-	font-family: var(--font-mono);
-	font-size: var(--text-caption);
-	font-variant-numeric: tabular-nums;
-	line-height: 18px;
-}
-
-.ag-row {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	width: 100%;
-	padding: 10px 12px;
-	border-radius: var(--radius-lg);
-	background: var(--bg-raised);
-	color: var(--fg);
-	font: inherit;
-	text-align: left;
-	box-shadow:
-		inset 0 0 0 0.5px var(--hairline),
-		var(--shadow-card);
-	transition: background var(--speed-fast) var(--ease-ios);
-}
-
-.ag-row:hover {
-	background: var(--bg-overlay);
-}
-
-.ag-row--selected {
-	background: var(--selected);
-	box-shadow:
-		inset 0 0 0 0.5px var(--hairline),
-		inset 0 0 0 1px var(--ring-soft),
-		var(--shadow-card);
-}
-
-.ag-row-head {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	min-width: 0;
-}
-
-.ag-row-name {
-	flex: 1;
-	min-width: 0;
+	color: var(--fg-primary, var(--fg));
 	overflow: hidden;
-	font-size: var(--text-body);
-	font-weight: 600;
-	letter-spacing: var(--tracking-tight);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.ag-row-activity {
-	overflow: hidden;
-	padding-left: 16px;
-	color: var(--fg-muted);
-	font-family: var(--font-mono);
-	font-size: var(--text-caption);
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.ag-row-meta {
-	display: flex;
-	gap: 10px;
-	padding-left: 16px;
-	color: var(--fg-faint);
-	font-family: var(--font-mono);
-	font-size: var(--text-caption);
-	font-variant-numeric: tabular-nums;
-}
-
-.ag-row-meta-when {
-	margin-left: auto;
-}
-
-.ag-empty {
-	margin: 2px 0;
-	padding: 14px 12px;
-	color: var(--fg-faint);
-	font-size: var(--text-subhead);
-	text-align: center;
-	border: 1px dashed var(--border-strong);
-	border-radius: var(--radius-lg);
-}
-
-/* Terminal transcript-read failure reported by the host (drawer stops polling). */
-.ag-fetch-error {
-	padding: 10px 0;
-	color: var(--err);
-	font-size: var(--text-footnote);
-	text-align: center;
-	border-top: 0.5px solid color-mix(in srgb, var(--err) 25%, transparent);
-	overflow-wrap: anywhere;
-}
-
-/* ── Status dot ───────────────────────────────────────────────────── */
-
-.ag-dot {
-	flex: none;
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	background: var(--fg-faint);
-}
-
-.ag-dot--running {
-	background: var(--live);
-	animation: ag-pulse 1.6s ease-out infinite;
-}
-
-.ag-dot--parked {
-	background: var(--warn);
-}
-
-.ag-dot--aborted {
-	background: var(--err);
-}
-
-@keyframes ag-pulse {
-	0% {
-		box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 45%, transparent);
-	}
-	70%,
-	100% {
-		box-shadow: 0 0 0 6px transparent;
-	}
-}
-
-/* ── Chips ────────────────────────────────────────────────────────── */
-
-.ag-chip {
-	flex: none;
-	padding: 0 8px;
-	border: 0.5px solid var(--hairline);
-	border-radius: var(--radius-pill);
-	background: var(--hover);
-	color: var(--fg-muted);
-	font-family: var(--font-mono);
-	font-size: var(--text-caption);
-	font-variant-numeric: tabular-nums;
-	line-height: 18px;
-	white-space: nowrap;
-}
-
-.ag-chip--running {
-	border-color: color-mix(in srgb, var(--ok) 35%, transparent);
-	background: var(--success-muted);
-	color: var(--ok);
-}
-
-.ag-chip--parked {
-	border-color: color-mix(in srgb, var(--warn) 35%, transparent);
-	background: var(--warning-muted);
-	color: var(--warn);
-}
-
-.ag-chip--aborted {
-	border-color: color-mix(in srgb, var(--err) 35%, transparent);
-	background: var(--error-muted);
-	color: var(--err);
-}
-
-.ag-chip--model {
-	overflow: hidden;
-	max-width: 160px;
-	color: var(--fg-faint);
-	text-overflow: ellipsis;
-}
-
-/* ── Agent sheet (iOS bottom sheet) ───────────────────────────────── */
-
-.ag-drawer-backdrop {
-	position: fixed;
-	inset: 0;
-	z-index: 45;
-	background: var(--backdrop);
-	backdrop-filter: var(--blur-surface);
-	-webkit-backdrop-filter: var(--blur-surface);
-	animation: ag-fade-in 0.25s var(--ease-ios);
-}
-
-@keyframes ag-fade-in {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
-
-.ag-drawer {
-	position: fixed;
-	left: 0;
-	right: 0;
-	bottom: 0;
-	z-index: 46;
-	display: flex;
-	flex-direction: column;
-	width: min(560px, 100vw);
-	max-height: 88vh;
-	max-height: 88dvh;
-	margin-inline: auto;
-	background: var(--bg-raised);
-	backdrop-filter: var(--blur-strong);
-	-webkit-backdrop-filter: var(--blur-strong);
-	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-	box-shadow:
-		inset 0 0.5px 0 var(--hairline),
-		var(--shadow-overlay);
-	animation: ag-drawer-in 0.35s var(--ease-ios);
-}
-
-@keyframes ag-drawer-in {
-	from {
-		transform: translateY(100%);
-	}
-	to {
-		transform: none;
-	}
-}
-
-.ag-grabber {
-	flex: none;
-	width: 36px;
-	height: 4px;
-	margin: 8px auto 0;
-	border-radius: var(--radius-pill);
-	background: var(--border-strong);
-}
-
-.ag-drawer-head {
+.ag-status {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	min-height: var(--tap);
-	padding: 6px 10px 12px 16px;
-	box-shadow: inset 0 -0.5px 0 var(--hairline);
-}
-
-.ag-drawer-title {
-	display: flex;
-	flex: 1;
-	align-items: center;
-	gap: 8px;
-	min-width: 0;
-}
-
-.ag-drawer-name {
-	overflow: hidden;
-	font-size: var(--text-headline);
-	font-weight: 700;
-	letter-spacing: var(--tracking-tight);
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.ag-drawer-actions {
-	display: flex;
-	flex: none;
-	align-items: center;
-	gap: 6px;
-}
-
-/* ── Buttons ──────────────────────────────────────────────────────── */
-
-.ag-btn {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	height: var(--tap);
-	padding: 0 14px;
-	border: 1px solid var(--border-strong);
-	border-radius: var(--radius);
-	background: var(--bg-overlay);
-	color: var(--fg);
-	font: inherit;
-	font-size: var(--text-subhead);
-	font-weight: 600;
-}
-
-.ag-btn:hover {
-	background: color-mix(in srgb, var(--bg-overlay) 94%, var(--fg));
-	color: var(--fg);
-}
-
-.ag-btn--danger {
-	border-color: color-mix(in srgb, var(--err) 35%, transparent);
-	background: var(--error-muted);
-	color: var(--err);
-}
-
-.ag-btn--danger:hover {
-	background: color-mix(in srgb, var(--error-muted) 70%, var(--err) 12%);
-	color: var(--err);
-}
-
-.ag-iconbtn {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	flex: none;
-	width: var(--tap);
-	height: var(--tap);
-	border-radius: var(--radius);
-	color: var(--fg-muted);
-}
-
-.ag-iconbtn:hover {
-	color: var(--fg);
-	background: var(--hover);
-}
-
-.ag-iconbtn:disabled {
-	opacity: 0.4;
-}
-
-/* ── Stats strip ──────────────────────────────────────────────────── */
-
-.ag-stats {
-	display: flex;
 	flex-wrap: wrap;
-	align-items: center;
-	gap: 14px;
-	padding: 10px 16px;
-	box-shadow: inset 0 -0.5px 0 var(--hairline);
-	color: var(--fg-muted);
-	font-family: var(--font-mono);
-	font-size: var(--text-caption);
-	font-variant-numeric: tabular-nums;
+	gap: 6px;
+	margin-top: 6px;
+	font-size: 0.8125rem;
+	color: var(--fg-secondary, var(--muted));
+	min-width: 0;
 }
 
-.ag-stat {
+.ag-status-icon {
+	display: inline-flex;
+	flex-shrink: 0;
+}
+
+/* ⏱ живое время работы — только для «Работает»; не кнопка */
+.ag-elapsed {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	padding: 1px 7px;
+	border: 1px solid var(--line, color-mix(in srgb, var(--muted) 35%, transparent));
+	border-radius: 999px;
+	font-size: 0.6875rem;
+	color: var(--accent);
+	flex-shrink: 0;
+}
+
+.ag-lock {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	font-size: 0.75rem;
+	color: var(--fg-tertiary, var(--muted));
+}
+
+/* tertiary line: project · model, uptime on the right */
+.ag-meta {
 	display: flex;
 	align-items: baseline;
 	gap: 5px;
+	margin-top: 4px;
+	font-size: 0.75rem;
+	color: var(--fg-tertiary, var(--muted));
+	min-width: 0;
 }
 
-.ag-stat-label {
-	color: var(--fg-faint);
-}
-
-.ag-stat-value {
-	color: var(--fg);
-}
-
-.ag-gauge {
-	display: inline-block;
+.ag-meta-proj,
+.ag-meta-model {
 	overflow: hidden;
-	align-self: center;
-	width: 72px;
-	height: 4px;
-	border-radius: var(--radius-pill);
-	background: var(--border-strong);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
 }
 
-.ag-gauge-fill {
-	display: block;
-	height: 100%;
-	border-radius: inherit;
-	background: var(--accent-gradient);
+.ag-uptime {
+	margin-left: auto;
+	flex-shrink: 0;
 }
 
-.ag-gauge-fill--warn {
-	background: var(--warn);
-}
+/* ── Stale data banner (polling error must not blank the list) ────── */
 
-/* ── Sheet body & chat ────────────────────────────────────────────── */
-
-.ag-drawer-body {
+.ag-stale {
 	display: flex;
-	flex: 1;
-	flex-direction: column;
-	min-height: 0;
-	padding: 12px 16px;
-	overflow-y: auto;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	box-sizing: border-box;
+	max-width: 640px;
+	margin: 0 auto;
+	padding: 8px 8px 8px 12px;
+	background: var(--surface);
+	border: 1px solid var(--warning);
+	border-radius: var(--radius-lg, 16px);
+	font-size: 0.8125rem;
+	color: var(--fg-secondary, var(--muted));
 }
 
-.ag-chat {
-	display: flex;
-	flex: none;
-	gap: 8px;
-	padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
-	box-shadow: inset 0 0.5px 0 var(--hairline);
+.ag-stale > svg {
+	flex-shrink: 0;
+	color: var(--warning);
 }
 
-.ag-chat-input {
+.ag-stale-text {
 	flex: 1;
 	min-width: 0;
-	height: var(--tap);
+}
+
+.ag-retry {
+	flex-shrink: 0;
+	min-height: 44px;
+	font-size: 0.8125rem;
 	padding: 0 14px;
-	border: 1px solid var(--border);
-	border-radius: var(--radius);
-	background: var(--bg-inset);
-	color: var(--fg);
-	font: inherit;
-	font-size: var(--text-body);
 }
 
-.ag-chat-input::placeholder {
-	color: var(--fg-faint);
+/* ── First-load skeleton ──────────────────────────────────────────── */
+
+.ag-skel {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
 }
 
-.ag-chat-input:focus-visible {
-	outline: 2px solid transparent;
+.ag-skel-name {
+	display: block;
+	height: 16px;
+	width: 46%;
 }
 
-.ag-chat-input:focus {
-	border-color: var(--ring);
-	box-shadow: 0 0 0 3px var(--ring-soft);
+.ag-skel-line {
+	display: block;
+	height: 13px;
+	width: 62%;
 }
 
-.ag-chat .ag-iconbtn {
-	color: var(--accent);
+.ag-skel-meta {
+	display: block;
+	height: 12px;
+	width: 84%;
 }
 
-@media (prefers-reduced-motion: reduce) {
-	.ag-drawer,
-	.ag-drawer-backdrop {
-		animation: none;
-	}
-	.ag-dot--running {
-		animation: none;
-	}
-	.ag-row,
-	.ag-btn,
-	.ag-iconbtn {
-		transition: none;
-	}
+/* ── New agent sheet: placeholders are hints, not values ──────────── */
+
+.pk-sheet .pk-field-input::placeholder {
+	color: var(--fg-tertiary, var(--muted));
+	font-style: italic;
+	font-family: var(--font-ui, inherit);
+	opacity: 1;
 }
 
+/* 16px on touch: prevents iOS/Android focus zoom. */
 @media (any-pointer: coarse) {
-	.ag-chat-input {
-		font-size: 16px; /* prevent iOS focus zoom */
+	.pk-sheet .pk-field-input {
+		font-size: 1rem;
 	}
 }

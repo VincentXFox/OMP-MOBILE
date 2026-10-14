@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { AlertTriangle, MessageCircle, Wrench } from "lucide-react";
+import { CircleAlert, MessageCircle, Wrench } from "lucide-react";
 import { messageText } from "../../lib/format";
 import type { HostInfo } from "../../lib/gateway";
 import type { GuestClient } from "../../lib/client";
@@ -92,10 +92,11 @@ function ActivityFeed(props: { client: GuestClient; onOpenSession: () => void })
 	}, [rows]);
 
 	return (
-		<div className="ac-feed" onClick={props.onOpenSession}>
+		<div className="ac-feed">
 			{rows.length === 0 ? (
-				<div className="ac-empty">
-					<div className="ac-empty-text">Пока нет активности в этой сессии.</div>
+				<div className="pk-empty">
+					<div className="pk-empty-title">Тишина</div>
+					<div className="pk-empty-text">Пока нет активности в этой сессии.</div>
 				</div>
 			) : (
 				sections.map(section => (
@@ -103,13 +104,16 @@ function ActivityFeed(props: { client: GuestClient; onOpenSession: () => void })
 						<div className="ac-section-title">{section.label}</div>
 						<div className="ac-section-rows">
 							{section.rows.map(r => (
-								<button key={r.id} type="button" className="ac-row">
+								<div key={r.id} className={`ac-row${r.kind === "error" ? " ac-row--error" : ""}`}>
 									<span className={`ac-row-icon ac-row-icon--${r.kind}`}>
-										{r.kind === "tool" ? <Wrench size={15} /> : r.kind === "error" ? <AlertTriangle size={15} /> : <MessageCircle size={15} />}
+										{r.kind === "tool" ? <Wrench size={15} /> : r.kind === "error" ? <CircleAlert size={15} /> : <MessageCircle size={15} />}
 									</span>
 									<span className="ac-row-title">{r.title || "…"}</span>
 									{r.ts !== "" && <span className="ac-row-time">{rowTime(r.ts)}</span>}
-								</button>
+									<button type="button" className="pk-btn pk-btn--ghost ac-row-open" onClick={props.onOpenSession}>
+										Открыть
+									</button>
+								</div>
 							))}
 						</div>
 					</section>
@@ -123,14 +127,29 @@ export function ActivityScreen(props: {
 	client: GuestClient | null;
 	onOpenSession: () => void;
 	hosts: HostInfo[] | null;
+	error: string | null;
+	onRetry: () => void;
 }): ReactNode {
-	if (!props.client) {
+	if (props.client) {
+		return <ActivityFeed client={props.client} onOpenSession={props.onOpenSession} />;
+	}
+	// Сессии нет И шлюз ошибся — честная ошибка с повтором вместо пустого состояния.
+	if (props.error != null) {
 		return (
-			<div className="ac-empty">
-				<div className="ac-empty-title">Нет открытой сессии</div>
-				<div className="ac-empty-text">Открой агента, чтобы увидеть активность.</div>
+			<div className="pk-empty">
+				<div className="pk-empty-title">Не удалось загрузить активность</div>
+				<div className="pk-empty-text">{props.error}</div>
+				<div className="pk-empty-text">Проверьте адрес шлюза и токен в Настройках.</div>
+				<button type="button" className="pk-btn pk-btn--ghost" onClick={props.onRetry}>
+					Повторить
+				</button>
 			</div>
 		);
 	}
-	return <ActivityFeed client={props.client} onOpenSession={props.onOpenSession} />;
+	return (
+		<div className="pk-empty">
+			<div className="pk-empty-title">Нет открытой сессии</div>
+			<div className="pk-empty-text">Открой агента, чтобы увидеть активность.</div>
+		</div>
+	);
 }

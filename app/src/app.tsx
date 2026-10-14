@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bot, Folder, Settings, Activity, RefreshCw, Brain, History, Crown } from "lucide-react";
+import { Bot, Folder, Settings, Activity, Brain, UsersRound } from "lucide-react";
 import { AgentsScreen } from "./components/agents/AgentsScreen";
 import { ActivityScreen } from "./components/activity/ActivityScreen";
 import { MemoryScreen } from "./components/memory/MemoryScreen";
@@ -10,20 +10,19 @@ import { SessionScreen } from "./components/session/SessionScreen";
 import { SuperScreen } from "./components/super/SuperScreen";
 import { UpdatesScreen } from "./components/updates/UpdatesScreen";
 import type { HostInfo } from "./lib/gateway";
-import { fetchHosts, GatewayError, mintLink, setToken } from "./lib/gateway";
+import { fetchHosts, GatewayError, mintLink, remapSession, setToken } from "./lib/gateway";
 import { GuestClient } from "./lib/client";
 import "./components/shell/pocket.css";
 
 type Screen = "agents" | "super" | "projects" | "sessions" | "memory" | "activity" | "updates" | "settings" | "session";
 
-const SCREENS: readonly { id: Exclude<Screen, "session">; label: string }[] = [
-	{ id: "super", label: "Супер" },
+/* 5 fixed tabs (HIG ≤5, M3 3-5). super/sessions/updates are reachable from
+ * screen-level entry points (header «Рой», Projects segment, Settings row). */
+const TABS: readonly { id: Screen; label: string }[] = [
 	{ id: "agents", label: "Агенты" },
 	{ id: "projects", label: "Проекты" },
-	{ id: "sessions", label: "Сессии" },
-	{ id: "memory", label: "Память" },
 	{ id: "activity", label: "Активность" },
-	{ id: "updates", label: "Обновления" },
+	{ id: "memory", label: "Память" },
 	{ id: "settings", label: "Настройки" },
 ];
 
@@ -60,31 +59,87 @@ function provisionTokenFromHash(): void {
 }
 provisionTokenFromHash();
 
-function screenFromHash(): Screen {
+function screenFromHash(): { screen: Screen; instanceId: string | null } {
 	const hash = window.location.hash.replace(/^#\/?/, "");
-	return hash === "super" || hash === "projects" || hash === "sessions" || hash === "memory" || hash === "activity" || hash === "updates" || hash === "settings" ? hash : "agents";
+	const sessionMatch = /^session\/([A-Za-z0-9_-]+)$/.exec(hash);
+	if (sessionMatch) return { screen: "session", instanceId: sessionMatch[1] ?? null };
+	if (hash === "super" || hash === "projects" || hash === "sessions" || hash === "memory" || hash === "activity" || hash === "updates" || hash === "settings") {
+		return { screen: hash, instanceId: null };
+	}
+	return { screen: "agents", instanceId: null };
 }
 
 export function App(): ReactNode {
-	const [screen, setScreen] = useState<Screen>(screenFromHash);
+	const initial = useRef(screenFromHash());
+	const [screen, setScreen] = useState<Screen>(initial.current.screen);
+	const [pendingInstanceId, setPendingInstanceId] = useState<string | null>(initial.current.instanceId);
 	const [hosts, setHosts] = useState<HostInfo[] | null>(null);
 	const [hostsError, setHostsError] = useState<string | null>(null);
 	const [filterCwd, setFilterCwd] = useState<string | null>(null);
 	const [client, setClient] = useState<GuestClient | null>(null);
 	const clientRef = useRef<GuestClient | null>(null);
-	const [activeInstanceId, setActiveInstanceId] = useState<string | null>(null);
+	const [activeInstanceId, setActiveInstanceId] = useState<string | null>(initial.current.instanceId);
 	const [opening, setOpening] = useState(false);
+	// Screens that must survive tab switches stay mounted (hidden) once visited.
+	const [keepAliveVisited, setKeepAliveVisited] = useState<Set<string>>(
+		() => new Set(screen === "settings" || screen === "memory" ? [screen] : []),
+	);
 
-	// hash ⇄ screen sync
+	// hash ⇄ screen sync; back-gesture out of a session closes it.
 	useEffect(() => {
-		const onHash = (): void => setScreen(screenFromHash());
+		const onHash = (): void => {
+			const next = screenFromHash();
+			if (next.screen === "session" && next.instanceId) {
+				if (clientRef.current == null) setPendingInstanceId(next.instanceId);
+				setActiveInstanceId(next.instanceId);
+				setScreen("session");
+				return;
+			}
+			setScreen((prev) => {
+				if (prev === "session") {
+					// Back navigation left the session: tear the client down.
+					clientRef.current?.close();
+					clientRef.current = null;
+					setClient(null);
+					setActiveInstanceId(null);
+				}
+				return next.screen;
+			});
+		};
 		window.addEventListener("hashchange", onHash);
 		return () => window.removeEventListener("hashchange", onHash);
 	}, []);
 
+	// F5 inside a session: re-open it from the hash once the registry loads.
+	useEffect(() => {
+		if (screen !== "session" || pendingInstanceId == null || client != null || opening) return;
+		setPendingInstanceId(null);
+		void openInstance(pendingInstanceId);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [screen, pendingInstanceId, client, opening]);
+
+	// Mark keep-alive screens as visited on first open.
+	useEffect(() => {
+		if ((screen === "settings" || screen === "memory") && !keepAliveVisited.has(screen)) {
+			setKeepAliveVisited(prev => {
+				const next = new Set(prev);
+				next.add(screen);
+				return next;
+			});
+		}
+	}, [screen, keepAliveVisited]);
+
 	const goto = useCallback((next: Screen): void => {
-		setScreen(next);
-		if (next === "session") return; // session is transient, not addressable
+		setScreen((prev) => {
+			if (prev === "session") {
+				clientRef.current?.close();
+				clientRef.current = null;
+				setClient(null);
+				setActiveInstanceId(null);
+			}
+			return next;
+		});
+		if (next === "session") return; // session hash is set by openHost
 		window.location.hash = `#/${next}`;
 	}, []);
 
@@ -127,7 +182,12 @@ export function App(): ReactNode {
 				clientRef.current = next;
 				setClient(next);
 				setActiveInstanceId(host.instanceId);
-				goto("session");
+				// Addressable session: back-gesture/popstate → hashchange → leaveSession.
+				if (window.location.hash !== `#/session/${host.instanceId}`) {
+					window.location.hash = `#/session/${host.instanceId}`;
+				} else {
+					setScreen("session");
+				}
 			} catch (err) {
 				const status = err instanceof GatewayError ? err.status : 0;
 				setHostsError(
@@ -147,8 +207,18 @@ export function App(): ReactNode {
 		clientRef.current = null;
 		setClient(null);
 		setActiveInstanceId(null);
-		goto("agents");
-	}, [goto]);
+		// Route back: hashchange listener performs the actual screen switch.
+		if (window.location.hash.startsWith("#/session/")) {
+			history.back();
+			// Fallback (session opened as the first history entry): force agents.
+			window.setTimeout(() => {
+				if (window.location.hash.startsWith("#/session/")) window.location.hash = "#/agents";
+			}, 0);
+		} else {
+			setScreen("agents");
+			window.location.hash = "#/agents";
+		}
+	}, []);
 
 	const refreshHosts = useCallback((): void => {
 		void (async () => {
@@ -175,9 +245,15 @@ export function App(): ReactNode {
 		async (instanceId: string): Promise<void> => {
 			try {
 				const fresh = await fetchHosts();
-				const host = fresh.find(h => h.instanceId === instanceId);
-				if (host) {
-					await openHost(host);
+				let target = fresh.find(h => h.instanceId === instanceId) ?? null;
+				if (target === null) {
+					// Экземпляр переродился (сбой питания, апдейт omp): шлюз хранит
+					// соответствие старый→новый по стабильному sessionId.
+					const remapped = await remapSession(instanceId);
+					if (remapped !== null) target = fresh.find(h => h.instanceId === remapped) ?? null;
+				}
+				if (target !== null) {
+					await openHost(target);
 					return;
 				}
 				setHostsError("Сессия поднялась, но агент не появился в collab-реестре.");
@@ -193,11 +269,31 @@ export function App(): ReactNode {
 		[hosts, activeInstanceId],
 	);
 
+	const agentsScreen = (key: string): ReactNode => (
+		<AgentsScreen
+			key={key}
+			hosts={hosts}
+			error={hostsError}
+			filterCwd={filterCwd}
+			onClearFilter={() => setFilterCwd(null)}
+			onOpen={h => void openHost(h)}
+			onRefresh={refreshHosts}
+		/>
+	);
+
+	// Keep-alive screens stay mounted (hidden) so their state survives tab switches.
+	const keepAlive = (id: "memory" | "settings", node: ReactNode): ReactNode =>
+		keepAliveVisited.has(id) ? (
+			<div hidden={screen !== id} className="pk-keepalive">
+				{node}
+			</div>
+		) : null;
+
 	const body = useMemo<ReactNode>(() => {
 		switch (screen) {
 			case "session":
-				if (client) return <SessionScreen client={client} onLeave={leaveSession} host={activeHost} />;
-				return <AgentsScreen hosts={hosts} error={hostsError} filterCwd={filterCwd} onClearFilter={() => setFilterCwd(null)} onOpen={h => void openHost(h)} onRefresh={refreshHosts} />;
+				if (client) return <SessionScreen client={client} onLeave={leaveSession} host={activeHost} onReopen={id => void openInstance(id)} />;
+				return agentsScreen("agents-fallback");
 			case "super":
 				return <SuperScreen onOpenSession={openSuperSession} />;
 			case "sessions":
@@ -207,34 +303,46 @@ export function App(): ReactNode {
 					<ProjectsScreen
 						hosts={hosts}
 						error={hostsError}
+						onOpenInstance={id => void openInstance(id)}
 						onOpen={cwd => {
 							setFilterCwd(cwd);
 							goto("agents");
 						}}
 					/>
 				);
-			case "memory":
-				return <MemoryScreen />;
 			case "activity":
-				return <ActivityScreen client={client} onOpenSession={() => goto("session")} hosts={hosts} />;
+				return (
+					<ActivityScreen
+						client={client}
+						onOpenSession={() => goto("session")}
+						hosts={hosts}
+						error={hostsError}
+						onRetry={refreshHosts}
+					/>
+				);
 			case "updates":
 				return <UpdatesScreen />;
+			case "memory":
 			case "settings":
-				return <SettingsScreen />;
+				// Rendered via keepAlive() below so they stay mounted across tabs.
+				return null;
 			default:
-				return <AgentsScreen hosts={hosts} error={hostsError} filterCwd={filterCwd} onClearFilter={() => setFilterCwd(null)} onOpen={h => void openHost(h)} onRefresh={refreshHosts} />;
+				return agentsScreen("agents");
 		}
-	}, [screen, client, hosts, hostsError, filterCwd, openHost, openInstance, leaveSession, goto, activeHost, refreshHosts]);
+		// keep-alive screens are rendered separately below
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [screen, client, hosts, hostsError, filterCwd, openHost, openInstance, leaveSession, goto, activeHost, refreshHosts, keepAliveVisited]);
 
-	const navIcon: Record<Exclude<Screen, "session">, ReactNode> = {
-		super: <Crown size={22} />,
+	const navIcon: Record<Screen, ReactNode> = {
 		agents: <Bot size={22} />,
 		projects: <Folder size={22} />,
-		sessions: <History size={22} />,
-		memory: <Brain size={22} />,
 		activity: <Activity size={22} />,
-		updates: <RefreshCw size={22} />,
+		memory: <Brain size={22} />,
 		settings: <Settings size={22} />,
+		super: <UsersRound size={22} />,
+		sessions: <Folder size={22} />,
+		updates: <Settings size={22} />,
+		session: <Bot size={22} />,
 	};
 
 	return (
@@ -242,15 +350,26 @@ export function App(): ReactNode {
 			{screen !== "session" && (
 				<header className="pk-header">
 					<span className="pk-header-title">{SCREEN_TITLE[screen]}</span>
+					{screen === "agents" && (
+						<button type="button" className="pk-icon-btn" aria-label="Рой" title="Рой" onClick={() => goto("super")}>
+							{navIcon.super}
+						</button>
+					)}
 				</header>
 			)}
-			<main className="pk-main">{body}</main>
+			<main className="pk-main">
+				{body}
+				{keepAlive("memory", <MemoryScreen />)}
+				{keepAlive("settings", <SettingsScreen onOpenUpdates={() => goto("updates")} />)}
+			</main>
 			{screen !== "session" && (
-				<nav className="pk-nav">
-					{SCREENS.map(s => (
+				<nav className="pk-nav" aria-label="Основная навигация">
+					{TABS.map(s => (
 						<button
 							key={s.id}
+							type="button"
 							className={`pk-nav-item${screen === s.id ? " pk-nav-item--on" : ""}`}
+							aria-current={screen === s.id ? "page" : undefined}
 							onClick={() => goto(s.id)}
 						>
 							{navIcon[s.id]}

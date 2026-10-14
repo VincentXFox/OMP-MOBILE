@@ -24,9 +24,9 @@
 	flex-direction: column;
 	gap: 8px;
 	padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
-	background: var(--bg-raised);
-	border-top: 1px solid var(--edge-top);
-	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+	background: var(--surface);
+	border-top: none;
+	border-radius: 24px 24px 0 0;
 	box-shadow: var(--shadow-overlay);
 	animation: sa-slide-up 0.25s var(--ease-ios);
 }
@@ -51,17 +51,27 @@
 	gap: 12px;
 	min-height: var(--tap);
 	padding: 0 16px;
-	border: 1px solid var(--hairline);
-	border-radius: var(--radius);
+	border: none;
+	border-radius: 14px;
 	background: var(--surface2);
 	color: var(--fg);
 	font-size: var(--text-body);
 	text-align: left;
 	transition: background var(--speed-fast) var(--ease-ios);
 }
+.sa-item::after {
+	content: "";
+	flex: none;
+	width: 8px;
+	height: 8px;
+	margin-left: auto;
+	border-right: 2px solid var(--fg-faint);
+	border-top: 2px solid var(--fg-faint);
+	transform: rotate(45deg);
+}
 .sa-item > svg {
 	flex: none;
-	color: var(--fg-muted);
+	color: var(--accent);
 }
 .sa-item:active {
 	background: var(--hover);
@@ -71,6 +81,9 @@
 	justify-content: center;
 	color: var(--accent);
 	font-weight: 600;
+}
+.sa-item--cancel::after {
+	display: none;
 }
 
 /* Pending text files: chips above the composer, removable until send. */

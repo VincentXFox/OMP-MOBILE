@@ -6,3 +6,5 @@ gateway/update-state.json
 gateway/started-instances.json
 backups/
 *.log
+screenshots/
+app/agents-round11.webp

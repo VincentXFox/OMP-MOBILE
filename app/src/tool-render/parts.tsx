@@ -3,11 +3,59 @@
  * instead of inventing new CSS — see tool-render.css for the `tv-` classes.
  */
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
 import type { ToolRenderHost, ToolResultImage, ToolResultLike } from "./types";
 import { getHljs, replaceTabs, resultImagesOf, resultTextOf, shortenPath, stripAnsi } from "./util";
 
 export type Tone = "accent" | "ok" | "err" | "warn";
+
+/** Russian plural: `plural(2, "строка", "строки", "строк")`. */
+export function plural(n: number, one: string, few: string, many: string): string {
+	const mod10 = n % 10;
+	const mod100 = n % 100;
+	if (mod10 === 1 && mod100 !== 11) return one;
+	if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+	return many;
+}
+
+/** Number of lines shown per «Показать ещё» portion once expanded. */
+const EXPAND_PORTION = 400;
+
+/**
+ * 44px tap-target copy button. Shows a check mark for 1.2s after copying.
+ * Falls back to a hidden textarea when the async clipboard API is unavailable
+ * (non-secure contexts, older webviews).
+ */
+export function CopyButton({ text, label = "Копировать" }: { text: string; label?: string }): ReactNode {
+	const [done, setDone] = useState(false);
+	const timerRef = useRef<number | undefined>(undefined);
+	const copy = (): void => {
+		const finish = (): void => {
+			setDone(true);
+			clearTimeout(timerRef.current);
+			timerRef.current = window.setTimeout(() => setDone(false), 1200);
+		};
+		if (navigator.clipboard?.writeText !== undefined) {
+			navigator.clipboard.writeText(text).then(finish, () => {});
+			return;
+		}
+		const ta = document.createElement("textarea");
+		ta.value = text;
+		ta.style.position = "fixed";
+		ta.style.opacity = "0";
+		document.body.append(ta);
+		ta.select();
+		document.execCommand("copy");
+		ta.remove();
+		finish();
+	};
+	return (
+		<button type="button" className="tv-copy" aria-label={label} title={label} onClick={copy}>
+			{done ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
+		</button>
+	);
+}
 
 /** Inline chip. Renders nothing for empty content. */
 export function Badge({ children, tone }: { children: ReactNode; tone?: Tone }): ReactNode {
@@ -104,11 +152,15 @@ export interface OutputProps {
  * search results. Tabs are widened, ANSI escapes stripped.
  */
 export function Output({ text, maxLines = 10, lang, error, variant = "plain", title, bare }: OutputProps): ReactNode {
-	const [expanded, setExpanded] = useState(false);
+	const [limit, setLimit] = useState<number | null>(null);
 	const clean = useMemo(() => replaceTabs(stripAnsi(text)).replace(/\n+$/, ""), [text]);
 	const lines = useMemo(() => clean.split("\n"), [clean]);
 	const collapsible = lines.length > maxLines + 1;
-	const shown = collapsible && !expanded ? lines.slice(0, maxLines).join("\n") : clean;
+	// Collapsed: `maxLines`. Expanded: `limit` lines, grown in portions so a
+	// 10k-line output never renders (or re-renders) in one shot.
+	const shown =
+		!collapsible || limit === null ? lines.slice(0, maxLines).join("\n") : lines.slice(0, limit).join("\n");
+	const hidden = collapsible ? lines.length - (limit ?? maxLines) : 0;
 	const html = useHighlight(shown, error ? null : lang);
 	const classes = ["tv-pre"];
 	if (variant === "plain") classes.push("tv-pre--wrap");
@@ -122,10 +174,26 @@ export function Output({ text, maxLines = 10, lang, error, variant = "plain", ti
 			) : (
 				<pre className={classes.join(" ")}>{shown}</pre>
 			)}
-			{collapsible && (
-				<button type="button" className="tv-expand" onClick={() => setExpanded(v => !v)}>
-					{expanded ? "collapse" : `⋯ ${lines.length - maxLines} more lines`}
-				</button>
+			{(collapsible || limit !== null) && (
+				<div className="tv-out-foot">
+					{limit !== null && <CopyButton text={clean} />}
+					{hidden > 0 && (
+						<button
+							type="button"
+							className="tv-expand"
+							onClick={() => setLimit(v => (v === null ? EXPAND_PORTION : v + EXPAND_PORTION))}
+						>
+							{limit === null
+								? `ещё ${lines.length - maxLines} ${plural(lines.length - maxLines, "строка", "строки", "строк")}`
+								: "Показать ещё"}
+						</button>
+					)}
+					{limit !== null && hidden > 0 && (
+						<button type="button" className="tv-expand" onClick={() => setLimit(null)}>
+							Свернуть
+						</button>
+					)}
+				</div>
 			)}
 		</div>
 	);
@@ -238,10 +306,11 @@ export function InvalidArg({ what }: { what?: string }): ReactNode {
  * faint, blank rows render as `…` gaps (non-contiguous regions).
  */
 export function DiffBlock({ diff, maxLines = 80 }: { diff: string; maxLines?: number }): ReactNode {
-	const [expanded, setExpanded] = useState(false);
+	const [limit, setLimit] = useState<number | null>(null);
 	const lines = useMemo(() => replaceTabs(stripAnsi(diff)).replace(/\n+$/, "").split("\n"), [diff]);
 	const collapsible = lines.length > maxLines + 1;
-	const shown = collapsible && !expanded ? lines.slice(0, maxLines) : lines;
+	const shown = !collapsible || limit === null ? lines.slice(0, maxLines) : lines.slice(0, limit);
+	const hidden = collapsible ? lines.length - (limit ?? maxLines) : 0;
 	return (
 		<div className="tv-out">
 			<div className="tv-diff">
@@ -258,10 +327,26 @@ export function DiffBlock({ diff, maxLines = 80 }: { diff: string; maxLines?: nu
 					);
 				})}
 			</div>
-			{collapsible && (
-				<button type="button" className="tv-expand" onClick={() => setExpanded(v => !v)}>
-					{expanded ? "collapse" : `⋯ ${lines.length - maxLines} more lines`}
-				</button>
+			{(collapsible || limit !== null) && (
+				<div className="tv-out-foot">
+					{limit !== null && <CopyButton text={lines.join("\n")} />}
+					{hidden > 0 && (
+						<button
+							type="button"
+							className="tv-expand"
+							onClick={() => setLimit(v => (v === null ? EXPAND_PORTION : v + EXPAND_PORTION))}
+						>
+							{limit === null
+								? `ещё ${lines.length - maxLines} ${plural(lines.length - maxLines, "строка", "строки", "строк")}`
+								: "Показать ещё"}
+						</button>
+					)}
+					{limit !== null && (
+						<button type="button" className="tv-expand" onClick={() => setLimit(null)}>
+							Свернуть
+						</button>
+					)}
+				</div>
 			)}
 		</div>
 	);

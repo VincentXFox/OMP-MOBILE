@@ -15,10 +15,10 @@
 }
 
 .ac-section-title {
-	padding: 14px 16px 6px;
-	color: var(--fg-faint);
-	font-size: var(--text-footnote);
-	font-weight: 600;
+	padding: var(--sp-4) var(--sp-4) var(--sp-2);
+	color: var(--fg-tertiary);
+	font-size: var(--text-xs);
+	font-weight: var(--weight-semibold);
 	letter-spacing: var(--tracking-caps);
 	text-transform: uppercase;
 }
@@ -39,14 +39,13 @@
 	position: relative;
 	display: flex;
 	align-items: center;
-	gap: 12px;
+	gap: var(--sp-3);
 	width: 100%;
-	min-height: var(--tap);
-	padding: 8px 14px;
-	background: none;
-	color: var(--fg);
+	min-height: 44px;
+	padding: var(--sp-2) var(--sp-4);
+	color: var(--fg-primary);
 	text-align: left;
-	font-size: var(--text-body);
+	font-size: var(--text-base);
 	transition: background var(--speed-fast) var(--ease-ios);
 }
 
@@ -75,10 +74,8 @@
 	display: none;
 }
 
-.ac-row:active {
-	transform: none;
-	opacity: 1;
-	background: var(--hover);
+.ac-row--error .ac-row-title {
+	color: var(--error);
 }
 
 .ac-row-icon {
@@ -115,32 +112,16 @@
 
 .ac-row-time {
 	flex: 0 0 auto;
-	color: var(--fg-faint);
+	color: var(--fg-tertiary);
 	font-family: var(--font-mono);
-	font-size: var(--text-caption);
+	font-size: var(--text-xs);
 	font-variant-numeric: tabular-nums;
 }
 
-/* ---- HIG empty / no-session states ---- */
-
-.ac-empty {
-	width: 100%;
-	max-width: 640px;
-	margin: 0 auto;
-	padding: 48px 16px;
-	text-align: center;
-	animation: rise var(--speed) var(--ease-ios);
-}
-
-.ac-empty-title {
-	font-size: var(--text-headline);
-	font-weight: 600;
-	letter-spacing: var(--tracking-tight);
-}
-
-.ac-empty-text {
-	margin-top: 6px;
-	color: var(--fg-faint);
-	font-size: var(--text-subhead);
-	line-height: 1.5;
+/* explicit open action — the row itself is not clickable */
+.ac-row-open {
+	flex: 0 0 auto;
+	min-height: 44px;
+	padding: 0 var(--sp-3);
+	font-size: var(--text-sm);
 }

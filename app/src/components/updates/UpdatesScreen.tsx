@@ -11,6 +11,7 @@ import {
 	RefreshCw,
 	RotateCcw,
 	Server,
+	X,
 	XCircle,
 } from "lucide-react";
 import {
@@ -29,6 +30,7 @@ import {
 	type UpdateStatus,
 } from "../../lib/gateway";
 import { basename, shortenPath } from "../../lib/format";
+import { ConfirmSheet } from "../shell/ConfirmSheet";
 import "./updates.css";
 
 const CHANGELOG_URL = "https://github.com/can1357/oh-my-pi/releases";
@@ -57,11 +59,25 @@ function sleep(ms: number): Promise<void> {
 	return promise;
 }
 
-function lastCheckText(ts: number | null): string {
-	if (ts === null || !Number.isFinite(ts)) return "не проверялось";
+const TIME_FMT = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
+const DATE_FMT = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" });
+
+/** Relative «Проверено: …» label; `null` — not shown at all. */
+function lastCheckText(ts: number | null): string | null {
+	if (ts === null || !Number.isFinite(ts)) return null;
 	const date = new Date(ts);
-	const pad = (n: number): string => String(n).padStart(2, "0");
-	return `сегодня, ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+	if (Number.isNaN(date.getTime())) return null;
+	const diff = Date.now() - date.getTime();
+	if (diff < 60_000) return "только что";
+	if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} мин назад`;
+	const now = new Date();
+	const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+	const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+	const time = TIME_FMT.format(date);
+	if (day === startToday) return `${Math.floor(diff / 3_600_000)} ч назад`;
+	if (day === startToday - 86_400_000) return `вчера, ${time}`;
+	if (date.getFullYear() === now.getFullYear()) return `${DATE_FMT.format(date)}, ${time}`;
+	return `${DATE_FMT.format(date)} ${date.getFullYear()}, ${time}`;
 }
 
 function CompatChip(props: { component: UpdateComponent }): ReactNode {
@@ -192,6 +208,11 @@ export function UpdatesScreen(): ReactNode {
 	const [toast, setToast] = useState<string | null>(null);
 	const [backupDir, setBackupDir] = useState<string | null>(null);
 	const [rollingBack, setRollingBack] = useState(false);
+	const [confirm, setConfirm] = useState<
+		| { kind: "apply"; ids: UpdateComponentId[] }
+		| { kind: "rollback"; id: UpdateComponentId }
+		| null
+	>(null);
 
 	const aliveRef = useRef(true);
 	const toastTimer = useRef<number | null>(null);
@@ -312,9 +333,9 @@ export function UpdatesScreen(): ReactNode {
 
 	const applyOne = useCallback(
 		(id: UpdateComponentId): void => {
-			void runQueue([id], false);
+			setConfirm({ kind: "apply", ids: [id] });
 		},
-		[runQueue],
+		[],
 	);
 
 	const availableCount = useMemo(() => {
@@ -325,8 +346,8 @@ export function UpdatesScreen(): ReactNode {
 	const updateAll = useCallback((): void => {
 		if (!status || availableCount === 0) return;
 		const targets = status.components.filter(c => c.updateAvailable).map(c => c.id);
-		void runQueue(targets, false);
-	}, [status, availableCount, runQueue]);
+		setConfirm({ kind: "apply", ids: targets });
+	}, [status, availableCount]);
 
 	const manualBackup = useCallback(async (): Promise<void> => {
 		try {
@@ -386,13 +407,20 @@ export function UpdatesScreen(): ReactNode {
 	}
 	if (status == null) {
 		return (
-			<div className="pk-empty">
-				<div className="pk-empty-text">Загрузка…</div>
+			<div className="pk-list upd-list" aria-busy="true">
+				{[0, 1, 2].map(i => (
+					<div key={i} className="pk-card upd-card upd-skel" aria-hidden="true">
+						<span className="pk-skeleton upd-skel-row" />
+						<span className="pk-skeleton upd-skel-line" />
+						<span className="pk-skeleton upd-skel-row upd-skel-row--short" />
+					</div>
+				))}
 			</div>
 		);
 	}
 
 	const showJob = job != null && (job.running || job.error != null || job.steps.length > 0);
+	const lastCheck = lastCheckText(status.lastCheck);
 
 	return (
 		<div className="upd-wrap">
@@ -410,12 +438,14 @@ export function UpdatesScreen(): ReactNode {
 					Резервная копия
 				</button>
 			</div>
-			<div className="upd-meta">
-				<span>Проверено: {lastCheckText(status.lastCheck)}</span>
-				{!status.remoteConfigured && <span className="upd-meta-warn">git remote не настроен — Gateway/Frontend не обновить</span>}
-			</div>
+			{(lastCheck != null || !status.remoteConfigured) && (
+				<div className="upd-meta">
+					{lastCheck != null && <span>Проверено: {lastCheck}</span>}
+					{!status.remoteConfigured && <span className="upd-meta-warn">git remote не настроен — Gateway/Frontend не обновить</span>}
+				</div>
+			)}
 			{backupDir != null && <div className="upd-backup">бэкап: ок · {shortenPath(backupDir)}</div>}
-			{showJob && job != null && <JobCard job={job} rollingBack={rollingBack} onRollback={id => void rollback(id)} />}
+			{showJob && job != null && <JobCard job={job} rollingBack={rollingBack} onRollback={id => setConfirm({ kind: "rollback", id })} />}
 			<div className="pk-list upd-list">
 				{status.components.map(component => (
 					<ComponentCard
@@ -424,7 +454,7 @@ export function UpdatesScreen(): ReactNode {
 						frozen={frozen}
 						rollingBack={rollingBack}
 						onApply={applyOne}
-						onRollback={id => void rollback(id)}
+						onRollback={id => setConfirm({ kind: "rollback", id })}
 					/>
 				))}
 				{status.components.length === 0 && (
@@ -433,6 +463,38 @@ export function UpdatesScreen(): ReactNode {
 					</div>
 				)}
 			</div>
+			{confirm?.kind === "apply" && (
+				<ConfirmSheet
+					open
+					title={confirm.ids.length > 1 ? "Обновить всё?" : `Обновить «${COMPONENT_TITLES[confirm.ids[0]]}»?`}
+					body="Сначала будет создана резервная копия, затем компонент обновится. Работающие агенты могут быть прерваны."
+					command={confirm.ids.map(id => `omp update ${id}`).join("\n")}
+					confirmLabel="Обновить"
+					danger
+					onConfirm={() => {
+						const ids = confirm.ids;
+						setConfirm(null);
+						void runQueue(ids, false);
+					}}
+					onCancel={() => setConfirm(null)}
+				/>
+			)}
+			{confirm?.kind === "rollback" && (
+				<ConfirmSheet
+					open
+					title={`Откатить «${COMPONENT_TITLES[confirm.id]}»?`}
+					body="Компонент вернётся к предыдущей версии. Текущая установка будет заменена."
+					command={`omp rollback ${confirm.id}`}
+					confirmLabel="Откатить"
+					danger
+					onConfirm={() => {
+						const id = confirm.id;
+						setConfirm(null);
+						void rollback(id);
+					}}
+					onCancel={() => setConfirm(null)}
+				/>
+			)}
 			{busyDialog && (
 				<div className="upd-overlay" role="dialog" aria-modal="true" aria-label="Работают агенты">
 					<div className="upd-sheet">
@@ -468,7 +530,14 @@ export function UpdatesScreen(): ReactNode {
 					</div>
 				</div>
 			)}
-			{toast != null && <div className="upd-toast">{toast}</div>}
+			{toast != null && (
+				<div className="pk-toast" role="status">
+					<span>{toast}</span>
+					<button type="button" className="pk-toast-x" aria-label="Скрыть" onClick={() => setToast(null)}>
+						<X size={16} />
+					</button>
+				</div>
+			)}
 		</div>
 	);
 }

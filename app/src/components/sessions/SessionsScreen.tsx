@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Check, Pencil, X } from "lucide-react";
 import type { SessionStatus, SessionSummary } from "../../lib/gateway";
-import { fetchSessions, resumeSession } from "../../lib/gateway";
+import { fetchSessions, renameSession, resumeSession } from "../../lib/gateway";
 import { basename, relTime } from "../../lib/format";
 import "./sessions.css";
 
@@ -32,12 +33,36 @@ function groupSessions(sessions: SessionSummary[]): SessionGroup[] {
 	return [...map.values()];
 }
 
+/** Человекочитаемое имя: title omp → первый запрос кириллицей → короткий id. */
+function rowTitle(session: SessionSummary): string {
+	if (session.title !== null && session.title.length > 0) return session.title;
+	if (session.preview !== null && session.preview.length > 0) return session.preview;
+	return session.id.slice(0, 8);
+}
+
+/** «Оборван/прерван» = жертва сбоя — поднимаем с --restore (доделать ход и субагентов). */
+function isCrashVictim(session: SessionSummary): boolean {
+	return session.status === "interrupted" || session.status === "aborted";
+}
+
+function createdLabel(ts: number): string {
+	const d = new Date(ts);
+	const now = new Date();
+	const sameDay = d.toDateString() === now.toDateString();
+	const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+	return sameDay ? `сегодня ${time}` : `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")} ${time}`;
+}
+
 export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => void }): ReactNode {
 	const { onOpenInstance } = props;
 	const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [resumingPath, setResumingPath] = useState<string | null>(null);
 	const [resumeError, setResumeError] = useState<string | null>(null);
+	const [renamingPath, setRenamingPath] = useState<string | null>(null);
+	const [renameDraft, setRenameDraft] = useState("");
+	const [renamingBusy, setRenamingBusy] = useState(false);
+	const [renameError, setRenameError] = useState<string | null>(null);
 
 	const reload = useCallback(async (): Promise<void> => {
 		try {
@@ -58,16 +83,37 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 			if (!session.cwd || resumingPath != null) return;
 			setResumingPath(session.path);
 			setResumeError(null);
-			const result = await resumeSession(session.cwd, session.path);
-			if (result.ok) {
+			const mode = isCrashVictim(session) ? "restore" : "resume";
+			const result = await resumeSession(session.cwd, session.path, { mode });
+			if (result.ok === true) {
 				await reload();
 				onOpenInstance(result.instanceId);
 			} else {
-				setResumeError(`${basename(session.path)}: ${result.error}`);
+				setResumeError(`${rowTitle(session)}: ${result.error}`);
 			}
 			setResumingPath(null);
 		},
 		[onOpenInstance, resumingPath, reload],
+	);
+
+	const saveRename = useCallback(
+		async (session: SessionSummary): Promise<void> => {
+			if (renamingBusy) return;
+			const title = renameDraft.replace(/\s+/g, " ").trim();
+			if (title.length === 0) return;
+			setRenamingBusy(true);
+			setRenameError(null);
+			const result = await renameSession(session.path, title);
+			if (result.ok === true) {
+				setRenamingPath(null);
+				setRenameDraft("");
+				await reload();
+			} else {
+				setRenameError(result.error);
+			}
+			setRenamingBusy(false);
+		},
+		[renamingBusy, renameDraft, reload],
 	);
 
 	const groups = useMemo(() => (sessions ? groupSessions(sessions) : []), [sessions]);
@@ -110,27 +156,84 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 					<div className="sess-rows">
 						{group.sessions.map(session => {
 							const dead = DEAD.has(session.status);
+							const victim = isCrashVictim(session);
+							const renaming = renamingPath === session.path;
 							return (
 								<div key={session.path} className="pk-card sess-row">
 									<div className="sess-row-main">
-										<span className="sess-title">{session.title ?? session.id}</span>
+										<span className="sess-title">{rowTitle(session)}</span>
 										<span
 											className={`pk-chip${session.status === "live" ? " pk-chip--on" : ""}${dead ? " sess-chip--dead" : ""}`}
 										>
 											{STATUS_LABEL[session.status]}
 										</span>
+										{session.parentId !== null && (
+											<span className="pk-chip sess-chip--child" title={`Продолжение сессии ${session.parentId.slice(0, 8)}`}>
+												продолжение
+											</span>
+										)}
 									</div>
 									<div className="sess-meta">
-										{relTime(session.modified)} · {Math.max(1, Math.round(session.size / 1024))} КБ
+										{createdLabel(session.createdTs)} · {relTime(session.modified)} · {Math.max(1, Math.round(session.size / 1024))} КБ
 									</div>
-									{dead && session.cwd != null && (
-										<button
-											className="pk-btn sess-resume"
-											disabled={resumingPath != null}
-											onClick={() => void resume(session)}
-										>
-											{resumingPath === session.path ? "Поднимаю…" : "Поднять сессию"}
-										</button>
+									{victim && (
+										<div className="sess-victim-note">Погиб при сбое — при подъёме агент доделает прерванный ход и субагентов</div>
+									)}
+									{renaming ? (
+										<div className="sess-rename">
+											<input
+												className="pk-field-input"
+												value={renameDraft}
+												autoFocus
+												placeholder="Название кириллицей"
+												onChange={e => setRenameDraft(e.target.value)}
+												onKeyDown={e => {
+													if (e.key === "Enter") void saveRename(session);
+													if (e.key === "Escape") setRenamingPath(null);
+												}}
+											/>
+											<button
+												type="button"
+												className="pk-btn sess-rename-btn"
+												aria-label="Сохранить название"
+												disabled={renamingBusy || renameDraft.trim().length === 0}
+												onClick={() => void saveRename(session)}
+											>
+												<Check size={16} />
+											</button>
+											<button
+												type="button"
+												className="pk-btn sess-rename-btn"
+												aria-label="Отмена"
+												onClick={() => setRenamingPath(null)}
+											>
+												<X size={16} />
+											</button>
+										</div>
+									) : (
+										<div className="sess-actions">
+											{dead && session.cwd != null && (
+												<button
+													className="pk-btn sess-resume"
+													disabled={resumingPath != null || renamingBusy}
+													onClick={() => void resume(session)}
+												>
+													{resumingPath === session.path ? "Поднимаю…" : victim ? "Поднять с доделкой" : "Поднять сессию"}
+												</button>
+											)}
+											<button
+												type="button"
+												className="pk-icon-btn sess-rename-toggle"
+												aria-label="Переименовать"
+												onClick={() => {
+													setRenameDraft(session.title ?? "");
+													setRenamingPath(session.path);
+													setRenameError(null);
+												}}
+											>
+												<Pencil size={15} />
+											</button>
+										</div>
 									)}
 								</div>
 							);
@@ -138,6 +241,7 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 					</div>
 				</section>
 			))}
+			{renameError != null && <div className="pk-form-error sess-resume-error">{renameError}</div>}
 		</div>
 	);
 }

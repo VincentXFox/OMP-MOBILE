@@ -1,12 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Check, ChevronRight, Copy } from "lucide-react";
 import {
 	fetchHosts,
+	fetchUpdateStatus,
 	getGatewayBase,
 	getToken,
 	setGatewayBase,
 	setToken,
 	GatewayError,
 } from "../../lib/gateway";
+import { APP_VERSION, pluralRu } from "../../lib/format";
 import { pushState, subscribePush, unsubscribePush, type PushState } from "../../lib/push";
 import { useThemePreference } from "../../lib/theme";
 import {
@@ -32,23 +35,32 @@ const THEME_LABEL: Record<"system" | "dark" | "light", string> = {
 	light: "Светлая",
 };
 
-function ConnectionSection(): ReactNode {
-	const [base, setBase] = useState(getGatewayBase());
+function ConnectionSection(props: { onToast: (text: string) => void }): ReactNode {
+	const [base, setBase] = useState<string>(() => getGatewayBase() || window.location.origin);
 	const [token, setTok] = useState(getToken());
 	const [check, setCheck] = useState<{ ok: boolean; message: string } | null>(null);
 	const [checking, setChecking] = useState(false);
 
 	const save = async (): Promise<void> => {
-		setGatewayBase(base.trim());
-		setToken(token.trim());
+		const nextBase = base.trim();
+		const nextToken = token.trim();
+		// рабочие значения — чтобы откатить при неудачной проверке
+		const prevBase = getGatewayBase();
+		const prevToken = getToken();
 		setChecking(true);
 		setCheck(null);
+		// проверяем черновик: подменяем, тестируем, при ошибке возвращаем
+		setGatewayBase(nextBase);
+		setToken(nextToken);
 		try {
 			const hosts = await fetchHosts();
-			setCheck({ ok: true, message: `ОК: ${hosts.length} агент(ов)` });
+			setCheck({ ok: true, message: `ОК: ${hosts.length} ${pluralRu(hosts.length, "агент", "агента", "агентов")}` });
+			props.onToast("Сохранено");
 		} catch (err) {
+			setGatewayBase(prevBase);
+			setToken(prevToken);
 			const status = err instanceof GatewayError ? err.status : 0;
-			setCheck({ ok: false, message: status === 401 ? "401: неверный токен" : `Ошибка: ${err instanceof Error ? err.message : String(err)}` });
+			setCheck({ ok: false, message: status === 401 ? "401: неверный токен — сохранены прежние значения" : `Ошибка: ${err instanceof Error ? err.message : String(err)} — сохранены прежние значения` });
 		} finally {
 			setChecking(false);
 		}
@@ -63,7 +75,7 @@ function ConnectionSection(): ReactNode {
 					<input
 						className="pk-input"
 						type="url"
-						placeholder="http://192.168.1.10:8088"
+						placeholder="пусто = как этот сайт"
 						value={base}
 						onInput={e => setBase(e.currentTarget.value)}
 					/>
@@ -89,13 +101,30 @@ function ConnectionSection(): ReactNode {
 
 function PushSection(): ReactNode {
 	const [state, setState] = useState<PushState>("unsubscribed");
+	const [testResult, setTestResult] = useState<string | null>(null);
+	const [testing, setTesting] = useState(false);
 
 	useEffect(() => {
 		void pushState().then(setState);
 	}, []);
 
 	const toggle = async (): Promise<void> => {
+		setTestResult(null);
 		setState(await (state === "subscribed" ? unsubscribePush() : subscribePush()));
+	};
+
+	const sendTest = async (): Promise<void> => {
+		setTesting(true);
+		setTestResult(null);
+		try {
+			const res = await fetch(`${getGatewayBase()}/api/push/test`, { method: "POST", headers: { authorization: `Bearer ${getToken()}` } });
+			const data = (await res.json()) as { sent?: number };
+			setTestResult(data.sent ? `Отправлено на ${data.sent} ${data.sent === 1 ? "устройство" : "устройств"} — пуш придёт через секунды` : "Нет подписок — включи тумблер выше");
+		} catch {
+			setTestResult("Шлюз недоступен");
+		} finally {
+			setTesting(false);
+		}
 	};
 
 	return (
@@ -117,6 +146,20 @@ function PushSection(): ReactNode {
 						/>
 					</span>
 				</div>
+				{state === "denied" && (
+					<div className="pk-check pk-check--err">Разрешите уведомления в настройках браузера</div>
+				)}
+				{state === "subscribed" && (
+					<div className="pk-fieldrow">
+						<span>Проверить пуш</span>
+						<span className="set-row-end">
+							<button type="button" className="pk-btn pk-btn--sm" disabled={testing} onClick={() => void sendTest()}>
+								{testing ? "Отправляю…" : "Отправить"}
+							</button>
+						</span>
+					</div>
+				)}
+				{testResult && <div className="pk-check">{testResult}</div>}
 			</div>
 		</section>
 	);
@@ -226,30 +269,88 @@ function DisplaySection(): ReactNode {
 	);
 }
 
-export function SettingsScreen(): ReactNode {
+/** Строка «О программе»: значение с ellipsis, тап копирует его. */
+function AboutRow(props: { label: string; value: string; onToast: (text: string) => void }): ReactNode {
+	const { label, value, onToast } = props;
+	const copy = async (): Promise<void> => {
+		try {
+			await navigator.clipboard.writeText(value);
+			onToast("Скопировано");
+		} catch {
+			onToast("Не удалось скопировать");
+		}
+	};
+	return (
+		<button type="button" className="pk-fieldrow set-about-row" onClick={() => void copy()} aria-label={`${label}: скопировать`}>
+			<span>{label}</span>
+			<span className="pk-muted set-about-value">
+				{value}
+				<Copy size={13} aria-hidden="true" />
+			</span>
+		</button>
+	);
+}
+
+export function SettingsScreen(props: { onOpenUpdates?: () => void }): ReactNode {
+	const { onOpenUpdates } = props;
+	const [toast, setToast] = useState<string | null>(null);
+	const [updateAvailable, setUpdateAvailable] = useState(false);
+
+	// тихая проверка апдейтов — только ради точки-индикатора
+	useEffect(() => {
+		let alive = true;
+		void fetchUpdateStatus()
+			.then(status => {
+				if (alive) setUpdateAvailable(status.components.some(c => c.updateAvailable));
+			})
+			.catch(() => {
+				// шлюз недоступен — индикатор не показываем
+			});
+		return () => {
+			alive = false;
+		};
+	}, []);
+
+	const showToast = (text: string): void => {
+		setToast(text);
+		window.setTimeout(() => setToast(t => (t === text ? null : t)), 3000);
+	};
+
 	return (
 		<div className="pk-list set-screen">
-			<ConnectionSection />
+			{onOpenUpdates && (
+				<section className="pk-section">
+					<div className="pk-section-body">
+						<button type="button" className="pk-fieldrow set-updates-row" onClick={onOpenUpdates}>
+							<span className="set-updates-label">
+								Обновления
+								{updateAvailable && <span className="set-updates-dot" aria-label="Доступно обновление" />}
+							</span>
+							<ChevronRight size={18} className="pk-muted" aria-hidden="true" />
+						</button>
+					</div>
+				</section>
+			)}
+			<ConnectionSection onToast={showToast} />
 			<PushSection />
 			<TtsSection />
 			<DisplaySection />
 			<section className="pk-section">
 				<h2 className="pk-section-title">О программе</h2>
 				<div className="pk-section-body">
-					<div className="pk-fieldrow">
-						<span>Версия</span>
-						<span className="pk-muted">0.1.0</span>
-					</div>
-					<div className="pk-fieldrow">
-						<span>Протокол</span>
-						<span className="pk-muted">omp collab</span>
-					</div>
-					<div className="pk-fieldrow">
-						<span>Шифрование</span>
-						<span className="pk-muted">E2E AES-256-GCM, ключ в ссылке</span>
-					</div>
+					<AboutRow label="Версия" value={APP_VERSION} onToast={showToast} />
+					<AboutRow label="Протокол" value="omp collab" onToast={showToast} />
+					<AboutRow label="Шифрование" value="E2E AES-256-GCM, ключ в ссылке" onToast={showToast} />
 				</div>
 			</section>
+			{toast != null && (
+				<div className="pk-toast" role="status">
+					<span>{toast}</span>
+					<button type="button" className="pk-toast-x" aria-label="Скрыть" onClick={() => setToast(null)}>
+						<Check size={16} />
+					</button>
+				</div>
+			)}
 		</div>
 	);
 }

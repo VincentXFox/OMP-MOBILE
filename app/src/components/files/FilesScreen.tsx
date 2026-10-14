@@ -1,7 +1,7 @@
 import { ArrowLeft, FileText, Folder, FolderGit2, GitBranch } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { listProjectFiles, projectGit } from "../../lib/gateway";
+import { listProjectFiles, projectGit, readProjectFile } from "../../lib/gateway";
 import type { ProjectFileEntry } from "../../lib/gateway";
 import "./files.css";
 
@@ -18,30 +18,65 @@ function parentPath(path: string): string {
 	return path.slice(0, idx);
 }
 
+const TEXT_PREVIEW_EXTS: Record<string, true> = {
+	bash: true, c: true, cfg: true, conf: true, cpp: true, cjs: true, css: true, csv: true, env: true, go: true,
+	graphql: true, h: true, hpp: true, htm: true, html: true, ini: true, java: true, js: true, json: true,
+	jsonc: true, jsx: true, less: true, lock: true, log: true, lua: true, md: true, mdx: true, mjs: true,
+	php: true, prisma: true, py: true, rb: true, rs: true, sass: true, scss: true, sh: true, sql: true,
+	svg: true, svelte: true, toml: true, ts: true, tsx: true, txt: true, vue: true, xml: true, yaml: true, yml: true, zsh: true,
+};
+const TEXT_PREVIEW_MAX_BYTES = 200 * 1024;
+
+function hasTextPreview(entry: ProjectFileEntry): boolean {
+	const dot = entry.name.lastIndexOf(".");
+	return dot > 0 && entry.size !== null && entry.size <= TEXT_PREVIEW_MAX_BYTES && TEXT_PREVIEW_EXTS[entry.name.slice(dot + 1).toLowerCase()] === true;
+}
+
+type FilePreview =
+	| { state: "hidden" }
+	| { state: "loading" }
+	| { state: "error"; message: string }
+	| { state: "ok"; content: string };
+
+/** Сегментированные крошки: корень «/», промежуточные сегменты сжаты в «…»,
+ * последний показан целиком. Тап по «…» и «/» поднимает на уровень вверх. */
 function Breadcrumbs(props: { path: string; root: string; onJump: (path: string) => void }): ReactNode {
 	const { path, root, onJump } = props;
 	const rest = path.startsWith(root) ? path.slice(root.length) : path;
 	const parts = rest.split("/").filter(p => p.length > 0);
-	const segments: { label: string; target: string }[] = [{ label: root, target: root }];
-	let acc = root;
-	for (const part of parts) {
-		acc = acc === "/" ? `/${part}` : `${acc}/${part}`;
-		segments.push({ label: part, target: acc });
-	}
+	const parent = parts.length > 1 ? parentPath(path) : root;
+	const current = parts[parts.length - 1] ?? "";
+	const rootCurrent = parts.length === 0;
 	return (
-		<div className="fs-crumbs">
-			{segments.map((seg, i) => (
-				<span key={seg.target} className="fs-crumb-wrap">
-					{i > 0 && <span className="fs-crumb-sep">/</span>}
-					<button
-						type="button"
-						className={`fs-crumb${i === segments.length - 1 ? " fs-crumb--current" : ""}`}
-						onClick={() => onJump(seg.target)}
-					>
-						{seg.label}
+		<div className="fs-crumbs" role="navigation" aria-label="Путь">
+			<button
+				type="button"
+				className={`fs-crumb${rootCurrent ? " fs-crumb--current" : ""}`}
+				onClick={() => onJump(root)}
+				aria-label="Корень"
+			>
+				/
+			</button>
+			{parts.length > 1 && (
+				<>
+					<button type="button" className="fs-crumb" onClick={() => onJump(parent)} aria-label="На уровень выше">
+						…
 					</button>
+				</>
+			)}
+			{!rootCurrent && parts.length > 1 && (
+				<>
+					<span className="fs-crumb-sep">/</span>
+					<span className="fs-crumb fs-crumb--current" aria-current="location">
+						{current}
+					</span>
+				</>
+			)}
+			{!rootCurrent && parts.length === 1 && (
+				<span className="fs-crumb fs-crumb--current" aria-current="location">
+					{current}
 				</span>
-			))}
+			)}
 		</div>
 	);
 }
@@ -59,9 +94,15 @@ function GitView(props: { title: string; text: string; onBack: () => void }): Re
 				<pre className="fs-git-text">
 					{props.text.split("\n").map((line, i) => {
 						let cls = "fs-line";
-						if (line.startsWith("+")) cls += " fs-line--add";
-						else if (line.startsWith("-")) cls += " fs-line--del";
-						else if (line.startsWith("@@")) cls += " fs-line--hunk";
+						if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff --git")) {
+							cls += " fs-line--meta"; // заголовок файла, не содержимое
+						} else if (line.startsWith("+")) {
+							cls += " fs-line--add";
+						} else if (line.startsWith("-")) {
+							cls += " fs-line--del";
+						} else if (line.startsWith("@@")) {
+							cls += " fs-line--hunk";
+						}
 						return (
 							<span key={i} className={cls}>
 								{line}
@@ -82,7 +123,37 @@ export function FilesScreen(props: { root: string; onBack: () => void }): ReactN
 	const [hasGit, setHasGit] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [sheetFile, setSheetFile] = useState<ProjectFileEntry | null>(null);
+	const [preview, setPreview] = useState<FilePreview>({ state: "hidden" });
+	const [copied, setCopied] = useState(false);
 	const [gitView, setGitView] = useState<{ title: string; text: string } | null>(null);
+
+	useEffect(() => {
+		setCopied(false);
+		if (sheetFile === null || sheetFile.type !== "file" || !hasTextPreview(sheetFile)) {
+			setPreview({ state: "hidden" });
+			return;
+		}
+		let alive = true;
+		setPreview({ state: "loading" });
+		readProjectFile(path, sheetFile.name)
+			.then(content => {
+				if (alive) setPreview({ state: "ok", content });
+			})
+			.catch((err: unknown) => {
+				if (alive) setPreview({ state: "error", message: err instanceof Error ? err.message : String(err) });
+			});
+		return () => {
+			alive = false;
+		};
+	}, [sheetFile, path]);
+
+	const copyPreview = useCallback(() => {
+		if (preview.state !== "ok") return;
+		void navigator.clipboard.writeText(preview.content).then(() => {
+			setCopied(true);
+			window.setTimeout(() => setCopied(false), 1600);
+		});
+	}, [preview]);
 
 	const load = useCallback(async (dir: string) => {
 		setError(null);
@@ -171,7 +242,7 @@ export function FilesScreen(props: { root: string; onBack: () => void }): ReactN
 								<FileText size={16} className="fs-row-icon" />
 							)}
 							<span className="fs-row-name">{entry.name}</span>
-							<span className="fs-row-size">{humanSize(entry.size)}</span>
+							{entry.type === "file" && <span className="fs-row-size">{humanSize(entry.size)}</span>}
 						</button>
 					))}
 				{entries !== null && entries.length === 0 && path === root && (
@@ -187,8 +258,30 @@ export function FilesScreen(props: { root: string; onBack: () => void }): ReactN
 						<div className="fs-sheet-name">{sheetFile.name}</div>
 						<div className="fs-sheet-meta">
 							{sheetFile.type === "dir" ? "папка" : "файл"}
-							{sheetFile.size !== null && ` · ${humanSize(sheetFile.size)}`}
+							{sheetFile.type === "file" && sheetFile.size !== null && ` · ${humanSize(sheetFile.size)}`}
 						</div>
+						{preview.state === "loading" && <div className="fs-preview-msg">Загрузка…</div>}
+						{preview.state === "error" && <div className="fs-preview-msg">Не удалось загрузить: {preview.message}</div>}
+						{preview.state === "hidden" && sheetFile.type === "file" && (
+							<div className="fs-preview-msg">Предпросмотр недоступен</div>
+						)}
+						{preview.state === "ok" && (
+							<div className="fs-preview">
+								<div className="fs-preview-bar">
+									<span className="fs-preview-label">Предпросмотр</span>
+									<button
+										type="button"
+										className={`fs-preview-copy${copied ? " fs-preview-copy--done" : ""}`}
+										onClick={copyPreview}
+									>
+										{copied ? "Скопировано" : "Копировать"}
+									</button>
+								</div>
+								<div className="fs-preview-scroll">
+									<pre className="fs-preview-text">{preview.content}</pre>
+								</div>
+							</div>
+						)}
 						{hasGit && (
 							<div className="fs-sheet-actions">
 								<button type="button" className="fs-opt" onClick={() => void openGit("diff")}>

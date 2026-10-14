@@ -2,6 +2,10 @@
 	
 	"include": ["src", "scripts"],
 	"compilerOptions": {
+		"target": "ES2022",
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"skipLibCheck": true,
 		"jsx": "react-jsx",
 		"lib": ["ES2024", "DOM", "DOM.Iterable"],
 		"noEmit": true,

@@ -144,7 +144,7 @@
 }
 
 .pj-dot--pulse {
-	animation: pk-pulse 1.6s ease-in-out infinite;
+	/* живой индикатор без бесконечной пульсации (спека: спокойные статусы) */
 }
 
 /* ---- loading skeleton ---- */

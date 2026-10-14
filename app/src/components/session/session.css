@@ -3,13 +3,17 @@
  * transcript.css itself ships with the <Transcript> component import. */
 
 .ss-root {
+	/* Fullscreen chassis: escapes .pk-main's scroll + nav padding so the
+	 * composer never sinks below the fold and there is no double scroll. */
+	position: fixed;
+	inset: 0;
+	z-index: var(--z-sheet, 40);
 	display: flex;
 	flex-direction: column;
 	height: 100dvh;
 	background: var(--bg);
 	color: var(--fg);
-	font-size: 14px;
-	position: relative;
+	font-size: 0.875rem;
 	overflow: hidden;
 }
 
@@ -39,7 +43,7 @@
 	gap: 1px;
 }
 .ss-header-title {
-	font-size: 15px;
+	font-size: 0.9375rem;
 	font-weight: 600;
 	white-space: nowrap;
 	overflow: hidden;
@@ -49,7 +53,7 @@
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	font-size: 12px;
+	font-size: 0.75rem;
 	color: var(--fg-muted);
 }
 .ss-pulse-dot {
@@ -75,8 +79,8 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 38px;
-	height: 38px;
+	width: var(--tap, 44px);
+	height: var(--tap, 44px);
 	border: none;
 	border-radius: var(--radius);
 	background: transparent;
@@ -113,7 +117,7 @@
 	border-radius: 999px;
 	background: var(--surface2);
 	color: var(--fg);
-	font-size: 12px;
+	font-size: 0.75rem;
 	white-space: nowrap;
 	cursor: pointer;
 	flex: none;
@@ -122,9 +126,14 @@
 	color: var(--fg-muted);
 }
 .ss-agent-chip--summary {
-	color: var(--fg-muted);
-	font-size: 12px;
-	border-color: var(--border);
+	border: none;
+	background: none;
+	padding: 6px 2px;
+	min-height: 32px;
+	color: var(--fg-tertiary);
+	font-size: var(--text-footnote);
+	font-weight: 500;
+	letter-spacing: 0.02em;
 }
 .ss-agent-dot {
 	width: 6px;
@@ -141,23 +150,84 @@
 }
 .ss-agent-status-text {
 	color: var(--fg-muted);
-	font-size: 12px;
+	font-size: 0.75rem;
 }
 
 /* ---- transcript ---- */
 .ss-transcript-wrap {
 	flex: 1;
 	min-height: 0;
+	/* Flex items default to min-width:auto; without this guard a wide child
+	 * (table/code) stretches the track instead of overflowing into the
+	 * wrapper's overflow-x:auto, killing the scroll. */
+	min-width: 0;
 	position: relative;
 	display: flex;
 	flex-direction: column;
 }
+/* The scroller is `.tr-root` inside <Transcript>; this wrapper must not
+ * scroll on its own (double scroll = janky tail-follow). */
 .ss-transcript {
 	flex: 1;
-	overflow-y: auto;
-	overscroll-behavior: contain;
-	padding: 0;
+	min-height: 0;
+	min-width: 0;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
 }
+.ss-transcript > .tr-root {
+	flex: 1;
+	min-height: 0;
+}
+
+/* ---- host notices ---- */
+.ss-notices {
+	flex: none;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px 12px 0;
+}
+.ss-notice {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 4px 4px 12px;
+	border-radius: var(--radius-lg, 16px);
+	font-size: 0.8125rem;
+	line-height: 1.35;
+}
+.ss-notice--error {
+	background: var(--err-muted, rgba(255, 59, 48, 0.12));
+	color: var(--err);
+}
+.ss-notice--warning {
+	background: var(--warn-muted, rgba(255, 159, 10, 0.12));
+	color: var(--warn);
+}
+.ss-notice--info {
+	background: var(--bg-inset);
+	color: var(--fg-muted);
+	border: 1px solid var(--hairline);
+}
+.ss-notice-text {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.ss-notice-x {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--tap, 44px);
+	height: var(--tap, 44px);
+	border: none;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+	flex: none;
+}
+
 /* Inline insets live here: 16px of air between screen edge and bubbles. */
 .ss-transcript .tr-root {
 	padding: 12px 16px 20px;
@@ -197,45 +267,39 @@
 	align-items: flex-end;
 	max-width: min(85%, 480px);
 	padding: 10px 14px;
-	background: var(--accent);
-	border: none;
-	border-radius: 18px;
-	border-bottom-right-radius: 5px;
-	color: var(--accent-fg);
+	background: var(--surface2);
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-lg);
+	border-bottom-right-radius: 6px;
+	color: var(--fg);
 	box-shadow: none;
 }
 .ss-transcript .tr-row--user .tr-md a {
-	color: var(--accent-fg);
+	color: var(--accent-a);
 	text-decoration: underline;
 }
 .ss-transcript .tr-row--user .tr-md pre {
-	background: rgb(0 0 0 / 0.22);
-	border-color: transparent;
-	color: var(--accent-fg);
+	background: var(--bg-inset);
+	border-color: var(--hairline);
+	color: var(--fg);
 }
 .ss-transcript .tr-row--user .tr-body .tr-md code {
-	background: rgba(255, 255, 255, 0.18);
-	border-color: transparent;
-	color: var(--accent-fg);
+	background: var(--bg-inset);
+	border-color: var(--hairline);
+	color: var(--fg);
 }
-/* Agent turns: elevated card with a soft shadow, readable line measure,
- * tail corner toward the bottom-left (leading) edge. */
+/* Agent turns: plain on the surface (ChatGPT reference) — authorship reads from
+ * the right-aligned user bubble; tools/thinking stay quiet rows, not boxes. */
 .ss-transcript .tr-row--assistant .tr-body {
 	justify-self: start;
 	margin-right: auto;
 	width: 100%;
 	max-width: min(100%, 640px);
-	padding: 12px 14px;
-	background: var(--surface);
-	border: 1px solid var(--hairline);
-	border-radius: 18px;
-	border-bottom-left-radius: 5px;
-	box-shadow: var(--shadow-card);
 }
 .ss-transcript .tr-body {
 	max-width: 100%;
 	min-width: 0;
-	font-size: 15px;
+	font-size: 1rem;
 	line-height: 1.55;
 }
 .ss-transcript pre,
@@ -244,7 +308,7 @@
 }
 .ss-transcript pre {
 	overflow-x: auto;
-	font-size: 13px;
+	font-size: 0.8125rem;
 }
 .ss-transcript .tr-tablewrap {
 	max-width: 100%;
@@ -256,14 +320,23 @@
 .ss-transcript .tool-render,
 .ss-transcript [class*="tool-"] {
 	max-width: 100%;
-	font-size: 13px;
+	font-size: 0.8125rem;
 }
 .ss-transcript .tr-body > .tv-card {
 	max-width: 100%;
 	min-width: 0;
+	border-radius: var(--radius);
+}
+
+/* Поверхность — только у раскрытых карточек и ошибок (ChatGPT-стиль ленты). */
+.ss-transcript .tr-body > .tv-card:has(.tv-body) {
 	background: var(--bg-inset);
 	border-color: var(--hairline);
-	border-radius: var(--radius);
+}
+
+.ss-transcript .tr-body > .tv-card--error {
+	background: var(--error-muted);
+	border-color: var(--err);
 }
 
 .ss-jump {
@@ -294,9 +367,10 @@
 	background: var(--bg-overlay);
 	border: 1px solid var(--border-strong);
 	color: var(--warn);
-	font-size: 13px;
+	font-size: 0.8125rem;
 	z-index: 6;
-	white-space: nowrap;
+	max-width: calc(100% - 24px);
+	overflow-wrap: anywhere;
 }
 
 /* ---- composer ---- */
@@ -307,7 +381,15 @@
 	backdrop-filter: var(--blur-surface);
 	-webkit-backdrop-filter: var(--blur-surface);
 	border-top: 1px solid var(--hairline);
-	padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+	/* --ss-kb = visualViewport keyboard inset (set from JS). */
+	padding: 10px 12px calc(10px + var(--ss-kb, 0px) + env(safe-area-inset-bottom, 0px));
+	transition: padding 120ms var(--ease-out);
+}
+.ss-offline-note {
+	padding: 0 4px 6px;
+	font-size: 0.75rem;
+	color: var(--warn);
+	text-align: center;
 }
 .ss-queued-row {
 	display: flex;
@@ -324,13 +406,157 @@
 	border-radius: 999px;
 	background: var(--accent-muted);
 	color: var(--accent);
-	font-size: 12px;
+	font-size: 0.75rem;
 	white-space: nowrap;
+}
+
+/* ---- липкий туду-бар над композером ---- */
+.ss-todo {
+	padding-bottom: 6px;
+}
+
+.ss-todo-bar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 44px;
+	padding: 10px 12px;
+	border: 1px solid var(--hairline);
+	border-radius: 12px;
+	background: var(--surface2);
+	color: var(--fg);
+	font-size: 0.875rem;
+	text-align: left;
+}
+
+.ss-todo-bar-label {
+	flex: none;
+	font-weight: 600;
+	color: var(--fg);
+}
+
+.ss-todo-bar-count {
+	color: var(--accent);
+	font-variant-numeric: tabular-nums;
+}
+
+.ss-todo-bar-done {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	color: var(--success);
+	font-size: 0.8125rem;
+}
+
+.ss-todo-bar-progress {
+	flex: 1;
+	height: 4px;
+	min-width: 40px;
+	border-radius: 2px;
+	background: var(--hairline);
+	overflow: hidden;
+}
+
+.ss-todo-bar-progress-fill {
+	display: block;
+	height: 100%;
+	border-radius: 2px;
+	background: var(--success);
+	transition: width 200ms var(--ease-out);
+}
+
+.ss-todo-bar-chevron {
+	flex: none;
+	color: var(--muted);
+	transition: transform 150ms var(--ease-out);
+}
+
+.ss-todo-bar-chevron--open {
+	transform: rotate(180deg);
+}
+
+.ss-todo-board {
+	margin-top: 6px;
+	padding: 10px 12px;
+	border: 1px solid var(--hairline);
+	border-radius: 12px;
+	background: var(--surface2);
+	max-height: 40vh;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+.ss-todo-phase-name {
+	margin-top: 6px;
+	font-weight: 600;
+	font-size: 0.8125rem;
+	color: var(--muted);
+}
+
+.ss-todo-phase-name:first-child {
+	margin-top: 0;
+}
+
+.ss-todo-task {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 3px 0;
+	font-size: 0.84375rem;
+	line-height: 1.35;
+}
+
+.ss-todo-task-icon {
+	flex: none;
+	font-family: var(--font-mono);
+}
+
+.ss-todo-task--completed .ss-todo-task-icon {
+	color: var(--success);
+}
+
+.ss-todo-task--completed {
+	color: var(--muted);
+	text-decoration: line-through;
+	text-decoration-color: var(--border);
+}
+
+.ss-todo-task--in_progress .ss-todo-task-icon {
+	color: var(--accent);
+}
+
+.ss-todo-task--in_progress {
+	font-weight: 600;
+}
+
+.ss-todo-task--abandoned .ss-todo-task-icon {
+	color: var(--warn);
+}
+
+.ss-todo-task--abandoned {
+	color: var(--muted);
 }
 .ss-composer {
 	display: flex;
-	align-items: flex-end;
+	flex-direction: column;
 	gap: 8px;
+	background: var(--surface2);
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-xl);
+	padding: 8px 10px;
+	transition: border-color var(--speed-fast) var(--ease-ios);
+}
+.ss-composer:focus-within {
+	border-color: var(--border-strong);
+}
+.ss-composer-controls {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.ss-composer-controls .ss-model-chip {
+	margin-right: auto;
 }
 /* Composer controls meet the 44px tap target (header icons stay compact). */
 .ss-composer .ss-icon-btn {
@@ -339,35 +565,45 @@
 }
 .ss-input {
 	flex: 1;
+	width: 100%;
 	min-width: 0;
 	resize: none;
-	border: 1px solid var(--hairline);
-	border-radius: var(--radius-pill);
-	background: var(--bg-inset);
+	border: none;
+	border-radius: 14px;
+	background: none;
 	color: var(--fg);
 	font: inherit;
-	font-size: 15px;
+	font-size: 0.9375rem;
 	line-height: 20px;
-	padding: 11px 14px;
-	max-height: 136px;
-	transition: border-color var(--speed-fast) var(--ease-ios);
+	padding: 4px 6px;
+	max-height: 132px;
+	transition: none;
 }
 .ss-input:focus {
 	outline: none;
-	border-color: var(--ring-soft);
-	box-shadow: 0 0 0 3px var(--ring-soft);
+	box-shadow: none;
 }
 .ss-input:disabled {
 	opacity: 0.5;
 }
-.ss-interrupt {
-	color: var(--err);
-	margin-bottom: 0;
+/* Placeholder must read as one truncated line, never wrap+clip. */
+.ss-input::placeholder {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--fg-faint);
+}
+/* Coarse pointers: 16px input font prevents focus zoom on mobile. */
+@media (pointer: coarse) {
+	.ss-input {
+		font-size: 1rem;
+	}
 }
 .ss-send {
 	width: 48px;
 	height: 48px;
 	border-radius: 50%;
+	animation: ss-send-in 150ms cubic-bezier(0.32, 0.72, 0, 1);
 	border: none;
 	background: var(--accent-gradient);
 	color: var(--accent-fg);
@@ -383,12 +619,29 @@
 	cursor: default;
 }
 
+@keyframes ss-send-in {
+	from {
+		opacity: 0;
+		transform: scale(0.85);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ss-send {
+		animation: none;
+	}
+}
+
 /* ---- approval sheet ---- */
 .ss-sheet-backdrop {
 	position: fixed;
 	inset: 0;
 	background: var(--backdrop);
-	z-index: 40;
+	z-index: var(--z-sheet, 40);
 	animation: ss-fade 0.2s var(--ease-out);
 }
 @keyframes ss-fade {
@@ -399,10 +652,9 @@
 	left: 0;
 	right: 0;
 	bottom: 0;
-	z-index: 41;
-	background: var(--bg-raised);
-	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-	border-top: 1px solid var(--edge-top);
+	z-index: var(--z-approval, 70);
+	background: var(--surface);
+	border-radius: 24px 24px 0 0;
 	box-shadow: var(--shadow-overlay);
 	padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
 	animation: ss-slide-up 0.2s var(--ease-out);
@@ -422,18 +674,19 @@
 .ss-sheet-head {
 	display: flex;
 	align-items: center;
+	justify-content: center;
 	gap: 8px;
-	font-size: 13px;
+	font-size: 0.9375rem;
 	font-weight: 600;
 	color: var(--warn);
-	margin-bottom: 8px;
+	margin-bottom: 12px;
 }
 .ss-sheet-warn {
 	color: var(--warn);
 }
 .ss-sheet-title {
 	font-family: var(--font-mono);
-	font-size: 13px;
+	font-size: 0.8125rem;
 	line-height: 1.45;
 	white-space: pre-wrap;
 	word-break: break-word;
@@ -452,12 +705,12 @@
 }
 .ss-opt {
 	width: 100%;
-	min-height: 52px;
-	border-radius: var(--radius-lg);
-	border: 1px solid var(--border-strong);
-	background: var(--bg-overlay);
+	min-height: 48px;
+	border-radius: 14px;
+	border: 1px solid transparent;
+	background: var(--surface2);
 	color: var(--fg);
-	font-size: 15px;
+	font-size: 0.9375rem;
 	font-weight: 600;
 	cursor: pointer;
 	padding: 8px 14px;
@@ -504,7 +757,7 @@
 	background: var(--bg-inset);
 	color: var(--fg);
 	font: inherit;
-	font-size: 14px;
+	font-size: 0.875rem;
 	padding: 10px 12px;
 	margin-bottom: 10px;
 }
@@ -520,10 +773,62 @@
 	width: auto;
 	flex: 1;
 }
+.ss-sheet-help {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	color: var(--fg-muted);
+	font-size: 0.875rem;
+	line-height: 1.45;
+	margin: -4px 0 12px;
+}
+.ss-sheet-help-icon {
+	flex-shrink: 0;
+	margin-top: 2px;
+	color: var(--fg-muted);
+}
+.ss-sheet-options .ss-opt {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	justify-content: center;
+	gap: 3px;
+	text-align: left;
+	height: auto;
+}
+.ss-opt-label {
+	width: 100%;
+}
+.ss-opt-description {
+	width: 100%;
+	font-size: 0.8125rem;
+	font-weight: 400;
+	line-height: 1.4;
+	color: var(--fg-muted);
+}
+.ss-opt--success .ss-opt-description {
+	color: var(--fg-inverse);
+	opacity: 0.75;
+}
+.ss-opt--error .ss-opt-description {
+	color: var(--err);
+	opacity: 0.75;
+}
+.ss-opt--suggested {
+	border-color: var(--accent);
+}
+.ss-opt-suggested-mark {
+	font-size: 0.6875rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--accent);
+}
+
 
 /* ---- agent drawer: full-height hub sheet ---- */
 .ss-agent-backdrop {
-	background: rgba(0, 0, 0, 0.5);
+	background: var(--backdrop);
 	backdrop-filter: none;
 	-webkit-backdrop-filter: none;
 }
@@ -533,12 +838,11 @@
 	right: 0;
 	bottom: 0;
 	top: 10dvh;
-	z-index: 41;
+	z-index: var(--z-drawer, 50);
 	display: flex;
 	flex-direction: column;
-	background: var(--bg-raised);
-	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-	border-top: 1px solid var(--edge-top);
+	background: var(--surface);
+	border-radius: 24px 24px 0 0;
 	box-shadow: var(--shadow-overlay);
 	animation: ss-slide-up 0.2s var(--ease-out);
 }
@@ -559,7 +863,7 @@
 	border-bottom: 1px solid var(--border);
 }
 .ss-agent-drawer-head strong {
-	font-size: 15px;
+	font-size: 0.9375rem;
 	font-weight: 600;
 	min-width: 0;
 	overflow: hidden;
@@ -575,7 +879,7 @@
 	flex: none;
 	padding: 2px 8px;
 	border-radius: 999px;
-	font-size: 11px;
+	font-size: 0.6875rem;
 	background: var(--surface2);
 	color: var(--fg-muted);
 }
@@ -602,7 +906,7 @@
 	background: var(--surface2);
 	border: 1px solid var(--border);
 	border-radius: 16px;
-	font-size: 13px;
+	font-size: 0.8125rem;
 	color: var(--fg);
 	word-break: break-word;
 }
@@ -610,7 +914,7 @@
 	color: var(--fg-muted);
 }
 .ss-agent-line {
-	font-size: 13px;
+	font-size: 0.8125rem;
 	color: var(--fg-muted);
 	word-break: break-word;
 }
@@ -626,7 +930,7 @@
 	border: 1px solid var(--border);
 	background: var(--surface2);
 	color: var(--fg);
-	font-size: 13px;
+	font-size: 0.8125rem;
 	font-weight: 500;
 	cursor: pointer;
 	white-space: nowrap;
@@ -643,7 +947,7 @@
 .ss-agent-btn--danger-fill {
 	background: var(--err);
 	border-color: transparent;
-	color: #fff;
+	color: var(--fg-inverse);
 }
 .ss-agent-btn--success {
 	background: transparent;
@@ -669,11 +973,11 @@
 	text-align: center;
 }
 .ss-ended-title {
-	font-size: 16px;
+	font-size: 1rem;
 	font-weight: 600;
 }
 .ss-ended-reason {
-	font-size: 13px;
+	font-size: 0.8125rem;
 	color: var(--fg-muted);
 	word-break: break-word;
 }
@@ -684,51 +988,91 @@
 /* ── Info sheet ───────────────────────────────────────────────────── */
 
 .ss-info-title {
-	font-size: 15px;
+	font-size: 1rem;
 	font-weight: 600;
-	margin-bottom: 10px;
+	text-align: center;
+	margin-bottom: 12px;
 }
 .ss-info-sheet .ss-opt {
 	margin-top: 8px;
 }
 .ss-info-row {
 	display: flex;
-	flex-direction: column;
-	gap: 2px;
-	padding: 6px 0;
-	border-bottom: 1px solid var(--border);
+	flex-direction: row;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 11px 0;
+	border-bottom: 1px solid var(--hairline);
 }
 .ss-info-label {
-	font-size: 11px;
+	flex: none;
+	font-size: 0.8125rem;
 	color: var(--fg-muted);
 }
 .ss-info-value {
-	font-size: 13.5px;
+	min-width: 0;
+	text-align: right;
+	font-size: 0.875rem;
 	word-break: break-word;
 }
 .ss-info-value--mono {
 	font-family: var(--font-mono);
-	font-size: 12.5px;
+	font-size: 0.8125rem;
+}
+
+/* Сгруппированная карточка действий («Переименовать/Терминал/Файлы/Закрыть»)
+   — ChatGPT-шит: одна поверхность, hairline между строками, шеврон справа. */
+.ss-info-group {
+	display: flex;
+	flex-direction: column;
+	margin: 4px 0 12px;
+	background: var(--surface2);
+	border-radius: 16px;
+	overflow: hidden;
+}
+.ss-info-group > .ss-opt {
+	border-radius: 0;
+	background: transparent;
+	justify-content: flex-start;
+}
+.ss-info-group > .ss-opt + .ss-opt {
+	border-top: 0.5px solid var(--hairline);
+}
+.ss-info-group > .ss-opt::after {
+	content: "";
+	flex: none;
+	width: 8px;
+	height: 8px;
+	margin-left: auto;
+	border-right: 2px solid var(--fg-faint);
+	border-top: 2px solid var(--fg-faint);
+	transform: rotate(45deg);
+}
+.ss-info-group > .ss-opt--danger {
+	color: var(--err);
+}
+.ss-info-group > .ss-opt--danger::after {
+	border-color: var(--fg-faint);
+}
+.ss-info-group .ss-confirm-error {
+	padding: 0 16px 10px;
+	margin: 0;
+}
+
+/* Primary «Готово»: один на экран, акцентный, 14px радиус. */
+.ss-info-sheet > .ss-opt--dismiss {
+	background: var(--accent);
+	color: var(--accent-fg);
+	font-weight: 600;
 }
 .ss-opt--danger {
-	color: var(--warn);
-	border-color: var(--warn);
+	color: var(--err);
+	border-color: var(--err);
 	background: transparent;
 }
-.ss-confirm-text {
-	font-size: 13.5px;
-	margin: 10px 0 4px;
-}
-.ss-confirm-actions {
-	display: flex;
-	gap: 8px;
-}
-.ss-confirm-actions .ss-opt {
-	flex: 1;
-	margin-top: 4px;
-}
 .ss-confirm-error {
-	font-size: 12px;
+	font-size: 0.75rem;
 	color: var(--warn);
 	margin-top: 6px;
 	word-break: break-word;
@@ -739,12 +1083,12 @@
 .ss-attach-row {
 	display: flex;
 	gap: 8px;
-	padding: 0 16px 6px;
+	padding: 0 2px;
 }
 .ss-attach-thumb {
 	position: relative;
-	width: 48px;
-	height: 48px;
+	width: 64px;
+	height: 64px;
 	border-radius: var(--radius-lg, 10px);
 	overflow: hidden;
 	border: 1px solid var(--border);
@@ -760,21 +1104,27 @@
 	position: absolute;
 	top: 2px;
 	right: 2px;
-	width: 16px;
-	height: 16px;
+	width: 20px;
+	height: 20px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	padding: 0;
-	color: #fff;
+	color: var(--fg-inverse);
 	background: rgb(0 0 0 / 0.6);
 	border: none;
 	border-radius: 50%;
 	cursor: pointer;
 }
+/* Invisible halo: 20px visual cross, 44px coarse tap target. */
+.ss-attach-x::after {
+	content: "";
+	position: absolute;
+	inset: -12px;
+}
 .ss-attach-error {
 	padding: 0 16px 6px;
-	font-size: 12px;
+	font-size: 0.75rem;
 	color: var(--warn);
 }
 .ss-attach {
@@ -783,15 +1133,6 @@
 }
 .ss-attach:disabled {
 	opacity: 0.35;
-}
-.ss-attach-hint {
-	flex-shrink: 0;
-	padding: 3px 8px;
-	font-size: 11px;
-	color: var(--fg-muted);
-	background: var(--bg-inset);
-	border: 1px solid var(--border);
-	border-radius: 999px;
 }
 
 /* ---- agent drawer: transcript, controls, pinned chat row ---- */
@@ -805,7 +1146,7 @@
 	border-radius: 12px;
 	padding: 12px;
 	font-family: ui-monospace, "SF Mono", Menlo, monospace;
-	font-size: 12px;
+	font-size: 0.75rem;
 	line-height: 1.45;
 	color: var(--fg);
 	white-space: pre-wrap;
@@ -838,7 +1179,7 @@
 	border-radius: 12px;
 	padding: 0 12px;
 	color: var(--fg);
-	font-size: 14px;
+	font-size: 0.875rem;
 }
 .ss-agent-chat-input:focus {
 	outline: none;
@@ -888,7 +1229,7 @@
 	background: var(--surface-strong, var(--surface));
 	border: 1px solid var(--border-strong);
 	color: var(--fg);
-	font-size: 13px;
+	font-size: 0.8125rem;
 	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
@@ -897,4 +1238,88 @@
 	.ss-pulse-dot--on {
 		animation: none;
 	}
+}
+
+/* Переименование чата в шторке агента. */
+.ss-rename {
+	display: flex;
+	flex-direction: column;
+	gap: var(--sp-2, 8px);
+	padding: var(--sp-2, 8px) 0;
+}
+
+.ss-rename-input {
+	width: 100%;
+	min-height: 44px;
+	padding: 10px 14px;
+	border: 1px solid var(--ring-soft);
+	border-radius: var(--radius);
+	background: var(--bg-inset);
+	color: var(--fg);
+	font: inherit;
+	font-size: 1rem;
+}
+
+.ss-rename-error {
+	color: var(--err);
+	font-size: var(--text-footnote);
+}
+
+.ss-rename-actions {
+	display: flex;
+	gap: var(--sp-2, 8px);
+}
+
+.ss-rename-actions .ss-opt {
+	flex: 1;
+}
+
+/* Вспышка композера после распознавания голоса — вставка нельзя пропустить. */
+.ss-input--flash {
+	animation: ss-input-flash 900ms var(--ease-out) 2;
+}
+
+@keyframes ss-input-flash {
+	0%, 100% { border-color: var(--hairline); box-shadow: none; }
+	40% { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-muted); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ss-input--flash { animation: none; border-color: var(--accent); }
+}
+
+/* Чип модели в композере (ChatGPT-стиль) — тап открывает «Об агенте». */
+.ss-model-chip {
+	display: inline-flex;
+	align-items: center;
+	flex: none;
+	max-width: 130px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	padding: 5px 10px;
+	border: 0;
+	border-radius: var(--radius-pill);
+	background: var(--hover);
+	color: var(--fg-muted);
+	font-family: var(--font-ui);
+	font-size: var(--text-footnote);
+	font-weight: 500;
+	touch-action: manipulation;
+	-webkit-tap-highlight-color: transparent;
+}
+
+/* Пикер файлов проекта (attach sheet). */
+.sa-proj-title {
+	padding: 2px 14px 8px;
+	color: var(--fg-muted);
+	font-size: var(--text-footnote);
+}
+
+.ss-proj-error {
+	margin: 0 14px 6px;
+}
+
+.sa-item.ss-proj-busy {
+	color: var(--fg-muted);
 }

@@ -35,3 +35,17 @@ The room key never leaves the URL fragment — it is not sent to the relay or an
 - `scripts/` — `local-relay.ts` (content-blind relay on `Bun.serve`), `mock-host.ts` + `fixture.ts` (scripted host for offline dev), `build-tool-views.ts` (bundles `src/tool-render/` + React into `packages/coding-agent/src/export/html/tool-views.generated.js` for self-contained exports).
 
 The package is intentionally standalone — no dependency on `@oh-my-pi/pi-coding-agent` at runtime or type level. Wire-shape drift is prevented by consuming the same `@oh-my-pi/pi-wire` contracts as the host, with sealed-frame interop still covered by `test/codec.test.ts`.
+
+## Дизайн v2 (2026-10-13)
+
+Редизайн по Apple HIG + Material 3: нижняя навигация из 5 вкладок с M3-индикатором (super/sessions/updates доступны из хедера Агентов, Настроек и Проектов), сессия addressable через `#/session/<instanceId>` с восстановлением после F5, keep-alive для Памяти/Настроек. Дизайн-токены: `src/styles/tokens.css` (шкалы `--sp-*`, z-шкала `--z-*`, контрастные `--fg-secondary/--fg-tertiary` ≥4.5:1 в обеих темах), примитивы `.pk-btn/.pk-chip/.pk-card/.pk-sheet/.pk-toast/.pk-empty/.pk-skeleton` и общий `shell/ConfirmSheet` для всех опасных операций. Список работ: `local://omp-pocket-audit.md`, контракт: `local://omp-pocket-design.md`.
+
+## Автоворестор, имена, туду (2026-10-14)
+
+**Восстановление после сбоя питания.** Шлюз на каждом опросе реестра пишeт `gateway/runtime-manifest.json` (какие omp-сессии должны жить: sessionId, cwd, модель, имя). При старте шлюза `gateway/restore.ts` ждёт реестр и поднимает каждую жертву через `omp --restore` (доделывает прерванный ход и перезапускает субагентов), затем добирает осиротевшие herdr-панели (omp-агенты без живого хоста — свежайший `interrupted/aborted`-файл их cwd). Старые instanceId маппятся на новые (`restore-remap.json`, маршрут `/api/sessions/remap`). Приложение: упавший чат сам ищет хост с тем же sessionId и переоткрывается; устаревший `#/session/<id>` проходит ремап в `openInstance`.
+
+**Имена.** Пользовательская кириллица переживает всё: `POST /api/sessions/rename` и rename агента пишут официальный 256-байтовый title-слот omp (in-place, `source:"user"`, + audit-строка `title_change`) и хранят имя в `gateway/agent-names.json` по стабильному sessionId. `HostInfo.displayName` идёт с шлюза; herdr-слаг остаётся служебным (`[a-z0-9_-]`). Без title имя сессии = первый пользовательский запрос (preview), не UUID.
+
+**Список сессий.** Показывается дата создания (из имени файла) + свежая активность; форки/сиблинги (`parentSession` в header) помечены чипом «продолжение»; `прерван/прерван при сбое` поднимается кнопкой «Поднять с доделкой» (`--restore`), остальные — обычный resume.
+
+**Туду всегда перед глазами.** `lib/todo-board.ts` достаёт последний `todo`-результат из транскрипта (details.phases), `TodoBar` липнет над композером: N/M, прогресс, текущая фаза, тап — полный борд.

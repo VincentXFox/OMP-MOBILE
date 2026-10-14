@@ -64,15 +64,15 @@
 
 .fs-crumbs {
 	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	padding: 0 4px;
-}
-
-.fs-crumb-wrap {
-	display: flex;
 	align-items: center;
 	min-width: 0;
+	overflow-x: auto;
+	padding: 0 4px;
+	scrollbar-width: none;
+}
+
+.fs-crumbs::-webkit-scrollbar {
+	display: none;
 }
 
 .fs-crumb {
@@ -111,6 +111,7 @@
 }
 
 .fs-list {
+	overscroll-behavior: contain;
 	flex: 1;
 	width: 100%;
 	max-width: 640px;
@@ -244,8 +245,8 @@
 	flex-direction: column;
 	gap: 10px;
 	padding: 8px 14px calc(14px + env(safe-area-inset-bottom));
-	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-	background: var(--surface-strong);
+	border-radius: 24px 24px 0 0;
+	background: var(--surface);
 	box-shadow: var(--shadow-overlay);
 	animation: fs-sheet-up 260ms var(--ease-ios);
 }
@@ -318,6 +319,75 @@
 	font-weight: 600;
 }
 
+/* ---- file preview inside sheet ---- */
+
+.fs-preview-msg {
+	padding: 10px 4px;
+	color: var(--fg-faint);
+	font-size: var(--text-subhead);
+}
+
+.fs-preview {
+	overflow: hidden;
+	border: 1px solid var(--hairline);
+	border-radius: 12px;
+	background: var(--bg-inset);
+}
+
+.fs-preview-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 0 4px 0 12px;
+	border-bottom: 1px solid var(--hairline);
+	background: var(--surface2);
+}
+
+.fs-preview-label {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+}
+
+.fs-preview-copy {
+	min-width: 32px;
+	min-height: 32px;
+	padding: 0 10px;
+	border: 0;
+	background: none;
+	font-size: 12px;
+	color: var(--fg-muted);
+	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.fs-preview-copy:active,
+.fs-preview-copy--done {
+	color: var(--accent);
+}
+
+.fs-preview-scroll {
+	max-height: 60vh;
+	overflow: auto;
+	scrollbar-width: thin;
+	mask-image: linear-gradient(to right, #000 calc(100% - 20px), rgba(0, 0, 0, 0.35) calc(100% - 6px), rgba(0, 0, 0, 0.12));
+	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), rgba(0, 0, 0, 0.35) calc(100% - 6px), rgba(0, 0, 0, 0.12));
+}
+
+.fs-preview-text {
+	margin: 0;
+	padding: 12px;
+	overflow-x: auto;
+	font-family: var(--font-mono);
+	font-size: 0.8125rem;
+	line-height: 1.55;
+	white-space: pre;
+	tab-size: 4;
+}
+
 /* ---- git diff view ---- */
 
 .fs-git-root {
@@ -355,16 +425,26 @@
 .fs-git-scroll {
 	flex: 1;
 	overflow: auto;
+	scrollbar-width: thin;
+	mask-image: linear-gradient(to right, #000 calc(100% - 20px), rgba(0, 0, 0, 0.35) calc(100% - 6px), rgba(0, 0, 0, 0.12));
+	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), rgba(0, 0, 0, 0.35) calc(100% - 6px), rgba(0, 0, 0, 0.12));
 }
 
 .fs-git-text {
 	margin: 0;
 	padding: 12px 14px calc(16px + env(safe-area-inset-bottom));
 	font-family: var(--font-mono);
-	font-size: 12px;
+	font-size: 0.8125rem;
 	line-height: 1.55;
 	white-space: pre;
 	tab-size: 4;
+}
+
+.fs-line--meta {
+	display: inline-block;
+	min-width: 100%;
+	color: var(--fg-secondary);
+	font-weight: 600;
 }
 
 .fs-line--add {

@@ -46,7 +46,7 @@ export interface LocalRelay {
 export function startLocalRelay(port = 0): LocalRelay {
 	const rooms = new Map<string, Room>();
 
-	const server = Bun.serve({
+	const server = Bun.serve<SocketData>({
 		port,
 		fetch(req, srv): Response | undefined {
 			const url = new URL(req.url);

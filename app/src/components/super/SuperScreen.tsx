@@ -14,7 +14,7 @@ const STATUS_META: Record<SuperAgentStatus, { label: string; dot: string }> = {
 	working: { label: "Работает", dot: "su-dot--working" },
 	blocked: { label: "Ждёт ввода", dot: "su-dot--blocked" },
 	done: { label: "Завершено", dot: "su-dot--done" },
-	unknown: { label: "Статус ?", dot: "su-dot--unknown" },
+	unknown: { label: "Статус неизвестен", dot: "su-dot--unknown" },
 };
 
 function statusOf(agent: SuperAgent): { label: string; dot: string } {
@@ -50,7 +50,7 @@ function AgentCard(props: {
 	return (
 		<div className={`pk-card su-card${expanded ? " su-card--open" : ""}`}>
 			<button type="button" className="su-head" onClick={props.onToggle}>
-				<span className={`pk-dot su-dot ${status.dot}${agent.agentStatus === "working" ? " su-dot--pulse" : ""}`} />
+				<span className={`pk-dot su-dot ${status.dot}`} />
 				<span className="su-name">{agent.name}</span>
 				<span className="su-status">{status.label}</span>
 				<span className="su-toggle">
@@ -91,7 +91,7 @@ function AgentCard(props: {
 						<div className="su-tail su-tail--loading">Загрузка активности…</div>
 					)}
 					{agent.host && (
-						<button type="button" className="pk-btn su-open" onClick={() => props.onOpenSession(agent.host!.instanceId)}>
+						<button type="button" className="pk-btn pk-btn--ghost su-open" onClick={() => props.onOpenSession(agent.host!.instanceId)}>
 							Открыть сессию
 						</button>
 					)}
@@ -232,7 +232,7 @@ export function SuperScreen(props: {
 									className={`pk-chip su-pick-chip${on ? " pk-chip--on" : ""}`}
 									onClick={() => toggle(a.target)}
 								>
-									<span className={`pk-dot su-dot ${status.dot}${a.agentStatus === "working" ? " su-dot--pulse" : ""}`} />
+									<span className={`pk-dot su-dot ${status.dot}`} />
 									{a.name}
 								</button>
 							);
@@ -269,7 +269,12 @@ export function SuperScreen(props: {
 
 			{boardError && <div className="su-error">Доска недоступна: {boardError}</div>}
 			{board === null && !boardError && <div className="su-loading">Загрузка доски…</div>}
-			{board !== null && agents.length === 0 && <div className="su-empty">Агенты не найдены — запусти их на вкладке «Агенты».</div>}
+			{board !== null && agents.length === 0 && (
+				<div className="pk-empty">
+					<div className="pk-empty-title">Агентов нет</div>
+					<div className="pk-empty-text">Запусти агентов на вкладке «Агенты» — они появятся на доске.</div>
+				</div>
+			)}
 
 			{agents.map(a => (
 				<AgentCard

@@ -7,23 +7,33 @@ import {
 	ArrowDown,
 	ArrowUp,
 	ChevronLeft,
+	CircleAlert,
 	FileText,
+	FolderOpen,
 	ImagePlus,
 	Info,
-	Paperclip,
+	LoaderCircle,
+	Pause,
+	Pencil,
+	Play,
+	Plus,
 	Square,
 	Terminal,
 	TriangleAlert,
 	X,
 } from "lucide-react";
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { GuestClient, GuestSnapshot } from "../../lib/client";
-import type { HostInfo } from "../../lib/gateway";
-import { getTerminal, stopAgent } from "../../lib/gateway";
+import type { HostInfo, ProjectFileEntry } from "../../lib/gateway";
+import { fetchHosts, getTerminal, listProjectFiles, readProjectFile, renameAgent, stopAgent, uploadAttachment } from "../../lib/gateway";
+import { basename, pluralRu, relTime } from "../../lib/format";
+import { todoBoardFromEntries } from "../../lib/todo-board";
 import { cancelSpeech, isTtsEnabled, speakAssistantText } from "../../lib/tts";
 import { useGuestSnapshot } from "../../lib/use-guest";
+import { ConfirmSheet } from "../shell/ConfirmSheet";
 import { FilesScreen } from "../files/FilesScreen";
+import { TodoBar } from "./TodoBar";
 import { VoiceRecorder } from "../shell/VoiceRecorder";
 import { TerminalScreen } from "../terminal/TerminalScreen";
 import { Transcript } from "../transcript/Transcript";
@@ -36,12 +46,12 @@ interface PendingImage {
 	url: string;
 }
 
-const MAX_IMAGES = 4;
+const MAX_IMAGES = 10;
 const MAX_IMAGE_B64 = 4 * 1024 * 1024;
 const MAX_IMAGE_DIM = 1568;
 
-/** Text files ride in the prompt as fenced blocks; max 3 pending, 256 КБ each. */
-const MAX_TEXT_FILES = 3;
+/** Text files ride in the prompt as fenced blocks; max 5 pending, 256 КБ each. */
+const MAX_TEXT_FILES = 5;
 const MAX_TEXT_FILE_BYTES = 256 * 1024;
 const ACCEPT_TEXT_FILES =
 	"text/*,.txt,.md,.json,.csv,.log,.yaml,.yml,.ts,.tsx,.js,.py,.sh,.ini,.conf,.xml,.html,.css,.sql";
@@ -159,6 +169,15 @@ function textFileBlock(file: PendingTextFile): string {
 
 type OptionTone = "success" | "error" | "neutral";
 
+/** Хостовые служебные события приходят строками на английском — показываем по-русски. */
+function noticeRu(message: string): string {
+	return message
+		.replace(/\bguest joined the collab session\b/i, "Участник подключился к сессии")
+		.replace(/\bguest left the collab session\b/i, "Участник отключился от сессии")
+		.replace(/\bhost joined the collab session\b/i, "Хост подключился к сессии")
+		.replace(/\bhost left the collab session\b/i, "Хост отключился от сессии");
+}
+
 function optionTone(label: string): OptionTone {
 	if (/approv|allow|разреш|^да$|^yes$|^ok$/i.test(label)) return "success";
 	if (/deny|отклон|запрет|^нет$|^no$/i.test(label)) return "error";
@@ -173,23 +192,43 @@ const PHASE_TEXT: Record<GuestSnapshot["phase"], string> = {
 	ended: "Завершено",
 };
 
-function AgentChip({ agent, onTap }: { agent: AgentSnapshot; onTap: () => void }): ReactNode {
+function AgentChip({ agent, label, onTap }: { agent: AgentSnapshot; label: string; onTap: () => void }): ReactNode {
 	return (
 		<button type="button" className="ss-agent-chip" onClick={onTap}>
 			<span className={`ss-agent-dot ss-agent-dot--${agent.status}`} />
-			<span className="ss-agent-name">{agent.displayName}</span>
+			<span className="ss-agent-name">{label}</span>
 		</button>
 	);
 }
 
 const MAX_ACTIVE_CHIPS = 3;
 
+/** Last word of a phrase, stripped of punctuation — a compact chip differentiator. */
+function lastWord(text: string | undefined): string | null {
+	const word = text?.trim().split(/\s+/).filter(Boolean).at(-1)?.replace(/[.,;:!?)\]»"']+$/u, "");
+	if (!word) return null;
+	return word.length > 14 ? `${word.slice(0, 13)}…` : word.toLowerCase();
+}
+
+/**
+ * «task» chips are indistinguishable, so we add a differentiator: the last
+ * word of the agent's current intent / task (from tool progress events).
+ * Nothing to differentiate by → numbered «task 1..N».
+ */
+function chipLabel(agent: AgentSnapshot, progress: SubagentProgressPayload | undefined, position: number): string {
+	const word = lastWord(progress?.progress.lastIntent) ?? lastWord(progress?.progress.task);
+	if (word) return `${agent.displayName} · ${word}`;
+	return `${agent.displayName} ${position + 1}`;
+}
+
 /** Chips row: active subagents only (max 3 + «+N»), or one muted summary chip. */
 function AgentChipsRow({
 	subagents,
+	progress,
 	onOpen,
 }: {
 	subagents: AgentSnapshot[];
+	progress: ReadonlyMap<string, SubagentProgressPayload>;
 	onOpen: (id: string) => void;
 }): ReactNode {
 	const active = subagents.filter(a => a.status === "running");
@@ -212,7 +251,12 @@ function AgentChipsRow({
 	return (
 		<div className="ss-agent-row">
 			{shown.map(agent => (
-				<AgentChip key={agent.id} agent={agent} onTap={() => onOpen(agent.id)} />
+				<AgentChip
+					key={agent.id}
+					agent={agent}
+					label={chipLabel(agent, progress.get(agent.id), subagents.indexOf(agent))}
+					onTap={() => onOpen(agent.id)}
+				/>
 			))}
 			{hidden > 0 && (
 				<button
@@ -302,28 +346,22 @@ function AgentDrawer({
 						<button type="button" className="ss-agent-btn" disabled={loadingTranscript} onClick={() => void loadTranscript()}>
 							{loadingTranscript ? "Загрузка…" : "Транскрипт"}
 						</button>
-						{confirmingKill ? (
-							<>
-								<button type="button" className="ss-agent-btn ss-agent-btn--danger-fill" onClick={kill}>
-									Убить?
-								</button>
-								<button type="button" className="ss-agent-btn" onClick={() => setConfirmingKill(false)}>
-									Отмена
-								</button>
-							</>
-						) : (
-							<button
-								type="button"
-								className="ss-agent-btn ss-agent-btn--danger"
-								onClick={() => setConfirmingKill(true)}
-							>
-								Убить
-							</button>
-						)}
+						<button type="button" className="ss-agent-btn ss-agent-btn--danger" onClick={() => setConfirmingKill(true)}>
+							Убить
+						</button>
 						<button type="button" className="ss-agent-btn ss-agent-btn--success" onClick={revive}>
 							Возродить
 						</button>
 					</div>
+					<ConfirmSheet
+						open={confirmingKill}
+						title="Убить сабагента"
+						body={`Сабагент «${agent.displayName}» будет принудительно остановлен. Завершённую работу он не сохранит.`}
+						confirmLabel="Убить"
+						danger
+						onConfirm={kill}
+						onCancel={() => setConfirmingKill(false)}
+					/>
 					{transcript !== null && (
 						<pre ref={preRef} className="ss-agent-transcript">
 							{transcript}
@@ -376,19 +414,29 @@ function ApprovalSheet({
 					<span>Требуется решение</span>
 				</div>
 				<div className="ss-sheet-title">{request.title}</div>
+				{request.kind === "select" && request.helpText ? (
+					<div className="ss-sheet-help">
+						<Info size={14} className="ss-sheet-help-icon" />
+						<span>{request.helpText}</span>
+					</div>
+				) : null}
 				{request.kind === "select" ? (
 					<div className="ss-sheet-options">
-						{request.options.map(option => {
+						{request.options.map((option, index) => {
 							const label = typeof option === "string" ? option : option.label;
+							const description = typeof option === "string" ? undefined : option.description;
 							const tone = optionTone(label);
+							const suggested = request.initialIndex === index;
 							return (
 								<button
 									key={label}
 									type="button"
-									className={`ss-opt ss-opt--${tone}`}
+									className={`ss-opt ss-opt--${tone}${suggested ? " ss-opt--suggested" : ""}`}
 									onClick={() => onAnswer(label)}
 								>
-									{label}
+									<span className="ss-opt-label">{label}</span>
+									{description ? <span className="ss-opt-description">{description}</span> : null}
+									{suggested ? <span className="ss-opt-suggested-mark">предложено</span> : null}
 								</button>
 							);
 						})}
@@ -437,34 +485,65 @@ function InfoSheet(props: {
 	onClose: () => void;
 }): ReactNode {
 	const { snap, host, onLeave, onOpenTerminal, onOpenFiles, onClose } = props;
-	const [confirming, setConfirming] = useState(false);
+	const [confirmMode, setConfirmMode] = useState<null | "stop" | "force">(null);
 	const [stopping, setStopping] = useState(false);
 	const [stopError, setStopError] = useState<string | null>(null);
+	const [renaming, setRenaming] = useState(false);
+	const [renameDraft, setRenameDraft] = useState("");
+	const [renamingBusy, setRenamingBusy] = useState(false);
+	const [renameError, setRenameError] = useState<string | null>(null);
+	const instanceId = host?.instanceId ?? "";
+	const currentName = host
+		? host.displayName || host.sessionName || instanceId
+		: instanceId;
 
-	const closeAgent = useCallback(async () => {
-		if (!host || stopping) return;
-		setStopping(true);
-		setStopError(null);
+	const saveRename = useCallback(async () => {
+		if (!host || renamingBusy) return;
+		const name = renameDraft.replace(/\s+/g, " ").trim();
+		if (name.length === 0) return;
+		setRenamingBusy(true);
+		setRenameError(null);
 		try {
-			const outcome = await stopAgent(host.instanceId);
-			if (outcome === "missing") {
-				onLeave();
-				return;
-			}
-			if (outcome === "not_started_here") {
-				const confirmed = window.confirm("Агент запущен вне Pocket. Точно убить его?");
-				if (!confirmed) {
-					setStopping(false);
+			// Шлюз сохраняет кириллическое имя по sessionId (живёт рестарты) и
+			// пишет его в title-слот сессии; herdr-слаг остаётся служебным.
+			await renameAgent(host.instanceId, name);
+			setRenaming(false);
+		} catch (err) {
+			setRenameError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setRenamingBusy(false);
+		}
+	}, [host, renamingBusy, renameDraft]);
+
+	// force=true is the «agent runs outside Pocket» hard kill; it requires an
+	// explicit ConfirmSheet step, which closeAgent itself requests when needed.
+	const closeAgent = useCallback(
+		async (force: boolean) => {
+			if (!host || stopping) return;
+			setStopping(true);
+			setStopError(null);
+			try {
+				const outcome = await stopAgent(host.instanceId, force);
+				if (outcome === "missing") {
+					onLeave();
 					return;
 				}
-				if (await stopAgent(host.instanceId, true) !== "ok") throw new Error("Не удалось остановить агент");
+				if (outcome === "not_started_here") {
+					if (!force) {
+						setStopping(false);
+						setConfirmMode("force");
+						return;
+					}
+					throw new Error("Не удалось остановить агент");
+				}
+				onLeave();
+			} catch (err) {
+				setStopError(err instanceof Error ? err.message : String(err));
+				setStopping(false);
 			}
-			onLeave();
-		} catch (err) {
-			setStopError(err instanceof Error ? err.message : String(err));
-			setStopping(false);
-		}
-	}, [host, onLeave, stopping]);
+		},
+		[host, onLeave, stopping],
+	);
 
 	const state = snap.state;
 	const usage = state?.contextUsage;
@@ -485,38 +564,60 @@ function InfoSheet(props: {
 				{usage && usage.percent != null && (
 					<InfoRow
 						label="Контекст"
-						value={`${usage.tokens ?? "?"} / ${usage.contextWindow ?? "?"} токенов (${usage.percent}%)`}
+						value={`${usage.tokens ?? "?"} / ${usage.contextWindow ?? "?"} токенов (${Math.round(usage.percent)}%)`}
 					/>
 				)}
 				<InfoRow label="Фаза" value={`${PHASE_TEXT[snap.phase]}${state?.isStreaming ? " · отвечает" : ""}`} />
-				{host && <InfoRow label="Запущен" value={`${new Intl.RelativeTimeFormat("ru", { numeric: "auto" }).format(Math.round((host.startedAt - Date.now()) / 60000), "minute")} · ${new Date(host.startedAt).toLocaleString()}`} />}
-				<InfoRow label="Память агента" value="~/.omp/agent" mono />
-				{host && (
-					<button type="button" className="ss-opt ss-opt--accent" onClick={onOpenTerminal}>
-						<Terminal size={16} /> Терминал
-					</button>
-				)}
-				{host && (
-					<button type="button" className="ss-opt ss-opt--accent" onClick={onOpenFiles}>
-						Файлы проекта
-					</button>
-				)}
-				{host && !confirming && (
-					<button type="button" className="ss-opt ss-opt--danger" onClick={() => setConfirming(true)}>
-						Закрыть агента
-					</button>
-				)}
-				{host && confirming && (
-					<div className="ss-confirm">
-						<div className="ss-confirm-text">Агент будет остановлен. Продолжить?</div>
-						<div className="ss-confirm-actions">
-							<button type="button" className="ss-opt ss-opt--editor-cancel" disabled={stopping} onClick={() => setConfirming(false)}>
+				{host && <InfoRow label="Запущен" value={`${relTime(host.startedAt)} · ${new Date(host.startedAt).toLocaleString()}`} />}
+				{renaming ? (
+					<div className="ss-rename">
+						<input
+							type="text"
+							className="ss-rename-input"
+							value={renameDraft}
+							maxLength={48}
+							autoFocus
+							aria-label="Новое имя чата"
+							onChange={e => setRenameDraft(e.target.value)}
+							onKeyDown={e => {
+								if (e.key === "Enter") void saveRename();
+								if (e.key === "Escape") setRenaming(false);
+							}}
+						/>
+						{renameError != null && <div className="ss-rename-error" role="alert">{renameError}</div>}
+						<div className="ss-rename-actions">
+							<button type="button" className="ss-opt ss-opt--dismiss" onClick={() => setRenaming(false)}>
 								Отмена
 							</button>
-							<button type="button" className="ss-opt ss-opt--danger" disabled={stopping} onClick={() => void closeAgent()}>
-								{stopping ? "Останавливаю…" : "Остановить"}
+							<button
+								type="button"
+								className="ss-opt ss-opt--success"
+								disabled={renamingBusy || renameDraft.replace(/\s+/g, " ").trim().length === 0}
+								onClick={() => void saveRename()}
+							>
+								{renamingBusy ? "Сохраняю…" : "Сохранить"}
 							</button>
 						</div>
+					</div>
+				) : (
+					<div className="ss-info-group">
+						<button type="button" className="ss-opt ss-opt--accent ss-rename-open" onClick={() => { setRenameDraft(currentName); setRenaming(true); }}>
+							<Pencil size={16} /> Переименовать чат
+						</button>
+					</div>
+				)}
+				<InfoRow label="Память агента" value="~/.omp/agent" mono />
+				{host && (
+					<div className="ss-info-group">
+						<button type="button" className="ss-opt ss-opt--accent" onClick={onOpenTerminal}>
+							<Terminal size={16} /> Терминал
+						</button>
+						<button type="button" className="ss-opt ss-opt--accent" onClick={onOpenFiles}>
+							Файлы проекта
+						</button>
+						<button type="button" className="ss-opt ss-opt--danger" onClick={() => setConfirmMode("stop")}>
+							Закрыть агента
+						</button>
 						{stopError != null && <div className="ss-confirm-error">{stopError}</div>}
 					</div>
 				)}
@@ -524,15 +625,36 @@ function InfoSheet(props: {
 					Закрыть
 				</button>
 			</div>
+			<ConfirmSheet
+				open={confirmMode !== null}
+				title={confirmMode === "force" ? "Принудительно остановить агента?" : "Закрыть агента?"}
+				body={
+					confirmMode === "force"
+						? "Агент запущен вне Pocket. Он будет завершён принудительно, незавершённая работа будет потеряна."
+						: "Сессия агента будет остановлена. Продолжить?"
+				}
+				confirmLabel={confirmMode === "force" ? "Остановить" : stopping ? "Останавливаю…" : "Остановить"}
+				danger
+				onConfirm={() => {
+					const mode = confirmMode;
+					setConfirmMode(null);
+					if (mode !== null) void closeAgent(mode === "force");
+				}}
+				onCancel={() => {
+					setConfirmMode(null);
+					setStopError(null);
+				}}
+			/>
 		</>
 	);
 }
 
-export function SessionScreen(props: { client: GuestClient; onLeave: () => void; host?: HostInfo }): ReactNode {
-	const { client, onLeave, host } = props;
+export function SessionScreen(props: { client: GuestClient; onLeave: () => void; host?: HostInfo; onReopen?: (instanceId: string) => void }): ReactNode {
+	const { client, onLeave, host, onReopen } = props;
 	const snap = useGuestSnapshot(client);
 
 	const scrollRef = useRef<HTMLDivElement | null>(null);
+	const scrollElRef = useRef<HTMLElement | null>(null);
 	const tailLock = useRef(true);
 	const [showJump, setShowJump] = useState(false);
 
@@ -540,24 +662,78 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 	const isLive = snap.phase === "live";
 	const readOnly = snap.readOnly;
 	const queuedCount = snap.state?.queuedMessageCount ?? 0;
+	const todoBoard = useMemo(() => todoBoardFromEntries(snap.entries), [snap.entries]);
 
-	// Tail-follow: stick to bottom on new entries unless the user scrolled up >80px.
+	// Автопереподключение: агент умер/перезапустился (сбой питания, апдейт) —
+	// ищем живой хост с той же сессией и молча открываем его, чат сам вернётся.
+	const sessionId = snap.header?.id ?? null;
+	const instanceId = host?.instanceId ?? "";
+	const [rejoinWaiting, setRejoinWaiting] = useState(false);
+	const onReopenRef = useRef(onReopen);
+	onReopenRef.current = onReopen;
+	useEffect(() => {
+		if (snap.phase !== "ended" || sessionId === null || onReopenRef.current === undefined) return;
+		let cancelled = false;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const attempt = async (): Promise<void> => {
+			try {
+				const hosts = await fetchHosts();
+				const hit = hosts.find((h) => h.sessionId === sessionId && h.instanceId !== instanceId);
+				if (cancelled) return;
+				if (hit !== undefined) {
+					setRejoinWaiting(false);
+					onReopenRef.current?.(hit.instanceId);
+					return;
+				}
+				setRejoinWaiting(true);
+			} catch {
+				if (!cancelled) setRejoinWaiting(true);
+			}
+			if (!cancelled) timer = setTimeout(() => void attempt(), 5000);
+		};
+		timer = setTimeout(() => void attempt(), 2000);
+		return () => {
+			cancelled = true;
+			clearTimeout(timer);
+			setRejoinWaiting(false);
+		};
+	}, [snap.phase, sessionId, instanceId]);
+
+	const onScroll = useCallback(() => {
+		const el = scrollElRef.current;
+		if (!el) return;
+		const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+		tailLock.current = fromBottom <= 120;
+		setShowJump(fromBottom > 120);
+	}, []);
+
+	// The real transcript scroller is `.tr-root` inside <Transcript>, not the
+	// wrapper div; bind (once) to it and keep refs in sync across re-renders.
 	useLayoutEffect(() => {
-		const el = scrollRef.current;
+		const wrap = scrollRef.current;
+		if (!wrap) return;
+		const el = wrap.querySelector<HTMLElement>(".tr-root");
+		if (!el || el === scrollElRef.current) return;
+		scrollElRef.current = el;
+		el.addEventListener("scroll", onScroll, { passive: true });
+	}, [onScroll, snap.phase]);
+
+	useEffect(
+		() => () => {
+			scrollElRef.current?.removeEventListener("scroll", onScroll);
+		},
+		[onScroll],
+	);
+
+	// Tail-follow: stick to bottom on new entries unless the user scrolled up >120px.
+	useLayoutEffect(() => {
+		const el = scrollElRef.current;
 		if (!el || !tailLock.current) return;
 		el.scrollTop = el.scrollHeight;
 	}, [snap.entries.length, snap.stream, snap.phase]);
 
-	const onScroll = useCallback(() => {
-		const el = scrollRef.current;
-		if (!el) return;
-		const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-		tailLock.current = fromBottom <= 80;
-		setShowJump(fromBottom > 80);
-	}, []);
-
 	const jumpToTail = useCallback(() => {
-		const el = scrollRef.current;
+		const el = scrollElRef.current;
 		if (!el) return;
 		tailLock.current = true;
 		el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -566,7 +742,6 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 
 	const [draft, setDraft] = useState("");
 	const [images, setImages] = useState<PendingImage[]>([]);
-	const [sending, setSending] = useState(false);
 	const [attachError, setAttachError] = useState<string | null>(null);
 	const [textFiles, setTextFiles] = useState<PendingTextFile[]>([]);
 	const [attachMenuOpen, setAttachMenuOpen] = useState(false);
@@ -583,12 +758,30 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
 	}, [draft]);
 
-	const send = useCallback(() => {
+	// Composer is writable while live AND while reconnecting: sends land in the
+	// client-side socket queue (≤256 frames) and flush on reconnect.
+	const composerActive = isLive || snap.phase === "reconnecting";
+
+	const send = useCallback(async (): Promise<void> => {
 		const text = draft.trim();
 		if (text.length === 0 && images.length === 0 && textFiles.length === 0) return;
-		if (readOnly || !isLive || sending) return;
-		// User text first, then attached files as «Файл: имя» + fenced blocks.
-		const fullText = [text, ...textFiles.map(textFileBlock)]
+		if (readOnly || !composerActive) return;
+		// Картинки грузим на шлюз и вшиваем markdown-ссылки в текст: снапшот
+		// collab отдаёт гостевые промпты без image-блоков, а md-картинку лента
+		// рендерит и без них (модель дополнительно получает сами блоки).
+		const links: string[] = [];
+		for (const img of images) {
+			try {
+				const b64 = img.data.includes(",") ? img.data.split(",")[1] ?? img.data : img.data;
+				const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+				const url = await uploadAttachment(bytes, img.mimeType);
+				links.push(`![вложение](${url})`);
+			} catch (err) {
+				links.push(`_(вложение не загрузилось: ${err instanceof Error ? err.message : String(err)})_`);
+			}
+		}
+		// User text first, then attachments, then attached files as «Файл: имя» + fenced blocks.
+		const fullText = [text, ...links, ...textFiles.map(textFileBlock)]
 			.filter(part => part.length > 0)
 			.join("\n\n");
 		if (images.length > 0) client.sendPromptWithImages(fullText, images);
@@ -597,17 +790,14 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		setImages([]);
 		setTextFiles([]);
 		tailLock.current = true;
-		// Brief composer lock so the (potentially large) frame lands cleanly.
-		setSending(true);
-		window.setTimeout(() => setSending(false), 600);
-	}, [client, draft, images, textFiles, isLive, readOnly, sending]);
+	}, [client, draft, images, textFiles, composerActive, readOnly]);
 
 	const pickFiles = useCallback(async (files: FileList | File[] | null) => {
 		if (!files || files.length === 0) return;
 		setAttachError(null);
 		const slots = MAX_IMAGES - images.length;
 		const picked = Array.from(files).slice(0, slots);
-		if (files.length > slots) setAttachError(`Не больше ${MAX_IMAGES} фото за раз`);
+		if (files.length > slots) setAttachError(`Больше ${MAX_IMAGES - images.length} не влезет — лимит ${MAX_IMAGES}`);
 		const encoded: PendingImage[] = [];
 		for (const file of picked) {
 			const img = await fileToPendingImage(file);
@@ -625,22 +815,24 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		client.sendAbort();
 	}, [client]);
 
-	const [voiceActive, setVoiceActive] = useState(false);
-	const sendVoice = useCallback(
-		(text: string) => {
-			const t = text.trim();
-			if (t.length === 0 || readOnly || !isLive || sending) return;
-			client.sendPrompt(t);
-			tailLock.current = true;
-			setSending(true);
-			window.setTimeout(() => setSending(false), 600);
-		},
-		[client, isLive, readOnly, sending],
-	);
+	// Android keyboard: visualViewport shrink = keyboard inset → lift the composer.
+	const [kbInset, setKbInset] = useState(0);
+	useEffect(() => {
+		const vv = window.visualViewport;
+		if (!vv) return;
+		const update = () => {
+			setKbInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
+		};
+		vv.addEventListener("resize", update);
+		vv.addEventListener("scroll", update);
+		update();
+		return () => {
+			vv.removeEventListener("resize", update);
+			vv.removeEventListener("scroll", update);
+		};
+	}, []);
 
-	const [infoOpen, setInfoOpen] = useState(false);
-	const [terminalOpen, setTerminalOpen] = useState(false);
-	const [filesOpen, setFilesOpen] = useState(false);
+	const [voiceActive, setVoiceActive] = useState(false);
 	const [toast, setToast] = useState<string | null>(null);
 	const toastTimer = useRef<number | null>(null);
 	const showToast = useCallback((message: string): void => {
@@ -654,6 +846,87 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		},
 		[],
 	);
+
+	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+	const [projectDir, setProjectDir] = useState<string | null>(null);
+	const [projectEntries, setProjectEntries] = useState<ProjectFileEntry[] | null>(null);
+	const [projectBusy, setProjectBusy] = useState(false);
+	const [projectError, setProjectError] = useState<string | null>(null);
+
+	const loadProjectDir = useCallback(
+		async (dir: string) => {
+			setProjectBusy(true);
+			setProjectError(null);
+			try {
+				const res = await listProjectFiles(dir);
+				setProjectEntries(res.entries.filter(e => e.type === "file"));
+				setProjectDir(dir);
+			} catch (err) {
+				setProjectError(err instanceof Error ? err.message : String(err));
+			} finally {
+				setProjectBusy(false);
+			}
+		},
+		[],
+	);
+
+	const attachProjectFile = useCallback(
+		async (name: string) => {
+			if (!host || projectBusy) return;
+			if (textFiles.length >= MAX_TEXT_FILES) {
+				showToast(`Не больше ${MAX_TEXT_FILES} файлов`);
+				return;
+			}
+			if (textFiles.some(t => t.name === name)) {
+				showToast("Уже прикреплён");
+				setProjectPickerOpen(false);
+				return;
+			}
+			setProjectBusy(true);
+			setProjectError(null);
+			try {
+				const content = await readProjectFile(host.cwd, name);
+				setTextFiles(prev => (prev.some(t => t.name === name) ? prev : [...prev, { name, content }]));
+				showToast(`Прикреплён: ${name}`);
+				setProjectPickerOpen(false);
+			} catch (err) {
+				setProjectError(err instanceof Error ? err.message : String(err));
+			} finally {
+				setProjectBusy(false);
+			}
+		},
+		[host, projectBusy, textFiles, showToast],
+	);
+	// Voice transcript lands in the draft for editing — never auto-sends.
+	// Вставка должна быть ЗАМЕТНОЙ: фокус в поле, вспышка рамки и тост.
+	const insertVoiceTranscript = useCallback(
+		(text: string) => {
+			const t = text.trim();
+			if (t.length === 0) {
+				showToast("Не удалось распознать речь — попробуй ещё раз");
+				return;
+			}
+			setDraft(prev => {
+				const base = prev.trimEnd();
+				return base.length === 0 ? t : `${base} ${t}`;
+			});
+			showToast("✓ Голос распознан — проверь и отправь");
+			requestAnimationFrame(() => {
+				const el = taRef.current;
+				if (!el) return;
+				el.focus();
+				el.setSelectionRange(el.value.length, el.value.length);
+				el.classList.remove("ss-input--flash");
+				void el.offsetWidth;
+				el.classList.add("ss-input--flash");
+			});
+		},
+		[showToast],
+	);
+
+	const [infoOpen, setInfoOpen] = useState(false);
+	const [terminalOpen, setTerminalOpen] = useState(false);
+	const [filesOpen, setFilesOpen] = useState(false);
 
 	const removeTextFile = useCallback((index: number) => {
 		setTextFiles(prev => prev.filter((_, i) => i !== index));
@@ -730,6 +1003,43 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 
 	const subagents = snap.agents.filter(a => a.kind === "sub");
 	const [openAgentId, setOpenAgentId] = useState<string | null>(null);
+	// An incoming approval must never hide under the subagent drawer.
+	useEffect(() => {
+		if (activeRequest !== null) setOpenAgentId(null);
+	}, [activeRequest]);
+
+	// Host notices → dismissible banners above the transcript.
+	const [dismissedNotices, setDismissedNotices] = useState<ReadonlySet<number>>(() => new Set());
+	const visibleNotices = snap.notices
+		.filter(notice => !dismissedNotices.has(notice.id))
+		// Одинаковые события подряд (вход/выход гостя циклами) — мусор в ленте.
+		.filter((notice, i, arr) => i === 0 || notice.message !== arr[i - 1].message)
+		.slice(-3);
+	const dismissNotice = useCallback((id: number) => {
+		setDismissedNotices(prev => new Set(prev).add(id));
+	}, []);
+
+	// Персистентный голосовой черновик: менеджер кладёт распознанный текст в
+	// localStorage, если сессия была закрыта; при монтировании забираем его в draft.
+	const [voiceNotice, setVoiceNotice] = useState(false);
+	useEffect(() => {
+		if (instanceId.length === 0) return;
+		const key = `ompPocket.voiceDraft.${instanceId}`;
+		let parked: string | null = null;
+		try {
+			parked = localStorage.getItem(key);
+			if (parked !== null) localStorage.removeItem(key);
+		} catch {
+			return;
+		}
+		const t = parked?.trim() ?? "";
+		if (t.length === 0) return;
+		setDraft(prev => {
+			const base = prev.trimEnd();
+			return base.length === 0 ? t : `${base} ${t}`;
+		});
+		setVoiceNotice(true);
+	}, [instanceId]);
 	const openAgent = subagents.find(a => a.id === openAgentId) ?? null;
 	const openAgentProgress = openAgent ? snap.progress.get(openAgent.id) : undefined;
 
@@ -769,6 +1079,11 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 				<div className="ss-ended-card">
 					<div className="ss-ended-title">Сессия закрыта</div>
 					{snap.endedReason && <div className="ss-ended-reason">{snap.endedReason}</div>}
+					{rejoinWaiting && (
+						<div className="ss-ended-reason">
+							Ищу поднятого агента с этой сессией — чат откроется сам, когда агент вернётся.
+						</div>
+					)}
 					<button type="button" className="ss-opt ss-opt--success" onClick={onLeave}>
 						Назад
 					</button>
@@ -800,10 +1115,50 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 				)}
 			</header>
 
-			{subagents.length > 0 && <AgentChipsRow subagents={subagents} onOpen={setOpenAgentId} />}
+			{subagents.length > 0 && <AgentChipsRow subagents={subagents} progress={snap.progress} onOpen={setOpenAgentId} />}
 
 			<div className="ss-transcript-wrap">
-				<div ref={scrollRef} className="ss-transcript" onScroll={onScroll}>
+				{(visibleNotices.length > 0 || voiceNotice) && (
+					<div className="ss-notices">
+						{voiceNotice && (
+							<div className="ss-notice ss-notice--info" role="status">
+								<Info size={16} />
+								<span className="ss-notice-text">Голосовое сообщение распознано — отправь когда готов</span>
+								<button
+									type="button"
+									className="ss-notice-x"
+									aria-label="Скрыть"
+									onClick={() => setVoiceNotice(false)}
+								>
+									<X size={16} />
+								</button>
+							</div>
+						)}
+						{visibleNotices.map(notice => (
+							<div
+								key={notice.id}
+								className={`ss-notice ss-notice--${notice.level}`}
+								role="alert"
+							>
+								{notice.level === "error" ? (
+									<CircleAlert size={16} />
+								) : (
+									<Info size={16} />
+								)}
+								<span className="ss-notice-text">{noticeRu(notice.message)}</span>
+								<button
+									type="button"
+									className="ss-notice-x"
+									aria-label="Скрыть"
+									onClick={() => dismissNotice(notice.id)}
+								>
+									<X size={16} />
+								</button>
+							</div>
+						))}
+					</div>
+				)}
+				<div ref={scrollRef} className="ss-transcript">
 					<Transcript
 						entries={snap.entries}
 						stream={snap.stream}
@@ -818,16 +1173,31 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 						<ArrowDown size={18} />
 					</button>
 				)}
-				{snap.phase === "reconnecting" && <div className="ss-phase-banner">Переподключение…</div>}
+				{snap.phase === "reconnecting" && (
+					<div className="ss-phase-banner">Нет сети — переподключение…</div>
+				)}
 				{snap.phase === "connecting" && <div className="ss-phase-banner">Подключение…</div>}
-				{snap.phase === "waiting" && <div className="ss-phase-banner">Ожидание снимка сессии…</div>}
+				{snap.phase === "waiting" && (
+					<div className="ss-phase-banner">
+						{snap.loading !== null
+							? `Загрузка сессии: ${snap.loading.received} / ${snap.loading.total}`
+							: "Ожидание снимка сессии…"}
+					</div>
+				)}
 			</div>
 
-			<div className="ss-composer-zone">
+			<div
+				className="ss-composer-zone"
+				style={{ "--ss-kb": `${kbInset}px` } as CSSProperties}
+			>
+				{todoBoard !== null && <TodoBar board={todoBoard} />}
+				{!composerActive && (
+					<div className="ss-offline-note">Не в сети — отправим при подключении</div>
+				)}
 				{queuedCount > 0 && (
 					<div className="ss-queued-row">
 						{/* Removing queued messages is host-RPC-only; chip is display-only. */}
-						<span className="ss-queued-chip">В очереди: {queuedCount}</span>
+						<span className="ss-queued-chip">В очереди: {queuedCount} {pluralRu(queuedCount, "сообщение", "сообщения", "сообщений")}</span>
 					</div>
 				)}
 				{textFiles.length > 0 && (
@@ -848,29 +1218,24 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 						))}
 					</div>
 				)}
-				{images.length > 0 && (
-					<div className="ss-attach-row">
-						{images.map((img, i) => (
-							<span key={`${i}:${img.data.slice(0, 16)}`} className="ss-attach-thumb">
-								<img src={img.url} alt="" />
-								<button
-									type="button"
-									className="ss-attach-x"
-									aria-label="Убрать фото"
-									onClick={() => removeImage(i)}
-								>
-									<X size={12} />
-								</button>
-							</span>
-						))}
-					</div>
-				)}
 				{attachError != null && <div className="ss-attach-error">{attachError}</div>}
 				<div className="ss-composer">
-					{busy && (
-						<button type="button" className="ss-icon-btn ss-interrupt" onClick={abort} aria-label="Прервать">
-							<Square size={16} />
-						</button>
+					{images.length > 0 && (
+						<div className="ss-attach-row">
+							{images.map((img, i) => (
+								<span key={`${i}:${img.data.slice(0, 16)}`} className="ss-attach-thumb">
+									<img src={img.url} alt="" />
+									<button
+										type="button"
+										className="ss-attach-x"
+										aria-label="Убрать фото"
+										onClick={() => removeImage(i)}
+									>
+										<X size={12} />
+									</button>
+								</span>
+							))}
+						</div>
 					)}
 					<input
 						ref={fileRef}
@@ -894,45 +1259,67 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 							e.target.value = "";
 						}}
 					/>
-					<button
-						type="button"
-						className="ss-icon-btn ss-attach"
-						aria-label="Прикрепить"
-						aria-expanded={attachMenuOpen}
-						disabled={readOnly || !isLive || sending}
-						onClick={() => setAttachMenuOpen(true)}
-					>
-						<Paperclip size={20} />
-					</button>
-					{!voiceActive ? (
-						<textarea
-							ref={taRef}
-							className="ss-input"
-							rows={1}
-							value={draft}
-							placeholder="Сообщение агенту…"
-							disabled={readOnly || !isLive || sending}
-							onChange={e => setDraft(e.target.value)}
-						/>
-					) : (
-						<span className="ss-input" aria-hidden="true" />
-					)}
-					<VoiceRecorder onSend={sendVoice} onActiveChange={setVoiceActive} disabled={readOnly || !isLive || sending} />
-					{images.length > 0 && <span className="ss-attach-hint">{images.length} фото</span>}
-					<button
-						type="button"
-						className="ss-send"
-						disabled={
-							(draft.trim().length === 0 && images.length === 0 && textFiles.length === 0) ||
-							readOnly ||
-							!isLive ||
-							sending
-						}
-						onClick={send}
-						aria-label="Отправить"
-					>
-						<ArrowUp size={22} />
-					</button>
+					{/* textarea всегда смонтирована — запись не должна перестраивать низ. */}
+					<textarea
+						ref={taRef}
+						className={`ss-input${voiceActive ? " ss-input--muted" : ""}`}
+						rows={1}
+						value={draft}
+						placeholder={voiceActive ? "Запись голоса…" : "Спроси OMP…"}
+						disabled={readOnly}
+						onChange={e => setDraft(e.target.value)}
+						onKeyDown={e => {
+							if (e.key !== "Enter" || e.shiftKey) return;
+							// IME composition (CJK and friends): Enter confirms the
+							// candidate, it must not send.
+							if (e.nativeEvent.isComposing) return;
+							e.preventDefault();
+							void send();
+						}}
+					/>
+					<div className="ss-composer-controls">
+						<button
+							type="button"
+							className="ss-icon-btn ss-attach"
+							aria-label="Прикрепить"
+							aria-expanded={attachMenuOpen}
+							disabled={readOnly || !composerActive}
+							onClick={() => setAttachMenuOpen(true)}
+						>
+							<Plus size={22} />
+						</button>
+						{host && (
+							<button
+								type="button"
+								className="ss-model-chip"
+								onClick={() => setInfoOpen(true)}
+								aria-label="Модель и агент — подробнее"
+								title="Модель и агент"
+							>
+								{host.model.id}
+							</button>
+						)}
+						{/* mic/send switch: draft + attachments present → send, otherwise mic.
+						    textarea всегда смонтирована — запись не перестраивает низ. */}
+						{draft.trim().length > 0 || images.length > 0 || textFiles.length > 0 ? (
+							<button
+								type="button"
+								className="ss-send"
+								disabled={readOnly || !composerActive}
+								onClick={() => void send()}
+								aria-label="Отправить"
+							>
+								<ArrowUp size={22} />
+							</button>
+						) : (
+							<VoiceRecorder
+								instanceId={instanceId}
+								onTranscript={insertVoiceTranscript}
+								onActiveChange={setVoiceActive}
+								disabled={readOnly || !composerActive}
+							/>
+						)}
+					</div>
 				</div>
 			</div>
 
@@ -993,8 +1380,74 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 							<FileText size={18} />
 							Файл
 						</button>
+						<button
+							type="button"
+							className="sa-item"
+							onClick={() => {
+								setAttachMenuOpen(false);
+								setProjectPickerOpen(true);
+								if (host) void loadProjectDir(host.cwd);
+							}}
+						>
+							<FolderOpen size={18} />
+							Файл из проекта
+						</button>
 						<button type="button" className="sa-item sa-item--cancel" onClick={() => setAttachMenuOpen(false)}>
 							Отмена
+						</button>
+					</div>
+				</>
+			)}
+			{projectPickerOpen && host && (
+				<>
+					<div className="sa-backdrop" onClick={() => setProjectPickerOpen(false)} />
+					<div className="sa-sheet" role="dialog" aria-modal="true" aria-label="Файлы проекта">
+						<div className="sa-handle" />
+						<div className="sa-proj-title">Файлы проекта · {basename(host.cwd)}</div>
+						{projectError != null && (
+							<div className="ss-rename-error ss-proj-error" role="alert">
+								{projectError}
+							</div>
+						)}
+						{projectBusy && <div className="sa-item ss-proj-busy">Загрузка…</div>}
+						{!projectBusy &&
+							projectDir != null &&
+							projectDir !== host.cwd && (
+								<button
+									type="button"
+									className="sa-item"
+									onClick={() => void loadProjectDir(projectDir.slice(0, projectDir.lastIndexOf("/")) || host.cwd)}
+								>
+									<FolderOpen size={16} /> Наверх
+								</button>
+							)}
+						{!projectBusy &&
+							(projectEntries ?? []).map(entry =>
+								entry.type === "dir" ? (
+									<button
+										key={entry.name}
+										type="button"
+										className="sa-item"
+										onClick={() => void loadProjectDir(`${projectDir}/${entry.name}`)}
+									>
+										<FolderOpen size={16} /> {entry.name}
+									</button>
+								) : (
+									<button
+										key={entry.name}
+										type="button"
+										className="sa-item"
+										onClick={() => void attachProjectFile(entry.name)}
+									>
+										<FileText size={16} /> {entry.name}
+									</button>
+								),
+							)}
+						{!projectBusy && projectEntries != null && projectEntries.length === 0 && (
+							<div className="sa-item ss-proj-busy">В папке нет файлов</div>
+						)}
+						<button type="button" className="sa-item sa-item--cancel" onClick={() => setProjectPickerOpen(false)}>
+							Готово
 						</button>
 					</div>
 				</>

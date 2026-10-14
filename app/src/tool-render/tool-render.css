@@ -20,17 +20,25 @@
 	--tv-ring: var(--ring, oklch(0.817 0.112 205 / 70%));
 	--tv-mono: var(--font-mono, ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace);
 
-	border: 1px solid var(--tv-border);
+	border: 1px solid transparent;
 	border-radius: 6px;
 	font-family: var(--tv-mono);
-	font-size: 12px;
+	font-size: 0.75rem;
 	line-height: 1.5;
 	color: var(--tv-fg);
 	isolation: isolate;
 	overflow: hidden;
 }
 
-.tv-card--error {
+/* Референс ChatGPT: свёрнутая строка инструмента — тихая строка ленты;
+   рамку и поверхность получают только раскрытые карточки и ошибки. */
+.tv-card:has(.tv-body) {
+	border-color: var(--tv-border);
+	background: var(--tv-raised);
+}
+
+.tv-card--error,
+.tv-card--error:has(.tv-body) {
 	border-color: color-mix(in oklch, var(--tv-err) 40%, var(--tv-border));
 }
 
@@ -41,10 +49,12 @@
 	align-items: center;
 	gap: 8px;
 	width: 100%;
-	padding: 5px 10px;
+	min-height: 44px;
+	padding: 0 12px;
 	background: none;
 	border: 0;
 	font: inherit;
+	font-size: 0.8125rem;
 	color: inherit;
 	text-align: left;
 	cursor: pointer;
@@ -59,6 +69,11 @@
 .tv-head:focus-visible {
 	outline: 2px solid var(--tv-ring);
 	outline-offset: -2px;
+}
+
+.tv-type {
+	flex: none;
+	color: var(--tv-faint);
 }
 
 .tv-status {
@@ -92,10 +107,10 @@
 
 .tv-name {
 	flex: none;
-	font-size: 11px;
+	font-size: 0.8125rem;
 	font-weight: 600;
 	letter-spacing: 0.02em;
-	color: var(--tv-muted);
+	color: var(--tv-fg);
 }
 
 .tv-sum {
@@ -104,12 +119,28 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-size: 11.5px;
-	color: var(--tv-muted);
+	font-size: 0.8125rem;
+	color: var(--fg-secondary, var(--tv-muted));
 }
 
 .tv-sum > * {
 	white-space: nowrap;
+}
+
+.tv-state {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 4px;
+	color: var(--fg-secondary, var(--tv-muted));
+}
+
+.tv-state--err {
+	color: var(--tv-err);
+}
+
+.tv-state-word {
+	font-size: 0.75rem;
 }
 
 .tv-chev {
@@ -133,21 +164,21 @@
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
-	padding: 8px 10px 10px;
+	padding: 8px 12px 12px;
 	border-top: 1px solid var(--tv-border);
 }
 
 .tv-intent {
 	font-style: italic;
-	font-size: 11px;
-	color: var(--tv-faint);
+	font-size: 0.75rem;
+	color: var(--fg-secondary, var(--tv-faint));
 }
 
 .tv-partial {
 	margin: 0;
 	padding: 6px 10px;
 	border-top: 1px solid var(--tv-border);
-	font-size: 11px;
+	font-size: 0.6875rem;
 	line-height: 1.45;
 	color: var(--tv-faint);
 	white-space: pre-wrap;
@@ -163,7 +194,7 @@
 	padding: 0 5px;
 	border-radius: 3px;
 	background: var(--tv-raised);
-	font-size: 10px;
+	font-size: 0.625rem;
 	line-height: 16px;
 	color: var(--tv-muted);
 	vertical-align: 1px;
@@ -224,9 +255,13 @@
 }
 
 .tv-agent-link {
+	display: inline-flex;
+	align-items: center;
+	min-height: 44px;
+	padding: 0 10px;
 	border: 0;
 	font: inherit;
-	font-size: 10px;
+	font-size: 0.8125rem;
 	cursor: pointer;
 }
 
@@ -260,11 +295,11 @@
 	display: grid;
 	grid-template-columns: max-content 1fr;
 	gap: 2px 10px;
-	font-size: 11.5px;
+	font-size: 0.75rem;
 }
 
 .tv-kv-key {
-	color: var(--tv-faint);
+	color: var(--fg-secondary, var(--tv-faint));
 }
 
 .tv-kv-val {
@@ -287,10 +322,17 @@
 	border-radius: 4px;
 	background: var(--tv-inset);
 	font-family: var(--tv-mono);
-	font-size: 11.5px;
+	font-size: 0.75rem;
 	line-height: 1.5;
 	overflow-x: auto;
 	tab-size: 3;
+}
+
+/* The card is the ONE surface: expanded bodies render flat, no inset boxes. */
+.tv-body .tv-pre {
+	background: none;
+	padding: 0 1px;
+	border-radius: 0;
 }
 
 .tv-pre--wrap {
@@ -309,22 +351,59 @@
 
 .tv-out-title {
 	padding: 0 1px 3px;
-	font-size: 10px;
+	font-size: 0.75rem;
 	letter-spacing: 0.05em;
 	text-transform: uppercase;
+	color: var(--fg-secondary, var(--tv-faint));
+}
+
+.tv-out-foot {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 2px;
+}
+
+.tv-copy {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	background: none;
+	border: 0;
 	color: var(--tv-faint);
+	cursor: pointer;
+	touch-action: manipulation;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.tv-copy:hover {
+	color: var(--tv-fg);
+}
+
+.tv-copy:focus-visible {
+	outline: 2px solid var(--tv-ring);
+	outline-offset: -2px;
 }
 
 .tv-expand {
+	display: inline-flex;
+	align-items: center;
 	align-self: flex-start;
-	margin-top: 3px;
-	padding: 0 1px;
+	min-height: 44px;
+	margin: 0;
+	padding: 0 10px;
 	background: none;
 	border: 0;
 	font-family: var(--tv-mono);
-	font-size: 10.5px;
-	color: var(--tv-faint);
+	font-size: 0.75rem;
+	color: var(--fg-secondary, var(--tv-faint));
 	cursor: pointer;
+	touch-action: manipulation;
+	-webkit-tap-highlight-color: transparent;
 }
 
 .tv-expand:hover {
@@ -334,7 +413,7 @@
 
 .tv-expand:focus-visible {
 	outline: 2px solid var(--tv-ring);
-	outline-offset: 1px;
+	outline-offset: -2px;
 	border-radius: 2px;
 }
 
@@ -342,8 +421,9 @@
 
 .tv-cmd {
 	display: flex;
+	align-items: center;
 	gap: 7px;
-	font-size: 11.5px;
+	font-size: 0.8125rem;
 }
 
 .tv-cmd-prompt {
@@ -353,6 +433,7 @@
 }
 
 .tv-cmd-text {
+	flex: 1;
 	min-width: 0;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
@@ -368,10 +449,16 @@
 	margin: 0;
 	border-radius: 4px;
 	background: var(--tv-inset);
-	font-size: 11.5px;
+	font-size: 0.75rem;
 	line-height: 1.5;
 	overflow-x: auto;
 	padding: 5px 0;
+}
+
+/* The card is the ONE surface: no inset diff box inside expanded bodies. */
+.tv-body .tv-diff {
+	background: none;
+	padding: 0;
 }
 
 .tv-diff-row {
@@ -414,7 +501,7 @@
 
 .tv-cell-title {
 	padding: 0 1px 3px;
-	font-size: 10px;
+	font-size: 0.625rem;
 	letter-spacing: 0.05em;
 	text-transform: uppercase;
 	color: var(--tv-faint);
@@ -426,7 +513,7 @@
 	display: flex;
 	flex-direction: column;
 	gap: 3px;
-	font-size: 11.5px;
+	font-size: 0.75rem;
 }
 
 .tv-row {
@@ -451,14 +538,14 @@
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
-	font-size: 11.5px;
+	font-size: 0.75rem;
 }
 
 .tv-todo-phase {
 	margin-top: 4px;
 	color: var(--tv-muted);
 	font-weight: 600;
-	font-size: 10.5px;
+	font-size: 0.65625rem;
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
 }
@@ -507,7 +594,7 @@
 	padding: 6px 9px;
 	border-radius: 4px;
 	background: var(--tv-raised);
-	font-size: 11.5px;
+	font-size: 0.75rem;
 	color: var(--tv-muted);
 	overflow-wrap: anywhere;
 }
@@ -547,7 +634,7 @@
 /* ---- markdown-ish prose (plain text bodies) ---- */
 
 .tv-prose {
-	font-size: 11.5px;
+	font-size: 0.75rem;
 	line-height: 1.55;
 	color: var(--tv-fg);
 	white-space: pre-wrap;

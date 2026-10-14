@@ -14,19 +14,57 @@ const TYPES: readonly { id: MemoryTable; label: string }[] = [
 	{ id: "annotations", label: "Аннотации" },
 ];
 
+/** «vincentfox-1ecs4vgag6mnf» → { base: "vincentfox", tail: "1ecs4vgag6mnf" } —
+ * хвост-суффикс после «-» длиной >6 из строчных латинских букв/цифр считаем хэшем. */
+function humanizeBank(name: string): { base: string; tail: string | null } {
+	const idx = name.lastIndexOf("-");
+	if (idx <= 0) return { base: name, tail: null };
+	const tail = name.slice(idx + 1);
+	if (tail.length > 6 && /^[a-z0-9]+$/.test(tail) && /\d/.test(tail)) {
+		return { base: name.slice(0, idx), tail };
+	}
+	return { base: name, tail: null };
+}
+
+/** Служебная разметка протокола ([user:start], [assistant:end], [toolCall]…) → читаемый текст. */
+function cleanMemoryText(text: string): string {
+	return text
+		.replace(/\[[a-z]+:(?:start|end)\]/gi, " ")
+		.replace(/\[(?:role:\s*)?(?:user|assistant|system|toolCall|toolResult|toolUse|custom_message|compaction)\]/gi, " ")
+		.replace(/^[ \t]*(?:role:\s*)?(?:user|assistant|system)[ \t]*$(\n?)/gim, "")
+		// XML-подобные служебные теги протокола (<file name="…">, </file>, <context>…)
+		.replace(/<\/?[a-z][a-z0-9_-]*(?:\s+[^<>]{0,120})?>/gi, " ")
+		.replace(/[ \t]{2,}/g, " ")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
+/** Порог 0.66/0.33 → высокая/средняя/низкая. */
+function importanceLabel(value: number): string {
+	if (value >= 0.66) return "высокая";
+	if (value >= 0.33) return "средняя";
+	return "низкая";
+}
+
 /** Transcript chunks and gists can be long; collapsed until tapped. */
 function MemCard(props: { entry: MemoryEntry }): ReactNode {
 	const { entry } = props;
 	const [open, setOpen] = useState(false);
 	const when = entry.ts && Number.isFinite(Date.parse(entry.ts)) ? relTime(Date.parse(entry.ts)) : null;
 	const stats: string[] = [];
-	if (entry.importance != null) stats.push(`важность ${entry.importance.toFixed(2)}`);
+	if (entry.importance != null) stats.push(`Важность: ${importanceLabel(entry.importance)}`);
 	if (entry.recallCount != null && entry.recallCount > 0) stats.push(`вспомянуто ×${entry.recallCount}`);
 	if (entry.confidence != null) stats.push(`уверенность ${Math.round(entry.confidence * 100)}%`);
+	const body = cleanMemoryText(entry.body);
 	return (
-		<div className="pk-card mem-card" onClick={() => setOpen(o => !o)}>
-			{entry.title && <div className="mem-title">{entry.title}</div>}
-			<div className={`mem-body${open ? " mem-body--open" : ""}`}>{entry.body}</div>
+		<button
+			type="button"
+			className="pk-card mem-card"
+			aria-expanded={open}
+			onClick={() => setOpen(o => !o)}
+		>
+			{entry.title && <div className="mem-title">{cleanMemoryText(entry.title)}</div>}
+			<div className={`mem-body${open ? " mem-body--open" : ""}`}>{body}</div>
 			{(entry.source || entry.kind || when || stats.length > 0) && (
 				<div className="mem-meta">
 					{entry.source && <span className="pk-chip">{entry.source}</span>}
@@ -35,7 +73,7 @@ function MemCard(props: { entry: MemoryEntry }): ReactNode {
 					{stats.length > 0 && <span className="mem-when">{stats.join(" · ")}</span>}
 				</div>
 			)}
-		</div>
+		</button>
 	);
 }
 
@@ -127,12 +165,16 @@ export function MemoryScreen(): ReactNode {
 	return (
 		<div className="mem-screen">
 			<div className="mem-row">
-				{banks.map(b => (
-					<button key={b.name} className={`pk-chip${b.name === bank ? " pk-chip--on" : ""}`} onClick={() => setBank(b.name)}>
-						{b.name}
-						<span className="mem-count">{b.total}</span>
-					</button>
-				))}
+				{banks.map(b => {
+					const { base, tail } = humanizeBank(b.name);
+					return (
+						<button key={b.name} className={`pk-chip${b.name === bank ? " pk-chip--on" : ""}`} onClick={() => setBank(b.name)}>
+							{base}
+							{tail && <span className="mem-hash">{tail}</span>}
+							<span className="mem-count">{b.total}</span>
+						</button>
+					);
+				})}
 			</div>
 			<div className="mem-row">
 				{TYPES.map(t => (
@@ -157,6 +199,17 @@ export function MemoryScreen(): ReactNode {
 			{error != null && (
 				<div className="pk-empty">
 					<div className="pk-empty-text">{error}</div>
+				</div>
+			)}
+			{loading && entries.length === 0 && (
+				<div className="pk-list" aria-hidden="true">
+					{[0, 1, 2].map(i => (
+						<div key={i} className="pk-card mem-card">
+							<span className="pk-skeleton mem-sk mem-sk--title" />
+							<span className="pk-skeleton mem-sk" />
+							<span className="pk-skeleton mem-sk mem-sk--short" />
+						</div>
+					))}
 				</div>
 			)}
 			{!loading && error == null && entries.length === 0 && (

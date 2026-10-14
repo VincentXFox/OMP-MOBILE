@@ -7,13 +7,13 @@
 	width: 100%;
 	box-sizing: border-box;
 	margin: 0 auto;
-	padding: 10px 12px 16px;
+	padding: 12px 12px 16px;
 }
 
 .su-composer {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 12px;
 }
 
 .su-task {
@@ -21,7 +21,7 @@
 	box-sizing: border-box;
 	resize: none;
 	min-height: 72px;
-	font-size: 15px;
+	font-size: var(--text-body);
 }
 
 .su-pick {
@@ -37,20 +37,25 @@
 
 .su-pick-chip {
 	cursor: pointer;
+	/* Тап-цель: выбор агента — основное действие, ≥48px. */
+	min-height: 48px;
+	padding: 0 16px;
 }
 
 .su-all {
 	flex-shrink: 0;
-	font-size: 12px;
+	font-size: var(--text-subhead);
 	color: var(--accent);
 	background: none;
 	border: none;
-	padding: 6px 2px;
+	padding: 0 8px;
+	/* Тап-цель: основное действие, ≥48px. */
+	min-height: 48px;
 	cursor: pointer;
 }
 
 .su-none {
-	font-size: 12.5px;
+	font-size: var(--text-footnote);
 	color: var(--muted);
 	align-self: center;
 }
@@ -60,6 +65,17 @@
 	align-items: center;
 	justify-content: center;
 	gap: 8px;
+	/* Единственный primary на экране: акцентная заливка, 48px, semibold. */
+	min-height: 48px;
+	font-weight: var(--weight-semibold);
+}
+
+/* Честный disabled: серый, а не полупрозрачный акцент. */
+.pk-btn.su-send:disabled {
+	background: var(--muted);
+	color: var(--bg);
+	opacity: 1;
+	transform: none;
 }
 
 .su-results {
@@ -69,25 +85,25 @@
 }
 
 .su-result {
-	font-size: 12.5px;
+	font-size: var(--text-footnote);
 	color: var(--success);
 	word-break: break-word;
 }
 
 .su-result--err {
-	color: var(--error, var(--warn, #e5484d));
+	color: var(--error);
 }
 
 .su-error {
-	font-size: 13px;
-	color: var(--error, var(--warn, #e5484d));
+	font-size: var(--text-subhead);
+	color: var(--error);
 	padding: 0 4px;
 	word-break: break-word;
 }
 
-.su-loading,
-.su-empty {
-	font-size: 13.5px;
+/* Пустое состояние доски — общий .pk-empty из pocket.css. */
+.su-loading {
+	font-size: var(--text-subhead);
 	color: var(--muted);
 	text-align: center;
 	padding: 24px 0;
@@ -108,16 +124,18 @@
 	color: var(--fg);
 	cursor: pointer;
 	text-align: left;
+	/* Тап-цель: раскрытие карточки — основное действие, ≥48px. */
+	min-height: 48px;
 }
 
 .su-name {
-	font-size: 15px;
-	font-weight: 600;
+	font-size: var(--text-body);
+	font-weight: var(--weight-semibold);
 	color: var(--accent);
 }
 
 .su-status {
-	font-size: 12px;
+	font-size: var(--text-footnote);
 	color: var(--muted);
 }
 
@@ -132,9 +150,9 @@
 }
 
 .su-title {
-	font-size: 13px;
+	font-size: var(--text-subhead);
 	color: var(--fg);
-	margin-top: 6px;
+	margin-top: 8px;
 	display: -webkit-box;
 	-webkit-line-clamp: 2;
 	-webkit-box-orient: vertical;
@@ -146,8 +164,8 @@
 	display: flex;
 	flex-wrap: wrap;
 	gap: 4px;
-	margin-top: 6px;
-	font-size: 12px;
+	margin-top: 8px;
+	font-size: var(--text-footnote);
 	color: var(--muted);
 	word-break: break-word;
 }
@@ -185,7 +203,7 @@
 }
 
 .su-dot--blocked {
-	background: var(--warning, #f5a623);
+	background: var(--warning);
 }
 
 .su-dot--done {
@@ -196,38 +214,24 @@
 	background: var(--muted);
 }
 
-.su-dot--pulse {
-	animation: su-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes su-pulse {
-	0%,
-	100% {
-		opacity: 1;
-	}
-	50% {
-		opacity: 0.35;
-	}
-}
-
 .su-detail {
-	margin-top: 10px;
+	margin-top: 12px;
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 8px;
 }
 
 .su-sublist {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 8px;
 }
 
 .su-subrow {
 	display: flex;
 	align-items: baseline;
 	gap: 8px;
-	font-size: 12.5px;
+	font-size: var(--text-footnote);
 	min-width: 0;
 }
 
@@ -252,18 +256,18 @@
 
 .su-subrow-when {
 	color: var(--muted);
-	font-size: 11.5px;
+	font-size: var(--text-caption);
 	flex-shrink: 0;
 }
 
 .su-tail {
 	margin: 0;
-	padding: 10px;
+	padding: 12px;
 	background: var(--bg-inset);
 	border: 1px solid var(--border);
-	border-radius: var(--radius, 8px);
-	font-family: var(--font-mono, monospace);
-	font-size: 11.5px;
+	border-radius: var(--radius-sm);
+	font-family: var(--font-mono);
+	font-size: var(--text-caption);
 	line-height: 1.45;
 	color: var(--fg);
 	white-space: pre-wrap;
@@ -279,13 +283,14 @@
 
 .su-open {
 	align-self: flex-start;
-	font-size: 13.5px;
-	padding: 8px 14px;
-	min-height: 38px;
+	font-size: var(--text-subhead);
+	padding: 0 16px;
+	/* Вторичное действие, тап-цель var(--tap). */
+	min-height: var(--tap);
 }
 
 .su-orphans {
-	font-size: 12px;
+	font-size: var(--text-footnote);
 	color: var(--muted);
 	text-align: center;
 	padding: 4px 0 0;

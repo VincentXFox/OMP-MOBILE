@@ -1,10 +1,15 @@
 import { ArrowLeft, CornerDownLeft, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getTerminal, sendTerminalKeys, sendTerminalText } from "../../lib/gateway";
 import "./terminal.css";
 
 const POLL_MS = 2500;
+
+/** Рендерим хвост снапшота: полный может быть мегабайтом скроллбака. */
+const MAX_LINES = 700;
+/** Псевдографика/блоки/стрелки — строки TUI-таблиц, которым нужны колонки. */
+const BOX_RE = /[\u2500-\u257F\u2580-\u259F\u2190-\u21FF\u25A0-\u25CF]/;
 
 const NAV_KEYS = [
 	{ key: "esc", label: "Esc" },
@@ -19,10 +24,15 @@ const NAV_KEYS = [
 export function TerminalScreen(props: { instanceId: string; label: string; onBack: () => void }): ReactNode {
 	const { instanceId, label, onBack } = props;
 	const [text, setText] = useState<string | null>(null);
+	const { lines, cut } = useMemo(() => {
+		const all = (text ?? "").split("\n");
+		const hidden = Math.max(0, all.length - MAX_LINES);
+		return { lines: hidden > 0 ? all.slice(-MAX_LINES) : all, cut: hidden };
+	}, [text]);
 	const [error, setError] = useState<string | null>(null);
 	const [draft, setDraft] = useState("");
 	const [busy, setBusy] = useState(false);
-	const preRef = useRef<HTMLPreElement | null>(null);
+	const preRef = useRef<HTMLDivElement | null>(null);
 	const tailLock = useRef(true);
 
 	const refresh = useCallback(async () => {
@@ -47,17 +57,30 @@ export function TerminalScreen(props: { instanceId: string; label: string; onBac
 	}, [refresh]);
 
 	// Tail-follow: stick to bottom on new output unless the user scrolled up.
+	// Горизонтальную позицию НЕ трогаем: пользователь читает таблицу справа.
 	useLayoutEffect(() => {
 		const el = preRef.current;
 		if (!el || !tailLock.current) return;
 		el.scrollTop = el.scrollHeight;
 	}, [text]);
 
+	const [hScroll, setHScroll] = useState(false);
+	const syncHScroll = useCallback((el: HTMLElement) => {
+		setHScroll(el.scrollWidth - el.scrollLeft - el.clientWidth > 12);
+	}, []);
+
 	const onScroll = useCallback(() => {
 		const el = preRef.current;
 		if (!el) return;
 		tailLock.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 60;
-	}, []);
+		syncHScroll(el);
+	}, [syncHScroll]);
+
+	// Фейд справа актуален и после каждого нового снапшота.
+	useLayoutEffect(() => {
+		const el = preRef.current;
+		if (el) syncHScroll(el);
+	}, [text, syncHScroll]);
 
 	const tapKey = useCallback(
 		async (key: string) => {
@@ -107,20 +130,31 @@ export function TerminalScreen(props: { instanceId: string; label: string; onBac
 
 			{error != null && <div className="ts-error">{error}</div>}
 
-			<pre ref={preRef} className="ts-screen" onScroll={onScroll}>
-				{text ?? "…"}
-			</pre>
+			<div className={`ts-screen-wrap${hScroll ? " ts-screen-wrap--scroll" : ""}`}>
+				<div ref={preRef} className="ts-screen" onScroll={onScroll}>
+					{cut > 0 && (
+						<div className="ts-line ts-line--cut">… выше скрыто {cut.toLocaleString("ru-RU")} строк</div>
+					)}
+					{lines.map((ln, i) => (
+						<div key={i} className={`ts-line${BOX_RE.test(ln) ? " ts-line--grid" : ""}`}>
+							{ln}
+						</div>
+					))}
+				</div>
+			</div>
 
 			<div className="ts-keys-zone">
 				<div className="ts-key-row">
 					<button
 						type="button"
-						className="ts-key ts-key--wide"
+						className="ts-key ts-key--interrupt"
 						disabled={busy}
 						onClick={() => void tapKey("ctrl+c")}
 					>
-						ctrl+c
+						Прервать (Ctrl+C)
 					</button>
+				</div>
+				<div className="ts-key-row">
 					{NAV_KEYS.map(k => (
 						<button key={k.key} type="button" className="ts-key" disabled={busy} onClick={() => void tapKey(k.key)}>
 							{k.label}
