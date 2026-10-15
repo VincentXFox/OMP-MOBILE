@@ -485,6 +485,9 @@
 	max-height: 40vh;
 	overflow-y: auto;
 	overscroll-behavior: contain;
+	/* намёк «список продолжается ниже», чтобы обрезанный пункт не выглядел багом */
+	mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), rgba(0, 0, 0, 0.25));
+	-webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), rgba(0, 0, 0, 0.25));
 }
 
 .ss-todo-phase-name {

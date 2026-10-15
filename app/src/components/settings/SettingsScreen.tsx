@@ -60,7 +60,11 @@ function ConnectionSection(props: { onToast: (text: string) => void }): ReactNod
 			setGatewayBase(prevBase);
 			setToken(prevToken);
 			const status = err instanceof GatewayError ? err.status : 0;
-			setCheck({ ok: false, message: status === 401 ? "401: неверный токен — сохранены прежние значения" : `Ошибка: ${err instanceof Error ? err.message : String(err)} — сохранены прежние значения` });
+			const mixed =
+				location.protocol === "https:" && nextBase.startsWith("http://")
+					? "Браузер блокирует http-адрес внутри https-страницы (mixed content) — используй https-адрес или оставь поле пустым (same-origin). "
+					: "";
+			setCheck({ ok: false, message: `${mixed}Ошибка: ${err instanceof Error ? err.message : String(err)} — сохранены прежние значения` });
 		} finally {
 			setChecking(false);
 		}

@@ -83,6 +83,17 @@
 	border-radius: var(--radius-sm);
 }
 
+.tr-msg-img-fallback {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 12px;
+	border: 1px dashed var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--fg-muted);
+	font-size: 0.8125rem;
+}
+
 /* ---- chips & badges ---- */
 
 .tr-badge {

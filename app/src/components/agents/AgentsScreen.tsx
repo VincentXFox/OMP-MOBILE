@@ -1,9 +1,9 @@
-import { Check, CircleAlert, Lock, OctagonPause, Play, Plus, Timer, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Folder, Lock, OctagonPause, Play, Plus, Timer, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { basename } from "../../lib/format";
-import type { HostInfo, SuperAgent, SuperBoard } from "../../lib/gateway";
-import { fetchSuperBoard, startAgent } from "../../lib/gateway";
+import type { HostInfo, ProjectFileEntry, SuperAgent, SuperBoard } from "../../lib/gateway";
+import { fetchSuperBoard, listProjectFiles, startAgent } from "../../lib/gateway";
 import "./agents.css";
 
 export type HostStatus = {
@@ -155,6 +155,135 @@ function HostCard(props: { host: HostInfo; board: SuperBoard | null; onOpen: (ho
 	);
 }
 
+function parentPath(path: string): string {
+	const idx = path.lastIndexOf("/");
+	if (idx <= 0) return "/";
+	return path.slice(0, idx);
+}
+
+/** Сегментированные крошки пикера — тот же паттерн, что fs-crumbs в FilesScreen:
+ * корень «/», промежуточные сегменты сжаты в «…», последний показан целиком. */
+function PickerBreadcrumbs(props: { path: string; onJump: (path: string) => void }): ReactNode {
+	const { path, onJump } = props;
+	const parts = path.split("/").filter(p => p.length > 0);
+	const current = parts[parts.length - 1] ?? "";
+	const rootCurrent = parts.length === 0;
+	return (
+		<div className="ag-crumbs" role="navigation" aria-label="Путь">
+			<button type="button" className={`ag-crumb${rootCurrent ? " ag-crumb--current" : ""}`} onClick={() => onJump("/")} aria-label="Корень">
+				/
+			</button>
+			{parts.length > 1 && (
+				<button type="button" className="ag-crumb" onClick={() => onJump(parentPath(path))} aria-label="На уровень выше">
+					…
+				</button>
+			)}
+			{!rootCurrent && (
+				<>
+					<span className="ag-crumb-sep">/</span>
+					<span className="ag-crumb ag-crumb--current" aria-current="location">
+						{current}
+					</span>
+				</>
+			)}
+		</div>
+	);
+}
+
+/** Шит-пикер папок для формы «Новый агент»: листает каталоги через существующий
+ * listProjectFiles (type=dir), крошки + «на уровень вверх», подтверждение —
+ * «Выбрать эту папку» → onPick(path), валидация и ошибка — в форме. */
+function FolderPickerSheet(props: {
+	initialPath: string;
+	suggestions: readonly string[];
+	onPick: (path: string) => void;
+	onClose: () => void;
+}): ReactNode {
+	const { initialPath, suggestions, onPick, onClose } = props;
+	const [path, setPath] = useState(initialPath);
+	const [dirs, setDirs] = useState<ProjectFileEntry[] | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const sheetRef = useRef<HTMLDivElement | null>(null);
+
+	const load = useCallback(async (dir: string) => {
+		setError(null);
+		setDirs(null);
+		try {
+			const data = await listProjectFiles(dir);
+			// Папка существует ⇔ она листится без ошибки; оставляем только dir.
+			setDirs(data.entries.filter(e => e.type === "dir").sort((a, b) => a.name.localeCompare(b.name, "ru")));
+			setPath(dir);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		}
+	}, []);
+
+	useEffect(() => {
+		void load(initialPath);
+	}, [load, initialPath]);
+
+	// .pk-sheet contract: focus moves in, Escape closes, focus returns on close.
+	useEffect(() => {
+		const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		sheetRef.current?.focus();
+		const onKey = (e: KeyboardEvent): void => {
+			if (e.key === "Escape") onClose();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => {
+			window.removeEventListener("keydown", onKey);
+			prev?.focus();
+		};
+	}, [onClose]);
+
+	const join = (name: string): string => `${path === "/" ? "" : path}/${name}`;
+
+	return (
+		<>
+			<div className="pk-sheet-backdrop" onClick={onClose} />
+			<div className="pk-sheet ag-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="fp-title" ref={sheetRef} tabIndex={-1}>
+				<div className="pk-sheet-handle" />
+				<div className="pk-sheet-title" id="fp-title">
+					Выбрать папку
+				</div>
+				<PickerBreadcrumbs path={path} onJump={target => void load(target)} />
+				{error != null && <div className="pk-form-error" role="alert">{error}</div>}
+				<div className="ag-picker-list">
+					{dirs === null && error == null && (
+						<div className="ag-picker-state">
+							<span className="pk-spinner" aria-label="Загрузка…" />
+						</div>
+					)}
+					{dirs !== null && path !== "/" && (
+						<button type="button" className="ag-picker-row" onClick={() => void load(parentPath(path))}>
+							<ArrowLeft size={16} className="ag-picker-icon ag-picker-icon--up" />
+							<span className="ag-picker-name">…</span>
+						</button>
+					)}
+					{dirs !== null &&
+						dirs.map(d => {
+							const full = join(d.name);
+							const known = suggestions.includes(full);
+							return (
+								<button key={d.name} type="button" className="ag-picker-row" onClick={() => void load(full)}>
+									<Folder size={16} className="ag-picker-icon ag-picker-icon--dir" />
+									<span className="ag-picker-name">{d.name}</span>
+									{known && <span className="ag-picker-badge">агент</span>}
+								</button>
+							);
+						})}
+					{dirs !== null && dirs.length === 0 && path === "/" && (
+						<div className="ag-picker-state">Папок нет</div>
+					)}
+				</div>
+				<button type="button" className="pk-sheet-submit" onClick={() => onPick(path)}>
+					Выбрать эту папку
+				</button>
+			</div>
+		</>
+	);
+}
+
 function NewAgentSheet(props: {
 	suggestions: readonly string[];
 	onClose: () => void;
@@ -167,7 +296,24 @@ function NewAgentSheet(props: {
 	const [label, setLabel] = useState("");
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [pickerOpen, setPickerOpen] = useState(false);
 	const sheetRef = useRef<HTMLDivElement | null>(null);
+
+	// Подтверждение пикера: папка существует ⇔ листится без ошибки.
+	const pickFolder = useCallback(
+		async (path: string) => {
+			setError(null);
+			try {
+				await listProjectFiles(path);
+				setCwd(path);
+				setPickerOpen(false);
+			} catch (err) {
+				setError(err instanceof Error ? err.message : String(err));
+				setPickerOpen(false);
+			}
+		},
+		[],
+	);
 
 	// .pk-sheet contract: focus moves in, Escape closes, focus returns on close.
 	useEffect(() => {
@@ -215,14 +361,20 @@ function NewAgentSheet(props: {
 					<label className="pk-field-label" htmlFor="na-cwd">
 						Папка проекта
 					</label>
-					<input
-						id="na-cwd"
-						className="pk-field-input"
-						value={cwd}
-						placeholder="/home/user/project"
-						spellCheck={false}
-						onChange={e => setCwd(e.target.value)}
-					/>
+					<div className="ag-cwd-row">
+						<input
+							id="na-cwd"
+							className="pk-field-input"
+							value={cwd}
+							placeholder="/home/user/project"
+							spellCheck={false}
+							onChange={e => setCwd(e.target.value)}
+						/>
+						<button type="button" className="ag-pick-btn" onClick={() => setPickerOpen(true)}>
+							<Folder size={16} />
+							Выбрать папку
+						</button>
+					</div>
 					{suggestions.length > 0 && (
 						<div className="pk-chips">
 							{suggestions.map(s => (
@@ -263,6 +415,14 @@ function NewAgentSheet(props: {
 					{submitting ? <span className="pk-spinner" aria-label="Создание…" /> : "Создать"}
 				</button>
 			</div>
+			{pickerOpen && (
+				<FolderPickerSheet
+					initialPath={cwd.trim() || suggestions[0] || "/"}
+					suggestions={suggestions}
+					onPick={path => void pickFolder(path)}
+					onClose={() => setPickerOpen(false)}
+				/>
+			)}
 		</>
 	);
 }

@@ -164,3 +164,185 @@
 		font-size: 1rem;
 	}
 }
+
+/* ── Folder picker (new-agent sheet) ──────────────────────────────── */
+
+/* Поле пути + кнопка «Выбрать папку» в одну строку */
+.ag-cwd-row {
+	display: flex;
+	gap: 8px;
+	align-items: stretch;
+}
+.ag-cwd-row .pk-field-input {
+	flex: 1;
+	min-width: 0;
+}
+
+/* Тач ≥44: кнопка открывает шит-пикер */
+.ag-pick-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 0 12px;
+	min-height: 44px;
+	flex-shrink: 0;
+	font-size: 0.8125rem;
+	font-weight: var(--weight-semibold, 600);
+	color: var(--accent);
+	background: var(--bg-inset);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	cursor: pointer;
+	white-space: nowrap;
+}
+.ag-pick-btn:active {
+	opacity: 0.7;
+}
+
+/* Пикер поверх формы нового агента */
+.ag-picker-sheet {
+	z-index: calc(var(--z-sheet) + 2);
+}
+
+/* Крошки — паттерн fs-crumbs */
+.ag-crumbs {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	overflow-x: auto;
+	white-space: nowrap;
+	padding: 2px 0;
+}
+.ag-crumbs::-webkit-scrollbar {
+	display: none;
+}
+.ag-crumb {
+	flex-shrink: 0;
+	padding: 6px 8px;
+	min-height: 32px;
+	font-size: 0.8125rem;
+	color: var(--accent);
+	background: none;
+	border: none;
+	border-radius: var(--radius-sm, 8px);
+	cursor: pointer;
+}
+.ag-crumb--current {
+	color: var(--fg);
+	font-weight: var(--weight-semibold, 600);
+	cursor: default;
+}
+.ag-crumb-sep {
+	color: var(--fg-tertiary, var(--muted));
+	flex-shrink: 0;
+}
+
+/* Список каталогов: внутренний скролл, кап 50vh */
+.ag-picker-list {
+	display: flex;
+	flex-direction: column;
+	max-height: 50vh;
+	overflow-y: auto;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	background: var(--bg-inset);
+}
+.ag-picker-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	padding: 10px 12px;
+	min-height: 44px;
+	box-sizing: border-box;
+	font-size: 0.9375rem;
+	color: var(--fg);
+	background: none;
+	border: none;
+	border-bottom: 1px solid var(--border);
+	text-align: left;
+	cursor: pointer;
+}
+.ag-picker-row:last-child {
+	border-bottom: none;
+}
+.ag-picker-row:active {
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.ag-picker-icon {
+	flex-shrink: 0;
+	color: var(--fg-tertiary, var(--muted));
+}
+.ag-picker-icon--dir {
+	color: var(--accent);
+}
+.ag-picker-icon--up {
+	color: var(--fg-tertiary, var(--muted));
+}
+.ag-picker-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+/* бейдж «агент» на каталогах из истории — как у чипов cwd */
+.ag-picker-badge {
+	flex-shrink: 0;
+	padding: 2px 8px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	font-size: 0.6875rem;
+	color: var(--accent);
+}
+.ag-picker-state {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 24px 12px;
+	min-height: 44px;
+	font-size: 0.875rem;
+	color: var(--fg-secondary, var(--muted));
+}
+
+/* ── Visual polish r12: readable titles, status accents, meta contrast ── */
+
+/* Заголовок в две строки вместо обрезания в одну */
+.ag-name {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	white-space: normal;
+	overflow: hidden;
+	overflow-wrap: anywhere;
+	line-height: 1.25;
+}
+
+/* Мета-строка читаемее: крупнее и контрастнее */
+.ag-meta {
+	font-size: 0.78rem;
+	color: var(--fg-secondary, var(--muted));
+	margin-top: 6px;
+}
+
+/* Живая карточка: акцентная кромка и лёгкий тинт вместо серого поля */
+.pk-host:has(.pk-dot--pulse) {
+	border-left: 3px solid var(--accent);
+	background: linear-gradient(
+		90deg,
+		var(--accent-muted, rgba(82, 103, 232, 0.14)),
+		var(--surface) 42%
+	);
+}
+
+/* Завершённые карточки тише, но не«выключены» целиком */
+.pk-host--dim {
+	opacity: 0.62;
+}
+
+/* Плотнее карточки: список вмещает больше агентов */
+.pk-host {
+	padding: 13px 14px;
+}

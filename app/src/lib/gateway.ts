@@ -44,12 +44,15 @@ export function getToken(): string {
 	}
 }
 
-/** Кладёт картинку на шлюз для видимости в ленте; урл секретный (UUID), без Bearer. */
-export async function uploadAttachment(bytes: Uint8Array, mimeType: string): Promise<string> {
+/** Кладёт файл (картинку или бинарник) на шлюз; урл секретный (UUID), без Bearer. */
+export async function uploadAttachment(bytes: Uint8Array, mimeType: string, originalName = "file"): Promise<string> {
+	const form = new FormData();
+	const file = new File([bytes as BlobPart], originalName, { type: mimeType });
+	form.append("file", file);
 	const res = await fetch(`${getGatewayBase()}/api/attach`, {
 		method: "POST",
-		headers: { authorization: `Bearer ${getToken()}`, "content-type": mimeType },
-		body: bytes as BlobPart,
+		headers: { authorization: `Bearer ${getToken()}` },
+		body: form,
 	});
 	const data = (await res.json()) as { url?: string; error?: string };
 	if (!res.ok || !data.url) throw new Error(data.error ?? `шлюз вернул ${res.status}`);
@@ -99,7 +102,13 @@ async function errorFromResponse(res: Response): Promise<GatewayError> {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	let res: Response;
 	try {
-		res = await fetch(gatewayUrl(path), { ...init, headers: authHeaders(init?.headers) });
+		// таймаут 10с: недостижимый base (упавший LAN-адрес/мёртвый туннель)
+		// не должен висеть до TCP-таймаута ОС, пока поллинг плодит запросы
+		res = await fetch(gatewayUrl(path), {
+			...init,
+			headers: authHeaders(init?.headers),
+			signal: AbortSignal.any([init?.signal, AbortSignal.timeout(10_000)].filter((s): s is AbortSignal => s !== null && s !== undefined)),
+		});
 	} catch (err) {
 		throw new GatewayError(0, err instanceof Error ? err.message : String(err));
 	}

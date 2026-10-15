@@ -72,6 +72,8 @@ export interface GuestSnapshot {
 	notices: readonly Notice[];
 	/** Snapshot download progress between `welcome` and its final chunk, else null. */
 	loading: { received: number; total: number } | null;
+	/** Отправка: очередь переполнилась, часть кадров потеряна (накопительный счётчик). */
+	droppedFrames: number;
 }
 
 const MAX_NOTICES = 50;
@@ -155,6 +157,7 @@ export class GuestClient {
 	#uiRequest: CollabUiRequest | null = null;
 	#uiRequestQueue: CollabUiRequest[] = [];
 	#notices: readonly Notice[] = [];
+	#droppedFrames = 0;
 	#snapshot: GuestSnapshot;
 	/**
 	 * Published entries array, cached across commits: rebuilt only when
@@ -177,6 +180,7 @@ export class GuestClient {
 		this.#socket.onOpen = () => this.#handleOpen();
 		this.#socket.onFrame = frame => this.#applyFrameSafe(frame);
 		this.#socket.onClose = (reason, willReconnect) => this.#handleClose(reason, willReconnect);
+		this.#socket.onDroppedFrames = count => this.#handleDroppedFrames(count);
 		this.#snapshot = this.#buildSnapshot();
 	}
 
@@ -286,6 +290,12 @@ export class GuestClient {
 			return;
 		}
 		this.#end(reason);
+	}
+
+	/** Очередь отправки переполнилась — часть кадров потеряна. Показываем счётчик в снапшоте. */
+	#handleDroppedFrames(count: number): void {
+		this.#droppedFrames = count;
+		this.#commit();
 	}
 
 	#end(reason: string): void {
@@ -644,6 +654,7 @@ export class GuestClient {
 			streamDone: this.#streamDone,
 			activeTools: this.#activeTools,
 			working: this.#working,
+			droppedFrames: this.#droppedFrames,
 			readOnly: this.#readOnly,
 			uiRequest: this.#uiRequest,
 			notices: this.#notices,

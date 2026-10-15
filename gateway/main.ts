@@ -139,10 +139,10 @@ updateBootCheck.unref();
 
 async function route(req: Request, url: URL): Promise<Response> {
   // Вложения ленты: отдаём БЕЗ Bearer — <img> в транскрипте не подставит
-  // заголовки; секрет — unguessable UUID в имени файла (см. attach.ts).
-  const attachMatch = /^\/api\/attach\/([0-9a-f-]{36}\.(?:png|jpg|webp|gif))$/.exec(url.pathname);
+  // заголовки; секрет — UUID в пути (см. attach.ts).
+  const attachMatch = /^\/api\/attach\/([0-9a-f-]{36})\/([^/]+)$/.exec(url.pathname);
   if (attachMatch && req.method === "GET") {
-    const res = readAttachment(attachMatch[1]);
+    const res = readAttachment(attachMatch[1], decodeURIComponent(attachMatch[2]));
     return res ?? json(404, { error: "not found" });
   }
 
@@ -203,9 +203,11 @@ async function route(req: Request, url: URL): Promise<Response> {
   }
 
   if (url.pathname === "/api/attach" && req.method === "POST") {
-    const bytes = new Uint8Array(await req.arrayBuffer());
-    const mime = req.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
-    const saved = saveAttachment(bytes, mime);
+    // multipart: file=<File> — бинарник любого типа с оригинальным именем.
+    const form = await req.formData();
+    const file = form.get("file");
+    if (!(file instanceof File)) return json(400, { error: "нет файла" });
+    const saved = saveAttachment(new Uint8Array(await file.arrayBuffer()), file.type || "application/octet-stream", file.name);
     return json("error" in saved ? 400 : 200, saved);
   }
 

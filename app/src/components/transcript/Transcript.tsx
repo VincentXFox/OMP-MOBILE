@@ -1,5 +1,5 @@
 import type { AssistantMessage, ImageContent, SessionEntry, TextContent, ToolResultMessage } from "@oh-my-pi/pi-wire";
-import { ChevronRight, Layers } from "lucide-react";
+import { ChevronRight, ImageOff, Layers } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ImageViewer } from "./ImageViewer";
@@ -80,6 +80,38 @@ function ThinkingBlock({ text, redacted }: { text: string; redacted?: boolean })
 	);
 }
 
+/** Валидный base64-дата-URI? Хост omp в снапшоте отдаёт усечённый base64
+ *  (граница ~64K) — такие картинки ломаются; лучше честный плейсхолдер. */
+function isRenderableBase64(data: string): boolean {
+	if (data.length < 100 || data.length % 4 !== 0) return false;
+	return /^[A-Za-z0-9+/]+={0,2}$/.test(data);
+}
+
+/** Миниатюра вложения: битый data-URI → аккуратный плейсхолдер вместо сломанной картинки. */
+function MsgImage({ mimeType, data }: { mimeType: string; data: string }): ReactNode {
+	if (!isRenderableBase64(data)) {
+		return (
+			<span className="tr-msg-img-fallback">
+				<ImageOff size={14} /> вложение недоступно в мобильной ленте
+			</span>
+		);
+	}
+	return (
+		<img
+			className="tr-msg-img"
+			src={`data:${mimeType};base64,${data}`}
+			alt="attachment"
+			onError={e => {
+				const el = e.currentTarget;
+				el.replaceWith(Object.assign(document.createElement("span"), {
+					className: "tr-msg-img-fallback",
+					textContent: "вложение недоступно в мобильной ленте",
+				}));
+			}}
+		/>
+	);
+}
+
 /** Markdown + image thumbnails for user / custom message content. */
 function MsgContent({ content }: { content: string | readonly (TextContent | ImageContent)[] }): ReactNode {
 	if (typeof content === "string") return <Markdown text={content} />;
@@ -90,14 +122,7 @@ function MsgContent({ content }: { content: string | readonly (TextContent | Ima
 					case "text":
 						return <Markdown key={i} text={block.text} />;
 					case "image":
-						return (
-							<img
-								key={i}
-								className="tr-msg-img"
-								src={`data:${block.mimeType};base64,${block.data}`}
-								alt="attachment"
-							/>
-						);
+						return <MsgImage key={i} mimeType={block.mimeType} data={block.data} />;
 					default:
 						return null;
 				}

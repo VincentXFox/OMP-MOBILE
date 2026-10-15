@@ -4,8 +4,8 @@
 		"sessionId": "01a1374c-d7ed-716c-bea7-87802f20a063",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
-		"name": "Test GigaAM2 STT service speed",
-		"updatedAt": 1791944993273
+		"name": "Add binary file attachment support",
+		"updatedAt": 1791954124791
 	},
 	"01a13734-0544-70ed-8dfe-d8ef62a34271": {
 		"instanceId": "1f6c03e892cea0b5",
@@ -36,8 +36,8 @@
 		"sessionId": "01a136a9-af92-7035-9905-8b20fd0c3b33",
 		"cwd": "/tmp/omp-pocket-scratch",
 		"model": "zai/glm-5.3-flash",
-		"name": "🔓 QR: OpenFlux нода в посёлке + QR",
-		"updatedAt": 1791934568079
+		"name": "🔓 QR: Fix vyandex captcha blocking node channels",
+		"updatedAt": 1791949814231
 	},
 	"01a135ec-dc91-7016-b5bb-ed21149ec797": {
 		"instanceId": "a8f99b70a9a58b30",
@@ -60,23 +60,103 @@
 		"sessionId": "01a13791-5bbd-7429-8167-468895d7dab5",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
-		"name": "Add discount display to feed tiles",
-		"updatedAt": 1791943873896
+		"name": "Show strikethrough old prices from feed",
+		"updatedAt": 1791946163950
 	},
 	"01a1381d-96dc-75eb-964a-4cac3fdeaf12": {
 		"instanceId": "7d6fab290b450bbc",
 		"sessionId": "01a1381d-96dc-75eb-964a-4cac3fdeaf12",
 		"cwd": "/tmp/omp-pocket-scratch",
 		"model": "zai/glm-5.3-flash",
-		"name": null,
-		"updatedAt": 1791942828960
+		"name": "Reconstruct superagent vision and gaps",
+		"updatedAt": 1791948554779
 	},
 	"01a13844-560d-742a-b9e1-28ad46033b05": {
 		"instanceId": "94ae280943569da0",
 		"sessionId": "01a13844-560d-742a-b9e1-28ad46033b05",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
+		"name": "Verify memory hook in TUI",
+		"updatedAt": 1791960825614
+	},
+	"01a138db-6b91-7050-b164-e706239be866": {
+		"instanceId": "de9a5a2556861a33",
+		"sessionId": "01a138db-6b91-7050-b164-e706239be866",
+		"cwd": "/tmp/gm-seed",
+		"model": "zai/glm-5.3-flash",
+		"name": "🌱 SEED: Verify GRANDMASTER auto-seed hook",
+		"updatedAt": 1791955310110
+	},
+	"01a13927-ad8c-7532-b1a5-19b1ed49aaff": {
+		"instanceId": "71ccfc293332cc6c",
+		"sessionId": "01a13927-ad8c-7532-b1a5-19b1ed49aaff",
+		"cwd": "/tmp",
+		"model": "zai/glm-5.3-flash",
 		"name": null,
-		"updatedAt": 1791945368469
+		"updatedAt": 1792076686562
+	},
+	"01a13928-d070-77df-91f4-a7a9a494411c": {
+		"instanceId": "76d0ec5b804b2a9b",
+		"sessionId": "01a13928-d070-77df-91f4-a7a9a494411c",
+		"cwd": "/tmp/stop-live",
+		"model": "zai/glm-5.3-flash",
+		"name": "🚧 GATE: Проверить стоп-гейт 7.3",
+		"updatedAt": 1791960475592
+	},
+	"01a13940-4b4e-7422-b45e-d68ed027f324": {
+		"instanceId": "7afad260ca8a8f89",
+		"sessionId": "01a13940-4b4e-7422-b45e-d68ed027f324",
+		"cwd": "/tmp/omp-pocket-scratch",
+		"model": "zai/glm-5.3-flash",
+		"name": "Fix memory forgetting in GRANDMASTER 7.3",
+		"updatedAt": 1791962175755
+	},
+	"01a1395f-3bc9-74da-bb78-6d896f7ded87": {
+		"instanceId": "8f9b3e016caf29b1",
+		"sessionId": "01a1395f-3bc9-74da-bb78-6d896f7ded87",
+		"cwd": "/home/vincentfox",
+		"model": "zai/glm-5.3-flash",
+		"name": "🛰️ PROXY: Донастройка прокси на MikroTik",
+		"updatedAt": 1791971957037
+	},
+	"01a1397b-5478-7742-bdb2-ffce7a4cef99": {
+		"instanceId": "03a8db763ac225ad",
+		"sessionId": "01a1397b-5478-7742-bdb2-ffce7a4cef99",
+		"cwd": "/home/vincentfox",
+		"model": "zai/glm-5.3-flash",
+		"name": "Extract and analyze project.zip safely",
+		"updatedAt": 1791965846399
+	},
+	"01a13982-d721-75bc-9163-a9bbfeabc58d": {
+		"instanceId": "61d9eced497ede4d",
+		"sessionId": "01a13982-d721-75bc-9163-a9bbfeabc58d",
+		"cwd": "/home/vincentfox",
+		"model": "zai/glm-5.3-flash",
+		"name": null,
+		"updatedAt": 1791966246539
+	},
+	"01a139dc-4abe-7783-a2e8-ae63dfdd899f": {
+		"instanceId": "6d786a28066575eb",
+		"sessionId": "01a139dc-4abe-7783-a2e8-ae63dfdd899f",
+		"cwd": "/home/vincentfox",
+		"model": "deepseek/deepseek-v4-flash-vision-exp",
+		"name": "📡 MIKRO: Revert MikroTik DNS to 9.9.9.9",
+		"updatedAt": 1791972367086
+	},
+	"01a13eb6-6dbf-7677-ae2f-b435a1c5090f": {
+		"instanceId": "f1ecef7b6c7f6163",
+		"sessionId": "01a13eb6-6dbf-7677-ae2f-b435a1c5090f",
+		"cwd": "/home/vincentfox",
+		"model": "deepseek/deepseek-v4-flash-vision-exp",
+		"name": "Add Hysteria2 node with safe publish",
+		"updatedAt": 1792063181377
+	},
+	"01a13f15-ac09-718c-abd3-c8ed0c55bd15": {
+		"instanceId": "e9e1a7cb019560f8",
+		"sessionId": "01a13f15-ac09-718c-abd3-c8ed0c55bd15",
+		"cwd": "/home/vincentfox",
+		"model": "deepseek/deepseek-v4-flash-vision-exp",
+		"name": "Set up Google Drive backup for servers",
+		"updatedAt": 1792060376189
 	}
 }

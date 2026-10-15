@@ -9,6 +9,7 @@ import {
 	ChevronLeft,
 	CircleAlert,
 	FileText,
+	Paperclip,
 	FolderOpen,
 	ImagePlus,
 	Info,
@@ -24,7 +25,7 @@ import {
 } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { GuestClient, GuestSnapshot } from "../../lib/client";
+import type { GuestClient, GuestSnapshot, Notice } from "../../lib/client";
 import type { HostInfo, ProjectFileEntry } from "../../lib/gateway";
 import { fetchHosts, getTerminal, listProjectFiles, readProjectFile, renameAgent, stopAgent, uploadAttachment } from "../../lib/gateway";
 import { basename, pluralRu, relTime } from "../../lib/format";
@@ -53,6 +54,7 @@ const MAX_IMAGE_DIM = 1568;
 /** Text files ride in the prompt as fenced blocks; max 5 pending, 256 КБ each. */
 const MAX_TEXT_FILES = 5;
 const MAX_TEXT_FILE_BYTES = 256 * 1024;
+const MAX_BINARIES = 5;
 const ACCEPT_TEXT_FILES =
 	"text/*,.txt,.md,.json,.csv,.log,.yaml,.yml,.ts,.tsx,.js,.py,.sh,.ini,.conf,.xml,.html,.css,.sql";
 
@@ -65,6 +67,13 @@ interface PendingImage {
 interface PendingTextFile {
 	name: string;
 	content: string;
+}
+
+interface PendingBinary {
+	name: string;
+	size: number;
+	mimeType: string;
+	file: File;
 }
 
 async function readAsDataUrl(file: Blob): Promise<string> {
@@ -744,6 +753,8 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 	const [images, setImages] = useState<PendingImage[]>([]);
 	const [attachError, setAttachError] = useState<string | null>(null);
 	const [textFiles, setTextFiles] = useState<PendingTextFile[]>([]);
+	// бинарные вложения (pdf/zip/…): грузятся на шлюз при отправке, в промпт — md-ссылка
+	const [binaries, setBinaries] = useState<PendingBinary[]>([]);
 	const [attachMenuOpen, setAttachMenuOpen] = useState(false);
 	const fileRef = useRef<HTMLInputElement | null>(null);
 	const anyFileRef = useRef<HTMLInputElement | null>(null);
@@ -764,7 +775,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 
 	const send = useCallback(async (): Promise<void> => {
 		const text = draft.trim();
-		if (text.length === 0 && images.length === 0 && textFiles.length === 0) return;
+		if (text.length === 0 && images.length === 0 && textFiles.length === 0 && binaries.length === 0) return;
 		if (readOnly || !composerActive) return;
 		// Картинки грузим на шлюз и вшиваем markdown-ссылки в текст: снапшот
 		// collab отдаёт гостевые промпты без image-блоков, а md-картинку лента
@@ -780,6 +791,16 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 				links.push(`_(вложение не загрузилось: ${err instanceof Error ? err.message : String(err)})_`);
 			}
 		}
+		// Бинарные файлы (pdf/zip/…): файл на шлюз, в промпте ссылка — агент скачает и разберёт.
+		for (const bin of binaries) {
+			try {
+				const bytes = new Uint8Array(await bin.file.arrayBuffer());
+				const url = await uploadAttachment(bytes, bin.mimeType, bin.name);
+				links.push(`📎 [${bin.name}](${url})`);
+			} catch (err) {
+				links.push(`_(${bin.name} не загрузился: ${err instanceof Error ? err.message : String(err)})_`);
+			}
+		}
 		// User text first, then attachments, then attached files as «Файл: имя» + fenced blocks.
 		const fullText = [text, ...links, ...textFiles.map(textFileBlock)]
 			.filter(part => part.length > 0)
@@ -789,8 +810,9 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		setDraft("");
 		setImages([]);
 		setTextFiles([]);
+		setBinaries([]);
 		tailLock.current = true;
-	}, [client, draft, images, textFiles, composerActive, readOnly]);
+	}, [client, draft, images, textFiles, binaries, composerActive, readOnly]);
 
 	const pickFiles = useCallback(async (files: FileList | File[] | null) => {
 		if (!files || files.length === 0) return;
@@ -942,14 +964,27 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 			if (photos.length > 0) void pickFiles(photos);
 			const docs = all.filter(file => !file.type.startsWith("image/"));
 			let slots = MAX_TEXT_FILES - textFiles.length;
+			let binSlots = MAX_BINARIES - binaries.length;
 			for (const file of docs) {
-				if (slots <= 0) {
-					showToast(`Не больше ${MAX_TEXT_FILES} файлов`);
-					break;
-				}
 				if (!isTextLikeFile(file)) {
-					showToast("Бинарные файлы агент пока не принимает — пришли текст или скриншот");
+					// бинарные (pdf/zip/docx/…) — на шлюз при отправке, в промпт ссылкой
+					if (binSlots <= 0) {
+						showToast(`Не больше ${MAX_BINARIES} бинарных файлов`);
+						continue;
+					}
+					if (file.size > 10 * 1024 * 1024) {
+						showToast(`${file.name}: больше 10 МБ`);
+						continue;
+					}
+					setBinaries(prev =>
+						prev.length >= MAX_BINARIES ? prev : [...prev, { name: file.name, size: file.size, mimeType: file.type || "application/octet-stream", file }],
+					);
+					binSlots -= 1;
 					continue;
+				}
+				if (slots <= 0) {
+					showToast(`Не больше ${MAX_TEXT_FILES} текстовых файлов`);
+					break;
 				}
 				if (file.size > MAX_TEXT_FILE_BYTES) {
 					showToast("Файл больше 256 КБ — вставь фрагмент");
@@ -966,7 +1001,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 				}
 			}
 		},
-		[pickFiles, textFiles.length, showToast],
+		[pickFiles, textFiles.length, binaries.length, showToast],
 	);
 
 	// Terminal is herdr-only: probe before opening, keep the sheet closed on refusal.
@@ -1010,11 +1045,23 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 
 	// Host notices → dismissible banners above the transcript.
 	const [dismissedNotices, setDismissedNotices] = useState<ReadonlySet<number>>(() => new Set());
-	const visibleNotices = snap.notices
-		.filter(notice => !dismissedNotices.has(notice.id))
-		// Одинаковые события подряд (вход/выход гостя циклами) — мусор в ленте.
-		.filter((notice, i, arr) => i === 0 || notice.message !== arr[i - 1].message)
-		.slice(-3);
+	const droppedNotice: Notice | null =
+		snap.droppedFrames > 0
+			? {
+					id: -1,
+					level: "warning",
+					message: `Очередь переполнилась: ${snap.droppedFrames} кадров потеряно — сообщения могли не дойти. Отправь заново.`,
+					at: 0,
+				}
+			: null;
+	const visibleNotices = [
+		...(droppedNotice ? [droppedNotice] : []),
+		...snap.notices
+			.filter(notice => !dismissedNotices.has(notice.id))
+			// Одинаковые события подряд (вход/выход гостя циклами) — мусор в ленте.
+			.filter((notice, i, arr) => i === 0 || notice.message !== arr[i - 1].message)
+			.slice(-3),
+	];
 	const dismissNotice = useCallback((id: number) => {
 		setDismissedNotices(prev => new Set(prev).add(id));
 	}, []);
@@ -1200,6 +1247,24 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 						<span className="ss-queued-chip">В очереди: {queuedCount} {pluralRu(queuedCount, "сообщение", "сообщения", "сообщений")}</span>
 					</div>
 				)}
+				{binaries.length > 0 && (
+					<div className="sa-chip-row">
+						{binaries.map((bin, i) => (
+							<span key={`${i}:${bin.name}`} className="sa-chip">
+								<Paperclip size={12} className="sa-chip-icon" />
+								<span className="sa-chip-name">{bin.name}</span>
+								<button
+									type="button"
+									className="sa-chip-x"
+									aria-label="Убрать файл"
+									onClick={() => setBinaries(prev => prev.filter((_, j) => j !== i))}
+								>
+									<X size={12} />
+								</button>
+							</span>
+						))}
+					</div>
+				)}
 				{textFiles.length > 0 && (
 					<div className="sa-chip-row">
 						{textFiles.map((file, i) => (
@@ -1251,7 +1316,6 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 					<input
 						ref={anyFileRef}
 						type="file"
-						accept={ACCEPT_TEXT_FILES}
 						multiple
 						hidden
 						onChange={e => {
@@ -1301,7 +1365,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 						)}
 						{/* mic/send switch: draft + attachments present → send, otherwise mic.
 						    textarea всегда смонтирована — запись не перестраивает низ. */}
-						{draft.trim().length > 0 || images.length > 0 || textFiles.length > 0 ? (
+						{draft.trim().length > 0 || images.length > 0 || textFiles.length > 0 || binaries.length > 0 ? (
 							<button
 								type="button"
 								className="ss-send"

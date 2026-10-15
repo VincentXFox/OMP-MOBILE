@@ -9,6 +9,8 @@ const BOARD_POLL_MS = 3000;
 const ACTIVITY_POLL_MS = 4000;
 const RESULTS_TTL_MS = 20_000;
 
+type DispatchMode = "common" | "plan";
+
 const STATUS_META: Record<SuperAgentStatus, { label: string; dot: string }> = {
 	idle: { label: "Ожидает", dot: "su-dot--idle" },
 	working: { label: "Работает", dot: "su-dot--working" },
@@ -107,6 +109,8 @@ export function SuperScreen(props: {
 	const [board, setBoard] = useState<SuperBoard | null>(null);
 	const [boardError, setBoardError] = useState<string | null>(null);
 	const [selected, setSelected] = useState<Set<string>>(new Set());
+	const [mode, setMode] = useState<DispatchMode>("common");
+	const [perTask, setPerTask] = useState<Record<string, string>>({});
 	const [text, setText] = useState("");
 	const [dispatching, setDispatching] = useState(false);
 	const [results, setResults] = useState<DispatchResult[] | null>(null);
@@ -177,49 +181,133 @@ export function SuperScreen(props: {
 		return () => clearTimeout(timer);
 	}, [results, dispatchError]);
 
+	// Правка компоуза — начало нового цикла раздачи: старые результаты не должны
+	// висеть и глушить подсказки валидации.
+	const beginCompose = useCallback((): void => {
+		setResults(null);
+		setDispatchError(null);
+	}, []);
+
 	const toggle = useCallback((target: string): void => {
+		beginCompose();
 		setSelected(prev => {
 			const next = new Set(prev);
 			if (next.has(target)) next.delete(target);
 			else next.add(target);
 			return next;
 		});
-	}, []);
+	}, [beginCompose]);
 
 	const selectAll = useCallback((): void => {
+		beginCompose();
 		const agents = boardRef.current?.agents ?? [];
 		setSelected(prev => (prev.size === agents.length ? new Set() : new Set(agents.map(a => a.target))));
-	}, []);
+	}, [beginCompose]);
 
 	const dispatch = useCallback(async (): Promise<void> => {
-		const items = [...selected].map(target => ({ target, text }));
-		if (dispatching || text.trim() === "" || items.length === 0) return;
+		if (dispatching || selected.size === 0) return;
+		// Снапшот текстов на момент клика — защита от гонки с редактированием в полёте.
+		const snapshot = new Map<string, string>();
+		for (const target of selected) snapshot.set(target, mode === "plan" ? perTask[target] ?? "" : text);
+		if (selected.size > 12) {
+			setDispatchError("Максимум 12 агентов за раз.");
+			return;
+		}
+		for (const [target, taskText] of snapshot) {
+			if (new TextEncoder().encode(taskText).length > 65536) {
+				const name = boardRef.current?.agents.find(a => a.target === target)?.name ?? target;
+				setDispatchError(`Текст для ${name} больше 64 КиБ — сократите.`);
+				return;
+			}
+		}
+		const items = [...snapshot].map(([target, taskText]) => ({ target, text: taskText }));
 		setDispatching(true);
 		setResults(null);
 		setDispatchError(null);
 		try {
-			setResults(await dispatchSuperTasks(items));
-			setText("");
+			const outcomes = await dispatchSuperTasks(items);
+			setResults(outcomes);
+			if (mode === "plan") {
+				setPerTask(prev => {
+					const next = { ...prev };
+					for (const r of outcomes) {
+						if ("error" in r) continue;
+						// чистим только если текст не изменили, пока шла отправка
+						if (next[r.target] === snapshot.get(r.target)) delete next[r.target];
+					}
+					return next;
+				});
+			} else {
+				setText("");
+			}
 		} catch (err) {
 			setDispatchError(err instanceof Error ? err.message : String(err));
 		} finally {
 			setDispatching(false);
 		}
-	}, [dispatching, selected, text]);
+	}, [dispatching, mode, perTask, selected, text]);
 
 	const agents = board?.agents ?? [];
 	const allSelected = agents.length > 0 && selected.size === agents.length;
+	const planAgents = mode === "plan" ? agents.filter(a => selected.has(a.target)) : [];
+	const missingPlan = planAgents.filter(a => (perTask[a.target] ?? "").trim() === "").map(a => a.name);
+	const oversizePlan = planAgents.find(a => new TextEncoder().encode(perTask[a.target] ?? "").length > 65536);
+	const canSend = selected.size > 0
+		&& (mode === "common" ? text.trim() !== "" : missingPlan.length === 0)
+		&& !dispatching;
 
 	return (
 		<div className="su-screen">
 			<div className="pk-card su-composer">
-				<textarea
-					className="pk-input su-task"
-					placeholder="Задача для агентов… одно и то же задание уйдёт всем выбранным"
-					rows={3}
-					value={text}
-					onChange={e => setText(e.target.value)}
-				/>
+				<div className="pk-chips su-modes">
+					<button
+						type="button"
+						className={`pk-chip su-mode${mode === "common" ? " pk-chip--on" : ""}`}
+						onClick={() => { beginCompose(); setMode("common"); }}
+					>
+						Всем одинаково
+					</button>
+					<button
+						type="button"
+						className={`pk-chip su-mode${mode === "plan" ? " pk-chip--on" : ""}`}
+						onClick={() => { beginCompose(); setMode("plan"); }}
+					>
+						По плану
+					</button>
+				</div>
+				{mode === "common" ? (
+					<textarea
+						className="pk-input su-task"
+						placeholder="Задача для агентов… одно и то же задание уйдёт всем выбранным"
+						rows={3}
+						value={text}
+						onChange={e => { beginCompose(); setText(e.target.value); }}
+					/>
+				) : (
+					<div className="su-plan">
+						{planAgents.map(a => {
+							const status = statusOf(a);
+							return (
+								<div key={a.target} className="su-plan-item">
+									<div className="su-plan-head">
+										<span className={`pk-dot su-dot ${status.dot}`} />
+										<span className="su-plan-name">{a.name}</span>
+										<span className="su-status">{status.label}</span>
+									</div>
+									<textarea
+										key={a.target}
+										className="pk-input su-task"
+										placeholder={`Задача для ${a.name}…`}
+										rows={3}
+										value={perTask[a.target] ?? ""}
+										onChange={e => { beginCompose(); setPerTask(prev => ({ ...prev, [a.target]: e.target.value })); }}
+									/>
+								</div>
+							);
+						})}
+						{planAgents.length === 0 && <div className="su-none">Выберите агентов — под каждого появится своя карточка.</div>}
+					</div>
+				)}
 				<div className="su-pick">
 					<div className="pk-chips">
 						{agents.map(a => {
@@ -248,12 +336,17 @@ export function SuperScreen(props: {
 				<button
 					type="button"
 					className="pk-btn su-send"
-					disabled={dispatching || text.trim() === "" || selected.size === 0}
+					disabled={!canSend}
 					onClick={() => void dispatch()}
 				>
 					{dispatching ? <span className="pk-spinner" /> : <SendHorizontal size={16} />}
 					Раздать{selected.size > 0 ? ` (${selected.size})` : ""}
 				</button>
+				{mode === "plan" && results === null && missingPlan.length > 0 && selected.size > 0 && (
+					<div className="su-hint">Нет текста: {missingPlan.join(", ")}</div>
+				)}
+				{selected.size > 12 && <div className="su-hint">Максимум 12 агентов за раз</div>}
+				{oversizePlan && <div className="su-hint">Текст для {oversizePlan.name} больше 64 КиБ — сократите</div>}
 				{dispatchError && <div className="su-result su-result--err">{dispatchError}</div>}
 				{results && (
 					<div className="su-results">

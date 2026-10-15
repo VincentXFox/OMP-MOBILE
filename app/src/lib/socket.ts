@@ -37,6 +37,9 @@ export class CollabSocket {
 	onControl?: (msg: RelayControlMessage) => void;
 	/** Fires on each close; `willReconnect` distinguishes retries from terminal shutdown. */
 	onClose?: (reason: string, willReconnect: boolean) => void;
+	/** Очередь отправки переполнилась (256) — кадры теряются; count накопительный. */
+	onDroppedFrames?: (count: number) => void;
+	#droppedFrames = 0;
 
 	readonly #opts: CollabSocketOptions;
 	#ws: WebSocket | null = null;
@@ -80,7 +83,13 @@ export class CollabSocket {
 					ws.send(envelope);
 					return;
 				}
-				if (this.#pendingSends.length >= MAX_PENDING_SENDS) return;
+				if (this.#pendingSends.length >= MAX_PENDING_SENDS) {
+					// очередь переполнилась — молча терять кадры нельзя:
+					// считаем и показываем пользователю счётчик потерь
+					this.#droppedFrames += 1;
+					this.onDroppedFrames?.(this.#droppedFrames);
+					return;
+				}
 				this.#pendingSends.push(envelope);
 			})
 			.catch(() => {
