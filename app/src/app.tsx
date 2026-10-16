@@ -11,6 +11,7 @@ import { SuperScreen } from "./components/super/SuperScreen";
 import { UpdatesScreen } from "./components/updates/UpdatesScreen";
 import type { HostInfo } from "./lib/gateway";
 import { fetchHosts, GatewayError, mintLink, remapSession, setToken } from "./lib/gateway";
+import { markOpened } from "./lib/agent-prefs";
 import { GuestClient } from "./lib/client";
 import "./components/shell/pocket.css";
 
@@ -212,6 +213,9 @@ export function App(): ReactNode {
 	const openHost = useCallback(
 		async (host: HostInfo): Promise<void> => {
 			if (opening) return;
+			// «Недавно открытые» — ключ сортировки списка агентов: поднимает сессию
+			// наверх сразу, ещё до успешного коннекта.
+			markOpened(host.sessionId);
 			setOpening(true);
 			setOpeningId(host.instanceId);
 			try {

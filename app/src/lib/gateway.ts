@@ -18,6 +18,11 @@ export interface HostInfo {
 	alive?: boolean;
 	/** Полный путь к .jsonl сессии (для resume), null/undefined если не найден. */
 	sessionFile?: string | null;
+	/** Заголовок из файла сессии: имя на момент старта реестр не знает,
+	 * у сессий без herdr-панели его нет вообще. */
+	sessionTitle?: string | null;
+	/** Первый запрос пользователя — имя для сессии без заголовка. */
+	sessionPreview?: string | null;
 }
 
 const BASE_KEY = "ompPocket.gwBase";

@@ -72,7 +72,19 @@ function parseHead(head: string): { id: string | null; cwd: string | null; title
   return { id, cwd, title, titleSource, parentId };
 }
 
-/** First user message text in the head slice — null when the head has none. */
+/** Обрезает host-шум (блоки памяти, системные ремарки, теги) до 80 символов. */
+function cleanPromptText(text: string): string | null {
+  const clean = text
+    .replace(/<memories>[\s\S]*?<\/memories>/gi, " ")
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, " ")
+    .replace(/<[^>\n]{1,64}>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+  return clean.length > 0 ? clean : null;
+}
+
+/** Первый запрос пользователя в head-срезе — null, когда запроса нет. */
 function firstUserText(head: string): string | null {
   for (const line of head.split("\n")) {
     if (!line.startsWith("{")) continue;
@@ -83,11 +95,18 @@ function firstUserText(head: string): string | null {
       continue;
     }
     if (obj === null || typeof obj !== "object") continue;
-    if (!("type" in obj) || obj.type !== "message") continue;
-    if (!("message" in obj) || obj.message === null || typeof obj.message !== "object") continue;
-    const message = obj.message;
-    if (!("role" in message) || message.role !== "user") continue;
-    const content = "content" in message ? message.content : undefined;
+    const rec = obj as { type?: unknown; attribution?: unknown; content?: unknown; message?: unknown };
+    // Запрос, отправленный из приложения, приходит не message, а custom_message
+    // («collab-prompt»): без этой ветки сессия, начатая с телефона, безымянна.
+    if (rec.type === "custom_message" && rec.attribution === "user" && typeof rec.content === "string") {
+      const clean = cleanPromptText(rec.content);
+      if (clean !== null) return clean;
+      continue;
+    }
+    if (rec.type !== "message" || rec.message === null || typeof rec.message !== "object") continue;
+    const message = rec.message as { role?: unknown; content?: unknown };
+    if (message.role !== "user") continue;
+    const content = message.content;
     let text: string;
     if (typeof content === "string") text = content;
     else if (Array.isArray(content)) {
@@ -100,15 +119,8 @@ function firstUserText(head: string): string | null {
       }
       text = parts.join(" ");
     } else text = "";
-    // Strip host-injected noise (memory blocks, system reminders, stray tags).
-    const clean = text
-      .replace(/<memories>[\s\S]*?<\/memories>/gi, " ")
-      .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, " ")
-      .replace(/<[^>\n]{1,64}>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 80);
-    return clean.length > 0 ? clean : null;
+    const clean = cleanPromptText(text);
+    if (clean !== null) return clean;
   }
   return null;
 }
@@ -188,13 +200,16 @@ export function listSessions(liveIds: ReadonlySet<string>): SessionSummary[] {
       const status: SessionStatus = liveIds.has(id)
         ? "live"
         : statusFromTail(readSlice(path, Math.max(0, stat.size - TAIL_BYTES), TAIL_BYTES).text, stat.size <= TAIL_BYTES);
-      const preview = head.title === null ? firstUserText(headSlice) : null;
+      // Пустой title-слот («» после инициализации сессии) — это «имени нет»:
+      // в списках такую сессию называет первый запрос, а не голый UUID.
+      const title = head.title !== null && head.title.trim().length > 0 ? head.title.trim() : null;
+      const preview = title === null ? firstUserText(headSlice) : null;
       out.push({
         id,
         path,
         projectSlug: slug,
         cwd: head.cwd,
-        title: head.title,
+        title,
         titleSource: head.titleSource,
         parentId: head.parentId,
         preview,
@@ -208,12 +223,24 @@ export function listSessions(liveIds: ReadonlySet<string>): SessionSummary[] {
   return out.sort((a, b) => b.modified - a.modified);
 }
 
-/** Head records of a session file (id, cwd, title, parent) — nulls when unreadable. */
-export function parseSessionHead(path: string): { id: string | null; cwd: string | null; title: string | null; titleSource: string | null; parentId: string | null } {
+/** Head records of a session file (id, cwd, title, parent) — nulls when unreadable.
+ * `preview` — первый запрос пользователя, когда omp ещё не дал сессии заголовок:
+ * без него свежая сессия в списках безымянна. */
+export function parseSessionHead(path: string): {
+  id: string | null;
+  cwd: string | null;
+  title: string | null;
+  titleSource: string | null;
+  parentId: string | null;
+  preview: string | null;
+} {
   try {
-    return parseHead(readSlice(path, 0, HEAD_BYTES).text);
+    const headSlice = readSlice(path, 0, HEAD_BYTES).text;
+    const head = parseHead(headSlice);
+    const title = head.title !== null && head.title.trim().length > 0 ? head.title.trim() : null;
+    return { ...head, title, preview: title === null ? firstUserText(headSlice) : null };
   } catch {
-    return { id: null, cwd: null, title: null, titleSource: null, parentId: null };
+    return { id: null, cwd: null, title: null, titleSource: null, parentId: null, preview: null };
   }
 }
 

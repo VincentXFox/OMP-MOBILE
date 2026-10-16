@@ -54,6 +54,21 @@ export function relTime(tsMs: number): string {
 	return `${Math.floor(h / 24)} дн назад`;
 }
 
+/** «сегодня 14:03», «вчера 23:05», «13.10 23:05» — абсолютная примета времени.
+ * В списке из десятка похожих агентов «2 ч назад» не различает карточки, а
+ * время запуска/правки различает. */
+export function dayTimeLabel(tsMs: number): string {
+	if (!Number.isFinite(tsMs) || tsMs <= 0) return "";
+	const d = new Date(tsMs);
+	const now = new Date();
+	const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+	if (d.toDateString() === now.toDateString()) return `сегодня ${time}`;
+	const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+	if (d.toDateString() === yesterday.toDateString()) return `вчера ${time}`;
+	const day = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+	return `${day} ${time}`;
+}
+
 /** Русская плюрализация: pluralRu(1, "агент", "агента", "агентов") → "агент". */
 export function pluralRu(n: number, one: string, few: string, many: string): string {
 	const mod10 = n % 10;

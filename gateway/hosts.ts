@@ -1,5 +1,6 @@
+import { statSync } from "node:fs";
 import { resolveBin } from "./bins.ts";
-import { findSessionFile } from "./sessions.ts";
+import { findSessionFile, parseSessionHead } from "./sessions.ts";
 
 export interface OmpHost {
   instanceId: string;
@@ -19,10 +20,39 @@ export interface OmpHost {
   alive: boolean;
   /** Полный путь к .jsonl сессии — для resume мёртвого агента. */
   sessionFile: string | null;
+  /** Заголовок из файла сессии (256-байтный title-слот omp, включая переименования
+   * из TUI). Реестр отдаёт только имя на момент старта, а сессия без herdr-панели —
+   * вообще без имени: в списке агентов это и был «агент без названия». */
+  sessionTitle: string | null;
+  /** Первый запрос пользователя — имя для сессии, которой omp ещё не дал заголовок. */
+  sessionPreview: string | null;
 }
 
 export interface OmpHostsOutput {
   hosts: OmpHost[];
+}
+
+/** Заголовок и первый запрос сессии дороже одного stat: кэш по (путь, mtime, size) —
+ * 5-секундный опрос реестра иначе перечитывал бы по 64 КБ на каждого агента. */
+const IDENTITY_CACHE_LIMIT = 256;
+const identityCache = new Map<string, { mtimeMs: number; size: number; title: string | null; preview: string | null }>();
+
+function sessionIdentityOf(path: string | null): { title: string | null; preview: string | null } {
+  if (path === null) return { title: null, preview: null };
+  try {
+    const stat = statSync(path);
+    const hit = identityCache.get(path);
+    if (hit !== undefined && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) {
+      return { title: hit.title, preview: hit.preview };
+    }
+    const head = parseSessionHead(path);
+    const identity = { title: head.title, preview: head.preview };
+    if (identityCache.size >= IDENTITY_CACHE_LIMIT) identityCache.clear();
+    identityCache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, ...identity });
+    return identity;
+  } catch {
+    return { title: null, preview: null };
+  }
 }
 
 /** Жив ли процесс: kill(pid, 0) — probe без сигнала. EPERM = есть, но чужой. */
@@ -67,11 +97,17 @@ export async function listHosts(): Promise<OmpHostsOutput> {
   const parsed = JSON.parse(res.stdout) as Partial<OmpHostsOutput>;
   const hosts = Array.isArray(parsed.hosts) ? parsed.hosts : [];
   return {
-    hosts: hosts.map((h) => ({
-      ...h,
-      alive: isProcessAlive(h.pid),
-      sessionFile: typeof h.sessionId === "string" ? findSessionFile(h.sessionId) : null,
-    })),
+    hosts: hosts.map((h) => {
+      const sessionFile = typeof h.sessionId === "string" ? findSessionFile(h.sessionId) : null;
+      const identity = sessionIdentityOf(sessionFile);
+      return {
+        ...h,
+        alive: isProcessAlive(h.pid),
+        sessionFile,
+        sessionTitle: identity.title,
+        sessionPreview: identity.preview,
+      };
+    }),
   };
 }
 

@@ -27,6 +27,7 @@ import {
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { GuestClient, GuestSnapshot, Notice } from "../../lib/client";
+import { agentName } from "../../lib/agent-name";
 import type { AgentChatSettings, HostInfo, ProjectFileEntry } from "../../lib/gateway";
 import { applyAgentSettings, fetchAgentSettings, fetchHosts, fetchModels, getTerminal, listProjectFiles, readProjectFile, renameAgent, stopAgent, uploadAttachment } from "../../lib/gateway";
 import { basename, pluralRu, relTime } from "../../lib/format";
@@ -506,9 +507,7 @@ function InfoSheet(props: {
 	const [renamingBusy, setRenamingBusy] = useState(false);
 	const [renameError, setRenameError] = useState<string | null>(null);
 	const instanceId = host?.instanceId ?? "";
-	const currentName = host
-		? host.displayName || host.sessionName || instanceId
-		: instanceId;
+	const currentName = host ? agentName(host) : instanceId;
 
 	const saveRename = useCallback(async () => {
 		if (!host || renamingBusy) return;
@@ -561,7 +560,9 @@ function InfoSheet(props: {
 	const state = snap.state;
 	const usage = state?.contextUsage;
 	const model = state?.model;
-	const title = state?.sessionName ?? snap.header?.title ?? null;
+	// Имя агента из шлюза (заголовок сессии) свежее и человечнее, чем herdr-слаг
+	// в снапшоте: у сессии, начатой с телефона, снапшот отдаёт «vincentfox».
+	const title = (host ? agentName(host) : null) ?? state?.sessionName ?? snap.header?.title ?? null;
 	const cwd = snap.header?.cwd ?? state?.cwd ?? null;
 
 	return (
@@ -1245,6 +1246,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 	useEffect(() => cancelSpeech, []);
 
 	const title =
+		(host ? agentName(host) : null) ??
 		snap.state?.sessionName ??
 		snap.header?.title ??
 		(snap.header?.cwd ? snap.header.cwd.slice(snap.header.cwd.lastIndexOf("/") + 1) : "Сессия");
@@ -1558,7 +1560,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 			{terminalOpen && host && (
 				<TerminalScreen
 					instanceId={host.instanceId}
-					label={host.sessionName ?? snap.header?.title ?? "агент"}
+					label={agentName(host)}
 					onBack={() => setTerminalOpen(false)}
 				/>
 			)}
