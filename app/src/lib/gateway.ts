@@ -257,6 +257,64 @@ export async function fetchSessions(signal?: AbortSignal): Promise<SessionSummar
 	return Array.isArray(data.sessions) ? data.sessions : [];
 }
 
+/* ---- полнотекстовый поиск по репликам сессий ---- */
+
+/** role=user — только то, что писал человек; all — плюс ответы агента. */
+export type SessionSearchRole = "user" | "all";
+
+export interface SessionSearchSnippet {
+	role: "user" | "assistant";
+	ts: number;
+	/** Отрывок вокруг совпадения. */
+	text: string;
+	/** Смещение и длина совпадения внутри text — для подсветки. */
+	start: number;
+	length: number;
+}
+
+export interface SessionSearchHit {
+	sessionId: string;
+	path: string;
+	cwd: string | null;
+	title: string | null;
+	preview: string | null;
+	createdTs: number;
+	modified: number;
+	lastMatchTs: number;
+	matches: number;
+	/** message — все слова в одной реплике; session — слова в разных репликах. */
+	scope: "message" | "session";
+	snippets: SessionSearchSnippet[];
+}
+
+export interface SessionSearchStatus {
+	sessions: number;
+	messages: number;
+	/** Сколько файлов ещё не прочитано в индекс (клиент доопрашивает, пока > 0). */
+	pendingFiles: number;
+	indexing: boolean;
+	indexedAt: number | null;
+	lastScanMs: number | null;
+}
+
+export interface SessionSearchResponse {
+	query: string;
+	role: SessionSearchRole;
+	status: SessionSearchStatus;
+	results: SessionSearchHit[];
+}
+
+export async function searchSessions(query: string, role: SessionSearchRole, signal?: AbortSignal): Promise<SessionSearchResponse> {
+	const params = new URLSearchParams({ q: query, role });
+	const data = await request<SessionSearchResponse>(`/api/sessions/search?${params.toString()}`, { signal });
+	return {
+		query: data.query ?? query,
+		role: data.role ?? role,
+		status: data.status,
+		results: Array.isArray(data.results) ? data.results : [],
+	};
+}
+
 export type AgentResumeResult = { ok: true; instanceId: string } | { ok: false; error: string };
 
 export type ResumeMode = "resume" | "restore";

@@ -72,15 +72,20 @@ function parseHead(head: string): { id: string | null; cwd: string | null; title
   return { id, cwd, title, titleSource, parentId };
 }
 
-/** Обрезает host-шум (блоки памяти, системные ремарки, теги) до 80 символов. */
-function cleanPromptText(text: string): string | null {
-  const clean = text
+/** Обрезает host-шум (блоки памяти, системные ремарки, теги) — общее правило для
+ * превью в списках и для текстового поиска по репликам. */
+export function stripInjectedNoise(text: string): string {
+  return text
     .replace(/<memories>[\s\S]*?<\/memories>/gi, " ")
     .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, " ")
     .replace(/<[^>\n]{1,64}>/g, " ")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 80);
+    .trim();
+}
+
+/** Первый запрос сессии, обрезанный до размера превью. */
+function cleanPromptText(text: string): string | null {
+  const clean = stripInjectedNoise(text).slice(0, 80);
   return clean.length > 0 ? clean : null;
 }
 
@@ -126,7 +131,7 @@ function firstUserText(head: string): string | null {
 }
 
 /** `2026-10-13T22-05-45-325Z_<uuid>.jsonl` → epoch ms (0 when unparsable). */
-function createdFromFilename(file: string): number {
+export function createdFromFilename(file: string): number {
   const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_/.exec(file);
   if (m === null) return 0;
   return Date.UTC(Number(m[1].slice(0, 4)), Number(m[1].slice(5, 7)) - 1, Number(m[1].slice(8, 10)), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]));

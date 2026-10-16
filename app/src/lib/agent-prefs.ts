@@ -7,6 +7,8 @@
 const PINS_KEY = "ompPocket.agPins";
 const OPENED_KEY = "ompPocket.agOpened";
 const COLLAPSED_KEY = "ompPocket.agCollapsed";
+const SEARCH_MODE_KEY = "ompPocket.agSearchMode";
+const SEARCH_MINE_KEY = "ompPocket.agSearchMine";
 /** Хватит на все живые сессии; старые вытесняются по времени открытия. */
 const OPENED_LIMIT = 80;
 
@@ -77,4 +79,38 @@ export function setSectionCollapsed(sectionId: string, collapsed: boolean): Reco
 	const next = { ...sectionCollapsedPrefs(), [sectionId]: collapsed };
 	writeJson(COLLAPSED_KEY, next);
 	return next;
+}
+
+/** Что ищет поле в хабе: агентов по имени или слова в переписке сессий. */
+export function searchModePreference(): "agents" | "text" {
+	try {
+		return window.localStorage.getItem(SEARCH_MODE_KEY) === "text" ? "text" : "agents";
+	} catch {
+		return "agents";
+	}
+}
+
+export function setSearchModePreference(mode: "agents" | "text"): void {
+	try {
+		window.localStorage.setItem(SEARCH_MODE_KEY, mode);
+	} catch {
+		// приватный режим — режим живёт до перезагрузки
+	}
+}
+
+/** Искать только реплики пользователя (по умолчанию) или вместе с ответами агента. */
+export function searchMineOnlyPreference(): boolean {
+	try {
+		return window.localStorage.getItem(SEARCH_MINE_KEY) !== "all";
+	} catch {
+		return true;
+	}
+}
+
+export function setSearchMineOnlyPreference(mineOnly: boolean): void {
+	try {
+		window.localStorage.setItem(SEARCH_MINE_KEY, mineOnly ? "mine" : "all");
+	} catch {
+		// приватный режим — выбор живёт до перезагрузки
+	}
 }

@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { basename, dayTimeLabel, pluralRu, shortenPath } from "../../lib/format";
 import { agentName } from "../../lib/agent-name";
-import { openedTimes, pinnedSessions, sectionCollapsedPrefs, setSectionCollapsed, togglePinned } from "../../lib/agent-prefs";
-import type { HostInfo, ModelOption, ProjectFileEntry, SuperAgent, SuperBoard } from "../../lib/gateway";
-import { fetchModels, fetchSuperBoard, listProjectFiles, resumeAgentHost, startAgent } from "../../lib/gateway";
+import { openedTimes, pinnedSessions, searchMineOnlyPreference, searchModePreference, sectionCollapsedPrefs, setSearchMineOnlyPreference, setSearchModePreference, setSectionCollapsed, togglePinned } from "../../lib/agent-prefs";
+import type { HostInfo, ModelOption, ProjectFileEntry, SessionSearchHit, SessionSearchResponse, SessionSearchSnippet, SuperAgent, SuperBoard } from "../../lib/gateway";
+import { fetchModels, fetchSuperBoard, listProjectFiles, resumeAgentHost, searchSessions, startAgent } from "../../lib/gateway";
 import { ModelPickerSheet } from "../shell/ModelPickerSheet";
 import "./agents.css";
 
@@ -211,6 +211,49 @@ function AgentCard(props: {
 				<Star size={16} fill={pinned ? "currentColor" : "none"} />
 			</button>
 		</div>
+	);
+}
+
+/** Отрывок с подсветкой совпадения: шлюз отдаёт смещение внутри текста. */
+function SnippetText(props: { snippet: SessionSearchSnippet }): ReactNode {
+	const { text, start, length } = props.snippet;
+	return (
+		<>
+			{text.slice(0, start)}
+			<mark className="ag-hit-mark">{text.slice(start, start + length)}</mark>
+			{text.slice(start + length)}
+		</>
+	);
+}
+
+/** Карточка найденной сессии: имя, проект, время совпадения и до трёх отрывков. */
+function SearchHitCard(props: { hit: SessionSearchHit; onOpen: (hit: SessionSearchHit) => void }): ReactNode {
+	const { hit } = props;
+	const name = hit.title ?? hit.preview ?? `Сессия ${hit.sessionId.slice(0, 8)}`;
+	return (
+		<button type="button" className="pk-card ag-hit-card" onClick={() => props.onOpen(hit)}>
+			<span className="ag-hit-head">
+				<span className="ag-hit-name">{name}</span>
+				<span className="ag-hit-count">{hit.matches}</span>
+			</span>
+			<span className="ag-meta">
+				<span className="ag-meta-proj">{shortenPath(hit.cwd ?? "")}</span>
+				<span aria-hidden="true">·</span>
+				<span className="ag-when">{dayTimeLabel(hit.lastMatchTs)}</span>
+				<span aria-hidden="true">·</span>
+				<span className="ag-meta-model">{hit.scope === "message" ? "слова рядом" : "слова в разных репликах"}</span>
+			</span>
+			<span className="ag-hit-snips">
+				{hit.snippets.map((snippet, index) => (
+					<span key={index} className="ag-hit-snip">
+						<span className={`ag-hit-role ag-hit-role--${snippet.role}`}>{snippet.role === "user" ? "я" : "агент"}</span>
+						<span className="ag-hit-text">
+							…<SnippetText snippet={snippet} />…
+						</span>
+					</span>
+				))}
+			</span>
+		</button>
 	);
 }
 
@@ -667,6 +710,11 @@ export function AgentsScreen(props: {
 	const [toast, setToast] = useState<string | null>(null);
 	const board = useSuperBoardOnce();
 	const [query, setQuery] = useState("");
+	const [mode, setMode] = useState<"agents" | "text">(searchModePreference);
+	const [mineOnly, setMineOnly] = useState<boolean>(searchMineOnlyPreference);
+	const [found, setFound] = useState<SessionSearchResponse | null>(null);
+	const [searchError, setSearchError] = useState<string | null>(null);
+	const [searching, setSearching] = useState(false);
 	const [pins, setPins] = useState<readonly string[]>(() => pinnedSessions());
 	const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => sectionCollapsedPrefs());
 
@@ -675,6 +723,56 @@ export function AgentsScreen(props: {
 		const next = !(collapsed[id] ?? SECTION_COLLAPSED_DEFAULT.includes(id));
 		setCollapsed(setSectionCollapsed(id, next));
 	}, [collapsed]);
+
+	const pickMode = useCallback((next: "agents" | "text") => {
+		setMode(next);
+		setSearchModePreference(next);
+	}, []);
+
+	const pickMineOnly = useCallback((next: boolean) => {
+		setMineOnly(next);
+		setSearchMineOnlyPreference(next);
+	}, []);
+
+	// Полнотекстовый поиск по репликам всех сессий: пока индекс дочитывает
+	// изменённые файлы (status.pendingFiles > 0), повторяем запрос — иначе первый
+	// результат будет неполным, а пользователь решит, что совпадений нет.
+	useEffect(() => {
+		if (mode !== "text") return;
+		const text = query.trim();
+		if (text.length < 2) {
+			setFound(null);
+			setSearchError(null);
+			setSearching(false);
+			return;
+		}
+		const controller = new AbortController();
+		let alive = true;
+		let retry = 0;
+		setSearching(true);
+		const run = async (): Promise<void> => {
+			try {
+				const response = await searchSessions(text, mineOnly ? "user" : "all", controller.signal);
+				if (!alive) return;
+				setFound(response);
+				setSearchError(null);
+				setSearching(response.status.pendingFiles > 0);
+				if (response.status.pendingFiles > 0) retry = window.setTimeout(() => void run(), 1500);
+			} catch (err) {
+				if (!alive) return;
+				if (err instanceof DOMException && err.name === "AbortError") return;
+				setSearchError(err instanceof Error ? err.message : String(err));
+				setSearching(false);
+			}
+		};
+		const debounce = window.setTimeout(() => void run(), 350);
+		return () => {
+			alive = false;
+			controller.abort();
+			window.clearTimeout(debounce);
+			window.clearTimeout(retry);
+		};
+	}, [mode, query, mineOnly]);
 
 	// Мёртвая карточка не открывает чат: вместо join — шит с resume.
 	const openHost = useCallback(
@@ -695,6 +793,43 @@ export function AgentsScreen(props: {
 		setToast(text);
 		window.setTimeout(() => setToast(null), 5000);
 	}, []);
+
+	// Найденная сессия: живая — открываем как обычно, мёртвая (или вообще не в
+	// реестре) — через шит возобновления, у него на руках путь к файлу сессии.
+	const openHit = useCallback(
+		(hit: SessionSearchHit) => {
+			const live = hosts?.find(h => h.sessionId === hit.sessionId);
+			if (live) {
+				openHost(live);
+				return;
+			}
+			if (hit.cwd === null || hit.cwd.length === 0) {
+				showToast("У этой сессии не записана папка — открыть нечем");
+				return;
+			}
+			setDeadHost({
+				instanceId: `session-${hit.sessionId}`,
+				generation: 0,
+				pid: 0,
+				sessionId: hit.sessionId,
+				displayName: null,
+				sessionName: hit.title,
+				cwd: hit.cwd,
+				model: { provider: "", id: "" },
+				startedAt: hit.createdTs,
+				participants: 0,
+				relayConnected: false,
+				inputRequired: false,
+				busy: false,
+				access: "control",
+				alive: false,
+				sessionFile: hit.path,
+				sessionTitle: hit.title,
+				sessionPreview: hit.preview,
+			});
+		},
+		[hosts, openHost, showToast],
+	);
 
 	const retry = onRefresh ? (
 		<button type="button" className="pk-btn pk-btn--ghost ag-retry" onClick={onRefresh}>
@@ -769,64 +904,135 @@ export function AgentsScreen(props: {
 		const waiting = matched.filter(r => r.host.inputRequired).length;
 		const working = matched.filter(r => r.host.busy).length;
 
-		body = (
-			<div className="pk-list ag-list">
-				{staleBanner}
-				<div className="ag-head">
-					<div className="ag-search">
-						<Search size={16} className="ag-search-icon" aria-hidden="true" />
-						<input
-							className="ag-search-input"
-							type="search"
-							value={query}
-							placeholder="Имя, проект, модель"
-							aria-label="Поиск агентов"
-							spellCheck={false}
-							onChange={e => setQuery(e.target.value)}
-						/>
-						{query !== "" && (
-							<button type="button" className="ag-search-clear" aria-label="Очистить поиск" onClick={() => setQuery("")}>
-								<X size={14} />
-							</button>
-						)}
-					</div>
+		const searchBar = (
+			<div className="ag-search">
+				<Search size={16} className="ag-search-icon" aria-hidden="true" />
+				<input
+					className="ag-search-input"
+					type="search"
+					value={query}
+					placeholder={mode === "text" ? "Слова из переписки — ищу во всех сессиях" : "Имя, проект, модель"}
+					aria-label={mode === "text" ? "Поиск по тексту сессий" : "Поиск агентов"}
+					spellCheck={false}
+					onChange={e => setQuery(e.target.value)}
+				/>
+				{query !== "" && (
+					<button type="button" className="ag-search-clear" aria-label="Очистить поиск" onClick={() => setQuery("")}>
+						<X size={14} />
+					</button>
+				)}
+			</div>
+		);
+
+		// Переключатель режима: список агентов и поиск по их переписке — разные
+		// вопросы, поэтому не угадываем, а показываем оба явно.
+		const modeChips = (
+			<div className="pk-chips ag-modes">
+				<button type="button" className={`pk-chip${mode === "agents" ? " pk-chip--on" : ""}`} onClick={() => pickMode("agents")}>
+					Агенты · {shown.length}
+				</button>
+				<button type="button" className={`pk-chip${mode === "text" ? " pk-chip--on" : ""}`} onClick={() => pickMode("text")}>
+					В переписке
+				</button>
+				{mode === "text" && (
+					<button type="button" className={`pk-chip${mineOnly ? " pk-chip--on" : ""}`} onClick={() => pickMineOnly(!mineOnly)}>
+						только мои сообщения
+					</button>
+				)}
+			</div>
+		);
+
+		const head = (
+			<div className="ag-head">
+				{searchBar}
+				{modeChips}
+				{filterCwd && (
+					<button type="button" className="pk-filter" onClick={onClearFilter}>
+						Проект: {shortenPath(filterCwd)}
+						<X size={14} />
+					</button>
+				)}
+			</div>
+		);
+
+		if (mode === "text") {
+			const hits = found?.results ?? [];
+			const indexNote = found === null ? null : (
+				<span className="ag-summary">
+					{found.status.sessions} {pluralRu(found.status.sessions, "сессия", "сессии", "сессий")} в индексе
+					{searching ? ` · дочитываю ${found.status.pendingFiles} ${pluralRu(found.status.pendingFiles, "файл", "файла", "файлов")}` : ""}
+				</span>
+			);
+			body = (
+				<div className="pk-list ag-list">
+					{staleBanner}
+					{head}
+					{query.trim().length < 2 ? (
+						<div className="pk-empty ag-empty-inline">
+							<div className="pk-empty-title">Поиск по всем сессиям</div>
+							<div className="pk-empty-text">
+								Два символа и больше: «растдекс», «Cudy роутер». Все слова должны встретиться в сессии — регистр и падеж не важны.
+							</div>
+						</div>
+					) : (
+						<>
+							{indexNote}
+							{searchError != null && (
+								<div className="pk-form-error" role="alert">
+									{searchError}
+								</div>
+							)}
+							{hits.length === 0 && !searching && searchError == null && (
+								<div className="pk-empty ag-empty-inline">
+									<div className="pk-empty-title">Ничего не найдено</div>
+									<div className="pk-empty-text">
+										{mineOnly ? "Попробуй «всё, что говорили» — или другие слова." : "Другие слова или короче запрос."}
+									</div>
+								</div>
+							)}
+							{hits.map(hit => (
+								<SearchHitCard key={hit.sessionId} hit={hit} onOpen={openHit} />
+							))}
+						</>
+					)}
+				</div>
+			);
+		} else {
+			body = (
+				<div className="pk-list ag-list">
+					{staleBanner}
+					{head}
 					<div className="ag-summary">
 						{matched.length} {pluralRu(matched.length, "агент", "агента", "агентов")}
 						{working > 0 && ` · ${working} ${pluralRu(working, "работает", "работают", "работают")}`}
 						{waiting > 0 && ` · ${waiting} ${pluralRu(waiting, "ждёт", "ждут", "ждут")} ответа`}
 					</div>
-					{filterCwd && (
-						<button type="button" className="pk-filter" onClick={onClearFilter}>
-							Проект: {shortenPath(filterCwd)}
-							<X size={14} />
-						</button>
+					{matched.length === 0 ? (
+						<div className="pk-empty ag-empty-inline">
+							<div className="pk-empty-title">{q === "" ? "Агентов нет" : "Ничего не найдено"}</div>
+							<div className="pk-empty-text">
+								{q === "" ? "Создай агента кнопкой «+» или выполни /collab в сессии OMP." : "Другой запрос, режим «В переписке» или очисти поиск."}
+							</div>
+						</div>
+					) : (
+						SECTION_ORDER.map(id => (
+							<AgentSection
+								key={id}
+								id={id}
+								rows={bySection.get(id) ?? []}
+								// Поиск разворачивает всё: свёрнутая секция с найденным — тупик.
+								collapsed={q === "" && (collapsed[id] ?? SECTION_COLLAPSED_DEFAULT.includes(id))}
+								openingId={openingId}
+								pins={pins}
+								onToggle={toggleSection}
+								onOpen={openHost}
+								onTogglePin={togglePin}
+							/>
+						))
 					)}
 				</div>
-				{matched.length === 0 ? (
-					<div className="pk-empty ag-empty-inline">
-						<div className="pk-empty-title">{q === "" ? "Агентов нет" : "Ничего не найдено"}</div>
-						<div className="pk-empty-text">
-							{q === "" ? "Создай агента кнопкой «+» или выполни /collab в сессии OMP." : "Другой запрос или очисти поиск."}
-						</div>
-					</div>
-				) : (
-					SECTION_ORDER.map(id => (
-						<AgentSection
-							key={id}
-							id={id}
-							rows={bySection.get(id) ?? []}
-							// Поиск разворачивает всё: свёрнутая секция с найденным — тупик.
-							collapsed={q === "" && (collapsed[id] ?? SECTION_COLLAPSED_DEFAULT.includes(id))}
-							openingId={openingId}
-							pins={pins}
-							onToggle={toggleSection}
-							onOpen={openHost}
-							onTogglePin={togglePin}
-						/>
-					))
-				)}
-			</div>
-		);
+			);
+		}
 	}
 
 	return (

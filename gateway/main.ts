@@ -6,6 +6,7 @@ import { listHosts, mintLink } from "./hosts.ts";
 import type { OmpHostsOutput } from "./hosts.ts";
 import { resumeAgent, startAgent, stopAgent } from "./agents.ts";
 import { findSessionFile, listSessions, parseSessionHead, renameSession, type RenameOutcome } from "./sessions.ts";
+import { refreshIndex, searchIndexStatus, searchSessions, SEARCH_QUERY_MIN, warmSearchIndex } from "./session-search.ts";
 import { displayName, setDisplayName } from "./names.ts";
 import { bootRestore, observeHosts, remapInstance } from "./restore.ts";
 import { getAgentSettings, listModelOptions, listProjectFiles, projectGit, readProjectFile, readTerminal, renameAgent, sendTerminalKeys, sendTerminalText, setAgentSettings, MAX_TERMINAL_TEXT_BYTES } from "./files.ts";
@@ -124,6 +125,15 @@ void bootRestore()
     }
   })
   .catch((err) => console.log(`[restore] ошибка: ${err instanceof Error ? err.message : String(err)}`));
+
+// Полнотекстовый индекс сессий: прогрев в фоне, чтобы первый поиск с телефона
+// не ждал сканирование 165 МБ.
+void warmSearchIndex()
+  .then(() => {
+    const status = searchIndexStatus();
+    console.log(`[search] индекс сессий: ${status.sessions} сессий, ${status.messages} реплик за ${status.lastScanMs ?? "?"} мс`);
+  })
+  .catch((err) => console.log(`[search] индекс не построен: ${err instanceof Error ? err.message : String(err)}`));
 
 const updater = new Updater(LIVE_UPDATER_PATHS, push);
 void updater.boot().catch(() => {});
@@ -292,6 +302,17 @@ async function route(req: Request, url: URL): Promise<Response> {
     const head = parseSessionHead(body.path);
     if (head.id !== null) setDisplayName(head.id, outcome.title, head.cwd);
     return json(200, { ok: true, title: outcome.title, sessionId: head.id });
+  }
+
+  // Полнотекстовый поиск по репликам всех сессий (по умолчанию — только слова
+  // пользователя). Индекс в памяти шлюза: пока он дочитывает изменённые файлы,
+  // в status.pendingFiles видно остаток, и клиент доопрашивает.
+  if (url.pathname === "/api/sessions/search" && req.method === "GET") {
+    const query = (url.searchParams.get("q") ?? "").trim();
+    if (query.length < SEARCH_QUERY_MIN) return json(400, { error: `запрос короче ${SEARCH_QUERY_MIN} символов` });
+    const role = url.searchParams.get("role") === "all" ? "all" : "user";
+    await refreshIndex(1500);
+    return json(200, { query, role, status: searchIndexStatus(), results: searchSessions(query, role) });
   }
 
   // Старый instanceId → живой (после автоворестора id меняется, сессия нет).

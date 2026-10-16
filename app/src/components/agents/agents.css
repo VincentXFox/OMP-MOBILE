@@ -620,3 +620,95 @@
 	background: var(--accent-muted);
 	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
+
+/* ── Поиск по переписке сессий ───────────────────────────────────────
+ * Поле в хабе умеет два разных вопроса: «где агент» (карточки) и «где я это
+ * писал» (совпадения в репликах). Результат — сессия, отрывки и переход в неё. */
+
+.ag-modes {
+	margin-top: 0;
+}
+
+/* Специфичность выше .pk-card (pocket.css собирается позже) */
+.pk-card.ag-hit-card {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.ag-hit-head {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+}
+
+.ag-hit-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+	overflow-wrap: anywhere;
+	font-size: 1.0625rem;
+	font-weight: 600;
+	line-height: 1.25;
+	color: var(--fg-primary, var(--fg));
+}
+
+.ag-hit-count {
+	flex-shrink: 0;
+	padding: 1px 8px;
+	font-size: 0.75rem;
+	font-weight: var(--weight-semibold, 600);
+	color: var(--accent);
+	background: var(--accent-muted);
+	border-radius: var(--radius-pill);
+}
+
+.ag-hit-snips {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.ag-hit-snip {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	font-size: 0.8125rem;
+	color: var(--fg-secondary, var(--muted));
+}
+
+.ag-hit-role {
+	flex-shrink: 0;
+	padding: 0 6px;
+	font-size: 0.6875rem;
+	color: var(--fg-tertiary, var(--muted));
+	background: var(--surface2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-pill);
+}
+
+.ag-hit-role--user {
+	color: var(--accent);
+	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.ag-hit-text {
+	min-width: 0;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	overflow: hidden;
+	overflow-wrap: anywhere;
+	line-height: 1.4;
+}
+
+.ag-hit-mark {
+	padding: 0 2px;
+	color: inherit;
+	background: color-mix(in srgb, var(--accent) 32%, transparent);
+	border-radius: 3px;
+}
