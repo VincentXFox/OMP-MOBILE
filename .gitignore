@@ -8,3 +8,6 @@ backups/
 *.log
 screenshots/
 app/agents-round11.webp
+# Локальный TLS-стенд: приватные ключи CA/листа не покидают машину
+certs/
+app/public/pocket-root-ca.crt

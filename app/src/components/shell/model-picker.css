@@ -1,0 +1,149 @@
+/* Лист выбора модели (ModelPickerSheet): поиск + список с провайдерами. */
+
+.mp-sheet {
+	display: flex;
+	flex-direction: column;
+	gap: var(--sp-2);
+	max-height: 82vh;
+}
+
+.mp-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--sp-2);
+}
+
+.mp-note {
+	font-size: 13px;
+	color: var(--fg-secondary);
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 8px 10px;
+}
+
+.mp-search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	padding: 8px 10px;
+	color: var(--fg-tertiary);
+}
+
+.mp-search-input {
+	flex: 1;
+	min-width: 0;
+	border: 0;
+	background: transparent;
+	color: var(--fg);
+	font-size: 15px;
+	outline: none;
+}
+
+.mp-busy {
+	font-size: 13px;
+	color: var(--accent);
+}
+
+/* Чипы уровня усилия в листе модели живого чата */
+.mp-effort {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.mp-effort-label {
+	font-size: 11px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--fg-tertiary);
+}
+
+.mp-effort-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.mp-list {
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-height: 120px;
+}
+
+.mp-provider {
+	position: sticky;
+	top: 0;
+	background: var(--bg);
+	padding: 8px 4px 4px;
+	font-size: 11px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--fg-tertiary);
+}
+
+.mp-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	width: 100%;
+	text-align: left;
+	background: transparent;
+	border: 0;
+	border-radius: 10px;
+	padding: 10px 12px;
+	color: inherit;
+}
+
+.mp-row:active {
+	background: var(--surface);
+}
+
+.mp-row--on {
+	background: var(--surface);
+}
+
+.mp-row:disabled {
+	opacity: 0.55;
+}
+
+.mp-row-main {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.mp-row-name {
+	font-size: 15px;
+}
+
+.mp-row-sub,
+.mp-row-meta {
+	font-size: 12px;
+	color: var(--fg-secondary);
+	font-variant-numeric: tabular-nums;
+}
+
+.mp-row-sub {
+	font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.mp-row-check {
+	color: var(--accent);
+	flex: none;
+}
+
+.mp-empty {
+	padding: 16px 4px;
+	font-size: 14px;
+	color: var(--fg-secondary);
+}

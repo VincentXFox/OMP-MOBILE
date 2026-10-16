@@ -8,7 +8,7 @@ import { resumeAgent, startAgent, stopAgent } from "./agents.ts";
 import { findSessionFile, listSessions, parseSessionHead, renameSession, type RenameOutcome } from "./sessions.ts";
 import { displayName, setDisplayName } from "./names.ts";
 import { bootRestore, observeHosts, remapInstance } from "./restore.ts";
-import { getAgentSettings, listProjectFiles, projectGit, readProjectFile, readTerminal, renameAgent, sendTerminalKeys, sendTerminalText, setAgentSettings, MAX_TERMINAL_TEXT_BYTES } from "./files.ts";
+import { getAgentSettings, listModelOptions, listProjectFiles, projectGit, readProjectFile, readTerminal, renameAgent, sendTerminalKeys, sendTerminalText, setAgentSettings, MAX_TERMINAL_TEXT_BYTES } from "./files.ts";
 import { PushManager } from "./push.ts";
 import { readAttachment, saveAttachment } from "./attach.ts";
 import { isMemoryTable, listBanks, listEntries } from "./memory.ts";
@@ -149,6 +149,15 @@ async function route(req: Request, url: URL): Promise<Response> {
   if (!url.pathname.startsWith("/api/")) return serveStatic(url.pathname);
 
   if (req.headers.get("authorization") !== `Bearer ${config.token}`) return json(401, { error: "unauthorized" });
+
+  // Каталог моделей для пикеров (создание агента и смена модели в чате).
+  if (url.pathname === "/api/models" && req.method === "GET") {
+    try {
+      return json(200, { models: await listModelOptions() });
+    } catch (err) {
+      return json(502, { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   if (url.pathname === "/api/hosts" && req.method === "GET") {
     const out = await cache.get();

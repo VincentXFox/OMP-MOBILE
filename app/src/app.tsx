@@ -80,6 +80,7 @@ export function App(): ReactNode {
 	const clientRef = useRef<GuestClient | null>(null);
 	const [activeInstanceId, setActiveInstanceId] = useState<string | null>(initial.current.instanceId);
 	const [opening, setOpening] = useState(false);
+	const [openingId, setOpeningId] = useState<string | null>(null);
 	// Screens that must survive tab switches stay mounted (hidden) once visited.
 	const [keepAliveVisited, setKeepAliveVisited] = useState<Set<string>>(
 		() => new Set(screen === "settings" || screen === "memory" ? [screen] : []),
@@ -143,9 +144,11 @@ export function App(): ReactNode {
 		window.location.hash = `#/${next}`;
 	}, []);
 
-	// poll hosts every 5s
+	// poll hosts every 5s; скрытая вкладка не поллит (телефон в фоне экономит
+	// батарею и трафик), возврат в приложение обновляет список сразу.
 	useEffect(() => {
 		let alive = true;
+		let timer: number | null = null;
 		const poll = async (): Promise<void> => {
 			try {
 				const list = await fetchHosts();
@@ -162,11 +165,47 @@ export function App(): ReactNode {
 				);
 			}
 		};
-		void poll();
-		const timer = setInterval(() => void poll(), 5000);
+		const stop = (): void => {
+			if (timer !== null) {
+				window.clearInterval(timer);
+				timer = null;
+			}
+		};
+		const start = (): void => {
+			stop();
+			timer = window.setInterval(() => void poll(), 5000);
+		};
+		const sync = (): void => {
+			if (document.visibilityState === "visible") {
+				void poll();
+				start();
+			} else {
+				stop();
+			}
+		};
+		sync();
+		document.addEventListener("visibilitychange", sync);
 		return () => {
 			alive = false;
-			clearInterval(timer);
+			stop();
+			document.removeEventListener("visibilitychange", sync);
+		};
+	}, []);
+
+	// Возврат в приложение / сеть снова есть: немедленное переподключение чата —
+	// иначе сокет ждёт backoff до 30 с, а мёртвый без close висит «живым».
+	useEffect(() => {
+		const wake = (): void => {
+			if (document.visibilityState !== "visible") return;
+			clientRef.current?.reconnectNow();
+		};
+		document.addEventListener("visibilitychange", wake);
+		window.addEventListener("online", wake);
+		window.addEventListener("pageshow", wake);
+		return () => {
+			document.removeEventListener("visibilitychange", wake);
+			window.removeEventListener("online", wake);
+			window.removeEventListener("pageshow", wake);
 		};
 	}, []);
 
@@ -174,6 +213,7 @@ export function App(): ReactNode {
 		async (host: HostInfo): Promise<void> => {
 			if (opening) return;
 			setOpening(true);
+			setOpeningId(host.instanceId);
 			try {
 				const link = await mintLink(host.instanceId, false);
 				const next = new GuestClient(link, storedName());
@@ -193,10 +233,13 @@ export function App(): ReactNode {
 				setHostsError(
 					status === 409
 						? "Сессия обновилась (stale generation) — попробуй ещё раз."
-						: `Не удалось открыть сессию: ${err instanceof Error ? err.message : String(err)}`,
+						: !window.isSecureContext
+							? "Страница открыта по http — браузер отключил шифрование, чаты не работают. Открой приложение по https-адресу (см. сообщение сверху)."
+							: `Не удалось открыть сессию: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			} finally {
 				setOpening(false);
+				setOpeningId(null);
 			}
 		},
 		[goto, opening],
@@ -275,6 +318,7 @@ export function App(): ReactNode {
 			hosts={hosts}
 			error={hostsError}
 			filterCwd={filterCwd}
+			openingId={openingId}
 			onClearFilter={() => setFilterCwd(null)}
 			onOpen={h => void openHost(h)}
 			onRefresh={refreshHosts}
@@ -347,6 +391,11 @@ export function App(): ReactNode {
 
 	return (
 		<div className="pk-app">
+			{typeof window !== "undefined" && !window.isSecureContext && (
+				<div className="pk-insecure-banner" role="alert">
+					⚠ Открыто по http — браузер отключил шифрование: чаты и вложения работать не будут. Открой приложение по https-адресу (см. актуальную ссылку).
+				</div>
+			)}
 			{screen !== "session" && (
 				<header className="pk-header">
 					<span className="pk-header-title">{SCREEN_TITLE[screen]}</span>

@@ -1,83 +1,83 @@
 {
 	"01a1374c-d7ed-716c-bea7-87802f20a063": {
-		"instanceId": "4f4d61e58b027bc7",
+		"instanceId": "2a763e22478368c5",
 		"sessionId": "01a1374c-d7ed-716c-bea7-87802f20a063",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
-		"name": "Add binary file attachment support",
-		"updatedAt": 1791954124791
+		"name": "Настроить HTTPS-токен для omp",
+		"updatedAt": 1792108289850
 	},
 	"01a13734-0544-70ed-8dfe-d8ef62a34271": {
-		"instanceId": "1f6c03e892cea0b5",
+		"instanceId": "823fa3382f1e18bd",
 		"sessionId": "01a13734-0544-70ed-8dfe-d8ef62a34271",
 		"cwd": "/tmp/omp-pocket-scratch",
 		"model": "zai/glm-5.3-flash",
 		"name": "🔀 MODEL: Switch model to flash-high",
-		"updatedAt": 1791934568079
+		"updatedAt": 1792108299855
 	},
 	"01a1178f-0dc7-75ea-b523-80df5b7eae9e": {
-		"instanceId": "29808e52dd5d4483",
+		"instanceId": "2e291d96c57934b0",
 		"sessionId": "01a1178f-0dc7-75ea-b523-80df5b7eae9e",
 		"cwd": "/tmp",
 		"model": "zai/glm-5.3-flash",
 		"name": "Сделать более современный дизайн",
-		"updatedAt": 1791934568079
+		"updatedAt": 1792108304855
 	},
 	"01a13077-c803-7695-a0bf-2d5fd98e833a": {
-		"instanceId": "fe4619be0d663944",
+		"instanceId": "944c1f00ed17ec37",
 		"sessionId": "01a13077-c803-7695-a0bf-2d5fd98e833a",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
 		"name": "📶 WR3000: Разблокировать Cudy WR3000",
-		"updatedAt": 1791934568079
+		"updatedAt": 1792108309856
 	},
 	"01a136a9-af92-7035-9905-8b20fd0c3b33": {
-		"instanceId": "c3fad65794f9a1b3",
+		"instanceId": "2693d60bef2e860e",
 		"sessionId": "01a136a9-af92-7035-9905-8b20fd0c3b33",
 		"cwd": "/tmp/omp-pocket-scratch",
 		"model": "zai/glm-5.3-flash",
 		"name": "🔓 QR: Fix vyandex captcha blocking node channels",
-		"updatedAt": 1791949814231
+		"updatedAt": 1792108314856
 	},
 	"01a135ec-dc91-7016-b5bb-ed21149ec797": {
-		"instanceId": "a8f99b70a9a58b30",
+		"instanceId": "e77ae208a02c0a38",
 		"sessionId": "01a135ec-dc91-7016-b5bb-ed21149ec797",
 		"cwd": "/tmp/omp-pocket-scratch",
 		"model": "zai/glm-5.3-flash",
 		"name": "Add hold-to-record voice input",
-		"updatedAt": 1791934568079
+		"updatedAt": 1792108314856
 	},
 	"01a13783-bd51-7322-9753-e1bb798beb54": {
-		"instanceId": "bf814cbe993b01f4",
+		"instanceId": "2f35fc132a0819d5",
 		"sessionId": "01a13783-bd51-7322-9753-e1bb798beb54",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
 		"name": "Fix Cyrillic session names and auto-recovery",
-		"updatedAt": 1791934568079
+		"updatedAt": 1792108319856
 	},
 	"01a13791-5bbd-7429-8167-468895d7dab5": {
-		"instanceId": "3154c27190af8f30",
+		"instanceId": "b3741943773a0523",
 		"sessionId": "01a13791-5bbd-7429-8167-468895d7dab5",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
 		"name": "Show strikethrough old prices from feed",
-		"updatedAt": 1791946163950
+		"updatedAt": 1792108324856
 	},
 	"01a1381d-96dc-75eb-964a-4cac3fdeaf12": {
-		"instanceId": "7d6fab290b450bbc",
+		"instanceId": "5aafb0768a66e336",
 		"sessionId": "01a1381d-96dc-75eb-964a-4cac3fdeaf12",
 		"cwd": "/tmp/omp-pocket-scratch",
 		"model": "zai/glm-5.3-flash",
 		"name": "Reconstruct superagent vision and gaps",
-		"updatedAt": 1791948554779
+		"updatedAt": 1792108329856
 	},
 	"01a13844-560d-742a-b9e1-28ad46033b05": {
-		"instanceId": "94ae280943569da0",
+		"instanceId": "f3540897068ebf32",
 		"sessionId": "01a13844-560d-742a-b9e1-28ad46033b05",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
 		"name": "Verify memory hook in TUI",
-		"updatedAt": 1791960825614
+		"updatedAt": 1792108334857
 	},
 	"01a138db-6b91-7050-b164-e706239be866": {
 		"instanceId": "de9a5a2556861a33",
@@ -88,12 +88,12 @@
 		"updatedAt": 1791955310110
 	},
 	"01a13927-ad8c-7532-b1a5-19b1ed49aaff": {
-		"instanceId": "71ccfc293332cc6c",
+		"instanceId": "ea4339cfb9dec924",
 		"sessionId": "01a13927-ad8c-7532-b1a5-19b1ed49aaff",
 		"cwd": "/tmp",
 		"model": "zai/glm-5.3-flash",
 		"name": null,
-		"updatedAt": 1792076686562
+		"updatedAt": 1792108339861
 	},
 	"01a13928-d070-77df-91f4-a7a9a494411c": {
 		"instanceId": "76d0ec5b804b2a9b",
@@ -104,59 +104,107 @@
 		"updatedAt": 1791960475592
 	},
 	"01a13940-4b4e-7422-b45e-d68ed027f324": {
-		"instanceId": "7afad260ca8a8f89",
+		"instanceId": "afebb4bad5d3596c",
 		"sessionId": "01a13940-4b4e-7422-b45e-d68ed027f324",
 		"cwd": "/tmp/omp-pocket-scratch",
 		"model": "zai/glm-5.3-flash",
 		"name": "Fix memory forgetting in GRANDMASTER 7.3",
-		"updatedAt": 1791962175755
+		"updatedAt": 1792108344866
 	},
 	"01a1395f-3bc9-74da-bb78-6d896f7ded87": {
-		"instanceId": "8f9b3e016caf29b1",
+		"instanceId": "1d0797e2311a3700",
 		"sessionId": "01a1395f-3bc9-74da-bb78-6d896f7ded87",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
 		"name": "🛰️ PROXY: Донастройка прокси на MikroTik",
-		"updatedAt": 1791971957037
+		"updatedAt": 1792108349860
 	},
 	"01a1397b-5478-7742-bdb2-ffce7a4cef99": {
-		"instanceId": "03a8db763ac225ad",
+		"instanceId": "b499a42b3c582bea",
 		"sessionId": "01a1397b-5478-7742-bdb2-ffce7a4cef99",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
 		"name": "Extract and analyze project.zip safely",
-		"updatedAt": 1791965846399
+		"updatedAt": 1792108349860
 	},
 	"01a13982-d721-75bc-9163-a9bbfeabc58d": {
-		"instanceId": "61d9eced497ede4d",
+		"instanceId": "70198b95b81622b2",
 		"sessionId": "01a13982-d721-75bc-9163-a9bbfeabc58d",
 		"cwd": "/home/vincentfox",
 		"model": "zai/glm-5.3-flash",
 		"name": null,
-		"updatedAt": 1791966246539
+		"updatedAt": 1792108354860
 	},
 	"01a139dc-4abe-7783-a2e8-ae63dfdd899f": {
-		"instanceId": "6d786a28066575eb",
+		"instanceId": "36ea40a77250d627",
 		"sessionId": "01a139dc-4abe-7783-a2e8-ae63dfdd899f",
 		"cwd": "/home/vincentfox",
 		"model": "deepseek/deepseek-v4-flash-vision-exp",
 		"name": "📡 MIKRO: Revert MikroTik DNS to 9.9.9.9",
-		"updatedAt": 1791972367086
+		"updatedAt": 1792108359860
 	},
 	"01a13eb6-6dbf-7677-ae2f-b435a1c5090f": {
-		"instanceId": "f1ecef7b6c7f6163",
+		"instanceId": "914b4150d1328400",
 		"sessionId": "01a13eb6-6dbf-7677-ae2f-b435a1c5090f",
 		"cwd": "/home/vincentfox",
 		"model": "deepseek/deepseek-v4-flash-vision-exp",
-		"name": "Add Hysteria2 node with safe publish",
-		"updatedAt": 1792063181377
+		"name": "Fix hy2 crash and prevent recurrence",
+		"updatedAt": 1792174888264
 	},
 	"01a13f15-ac09-718c-abd3-c8ed0c55bd15": {
-		"instanceId": "e9e1a7cb019560f8",
+		"instanceId": "844e21feb83102b8",
 		"sessionId": "01a13f15-ac09-718c-abd3-c8ed0c55bd15",
 		"cwd": "/home/vincentfox",
 		"model": "deepseek/deepseek-v4-flash-vision-exp",
 		"name": "Set up Google Drive backup for servers",
-		"updatedAt": 1792060376189
+		"updatedAt": 1792108369861
+	},
+	"01a1402e-5608-764b-8a1f-861da87c31fa": {
+		"instanceId": "d0f88822b6086408",
+		"sessionId": "01a1402e-5608-764b-8a1f-861da87c31fa",
+		"cwd": "/home/vincentfox",
+		"model": "deepseek/deepseek-v4-flash-vision-exp",
+		"name": "📶 WIFI: Keep big PC connected to Asus WiFi",
+		"updatedAt": 1792108374861
+	},
+	"01a1403b-1efe-702e-b7f2-edb7961332a5": {
+		"instanceId": "13740c3f1157adc4",
+		"sessionId": "01a1403b-1efe-702e-b7f2-edb7961332a5",
+		"cwd": "/tmp",
+		"model": "deepseek/deepseek-v4-flash-vision-exp",
+		"name": null,
+		"updatedAt": 1792078982216
+	},
+	"01a140c9-1f80-74d9-8391-ccd4e1aa7d47": {
+		"instanceId": "2e64f1f84077b374",
+		"sessionId": "01a140c9-1f80-74d9-8391-ccd4e1aa7d47",
+		"cwd": "/home/vincentfox",
+		"model": "deepseek/deepseek-v4-flash-vision-exp",
+		"name": "Set up RustDesk remote access on DE5",
+		"updatedAt": 1792108374861
+	},
+	"01a141b7-3fc9-72e0-8eb6-a7fdfd0e6fac": {
+		"instanceId": "12a9c545633c763d",
+		"sessionId": "01a141b7-3fc9-72e0-8eb6-a7fdfd0e6fac",
+		"cwd": "/home/vincentfox",
+		"model": "deepseek/deepseek-v4-flash-vision-exp",
+		"name": "Restore todo requirement in RULES.md",
+		"updatedAt": 1792173823088
+	},
+	"01a145e2-fa98-75b0-824c-9f806aa6a238": {
+		"instanceId": "2285fb03b5359ab8",
+		"sessionId": "01a145e2-fa98-75b0-824c-9f806aa6a238",
+		"cwd": "/home/vincentfox",
+		"model": "deepseek/deepseek-v4-flash-vision-exp",
+		"name": "Fix model selection and connection bugs",
+		"updatedAt": 1792173977983
+	},
+	"01a145f0-b165-73b7-9a02-7a8cdca324c9": {
+		"instanceId": "4a3126da0737486d",
+		"sessionId": "01a145f0-b165-73b7-9a02-7a8cdca324c9",
+		"cwd": "/tmp/model-switch-test",
+		"model": "deepseek/deepseek-v4-flash",
+		"name": "🔀 SWITCH: Test model switch commands",
+		"updatedAt": 1792177056469
 	}
 }

@@ -14,6 +14,10 @@ export interface HostInfo {
 	inputRequired: boolean;
 	busy: boolean;
 	access: "view" | "control";
+	/** false = запись реестра с мёртвым процессом: join невозможен, нужен resume. */
+	alive?: boolean;
+	/** Полный путь к .jsonl сессии (для resume), null/undefined если не найден. */
+	sessionFile?: string | null;
 }
 
 const BASE_KEY = "ompPocket.gwBase";
@@ -103,11 +107,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	let res: Response;
 	try {
 		// таймаут 10с: недостижимый base (упавший LAN-адрес/мёртвый туннель)
-		// не должен висеть до TCP-таймаута ОС, пока поллинг плодит запросы
+		// не должен висеть до TCP-таймаута ОС, пока поллинг плодит запросы.
+		// AbortSignal.any есть не во всех браузерах — фолбэк на одиночный таймаут.
+		const timeout = AbortSignal.timeout(10_000);
+		const signal = typeof AbortSignal.any === "function" && init?.signal
+			? AbortSignal.any([init.signal, timeout])
+			: (init?.signal ?? timeout);
 		res = await fetch(gatewayUrl(path), {
 			...init,
 			headers: authHeaders(init?.headers),
-			signal: AbortSignal.any([init?.signal, AbortSignal.timeout(10_000)].filter((s): s is AbortSignal => s !== null && s !== undefined)),
+			signal,
 		});
 	} catch (err) {
 		throw new GatewayError(0, err instanceof Error ? err.message : String(err));
@@ -259,6 +268,11 @@ export async function resumeSession(cwd: string, session: string, opts: { model?
 	} catch (err) {
 		return { ok: false, error: err instanceof Error ? err.message : String(err) };
 	}
+}
+
+/** Возобновить завершённую сессию из карточки Агентов: файл сессии уже известен. */
+export function resumeAgentHost(cwd: string, sessionFile: string): Promise<AgentResumeResult> {
+	return resumeSession(cwd, sessionFile, { mode: "resume" });
 }
 
 export async function fetchMemoryEntries(
@@ -470,6 +484,54 @@ export async function fetchUpdateJob(): Promise<UpdateJob> {
 /* ---- terminal (herdr agents) ---- */
 
 export type TerminalResult = { paneId: string; text: string } | { error: "not-herdr-agent" };
+
+/* ---- каталог моделей и настройки чата (модель + усилие) ---- */
+
+export interface ModelOption {
+	selector: string;
+	name: string;
+	thinking: string[];
+	contextWindow: number;
+}
+
+export interface AgentChatSettings {
+	model: { provider: string; id: string } | null;
+	thinking: string | null;
+	models: ModelOption[];
+}
+
+function toChatSettings(value: unknown): AgentChatSettings {
+	const data = value as Partial<AgentChatSettings> & { models?: unknown };
+	return {
+		model: data.model ?? null,
+		thinking: typeof data.thinking === "string" ? data.thinking : null,
+		models: Array.isArray(data.models) ? (data.models as ModelOption[]) : [],
+	};
+}
+
+/** Каталог моделей omp для пикеров (создание агента, смена модели в чате). */
+export async function fetchModels(): Promise<ModelOption[]> {
+	const data = await request<{ models?: unknown }>("/api/models");
+	return Array.isArray(data.models) ? (data.models as ModelOption[]) : [];
+}
+
+export async function fetchAgentSettings(instanceId: string): Promise<AgentChatSettings> {
+	return toChatSettings(await request<unknown>(`/api/agents/${encodeURIComponent(instanceId)}/settings`));
+}
+
+/** Смена модели и/или уровня усилия живого агента (клавишами в его TUI). */
+export async function applyAgentSettings(
+	instanceId: string,
+	change: { model?: string; thinking?: string },
+): Promise<AgentChatSettings> {
+	return toChatSettings(
+		await request<unknown>(`/api/agents/${encodeURIComponent(instanceId)}/settings`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(change),
+		}),
+	);
+}
 
 /** Terminal pane snapshot. `null` = unknown host; `{error}` = agent is not herdr-managed. */
 export async function getTerminal(instanceId: string): Promise<TerminalResult | null> {

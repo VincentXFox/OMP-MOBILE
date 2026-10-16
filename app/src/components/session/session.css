@@ -362,7 +362,10 @@
 	top: 10px;
 	left: 50%;
 	transform: translateX(-50%);
-	padding: 6px 14px;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 12px 6px 14px;
 	border-radius: 999px;
 	background: var(--bg-overlay);
 	border: 1px solid var(--border-strong);
@@ -371,6 +374,23 @@
 	z-index: 6;
 	max-width: calc(100% - 24px);
 	overflow-wrap: anywhere;
+}
+
+/* «Сейчас» в баннере переподключения: не ждать backoff вручную */
+.ss-phase-action {
+	flex: none;
+	padding: 2px 10px;
+	border-radius: 999px;
+	border: 1px solid var(--border-strong);
+	background: transparent;
+	color: inherit;
+	font-size: 0.75rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.ss-phase-action:active {
+	opacity: 0.7;
 }
 
 /* ---- composer ---- */

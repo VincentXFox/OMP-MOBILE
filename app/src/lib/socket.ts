@@ -55,6 +55,8 @@ export class CollabSocket {
 	#recvChain: Promise<void> = Promise.resolve();
 	/** Envelopes sealed while disconnected, flushed on the next open. */
 	#pendingSends: Uint8Array<ArrayBuffer>[] = [];
+	/** Время последнего ручного реконнекта — гасит дубли от пары wake-событий. */
+	#lastManualReconnect = 0;
 
 	constructor(opts: CollabSocketOptions) {
 		this.#opts = opts;
@@ -95,6 +97,32 @@ export class CollabSocket {
 			.catch(() => {
 				// dropped frame; the socket-level close path reports actionable failures
 			});
+	}
+
+	/**
+	 * Немедленное переподключение: сбросить экспоненциальный backoff и открыть
+	 * сокет сейчас. Нужно после сворачивания приложения/смены сети — ждать
+	 * таймер (до 30 с) там бессмысленно.
+	 */
+	reconnectNow(): void {
+		if (this.#closed) return;
+		// visibilitychange + online приходят парой: второй вызов в пределах
+		// пары секунд рвёт уже поднятый сокет — игнорируем.
+		const now = Date.now();
+		if (now - this.#lastManualReconnect < 1500) return;
+		this.#lastManualReconnect = now;
+		this.#clearRetry();
+		this.#attempt = 0;
+		const stale = this.#ws;
+		if (stale !== null) {
+			this.#ws = null;
+			try {
+				stale.close(4000, "manual reconnect");
+			} catch {
+				// already closing/closed
+			}
+		}
+		this.#openSocket();
 	}
 
 	/** Intentional close: clears any retry timer, suppresses reconnect. A later connect() starts fresh. */

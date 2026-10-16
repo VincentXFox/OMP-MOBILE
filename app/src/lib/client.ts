@@ -199,6 +199,25 @@ export class GuestClient {
 		}
 	}
 
+	/**
+	 * Немедленное переподключение к комнате: возврат из фона телефона, смена
+	 * сети, «залипший» сокет без события close. Сбрасывает backoff сокета и
+	 * заново шлёт hello; хост отвечает свежим welcome со снапшотом.
+	 * Терминально завершённую сессию не оживляем — там свой флоу (rejoin).
+	 */
+	reconnectNow(): void {
+		if (this.#phase === "ended") return;
+		this.#socket.reconnectNow();
+		if (!this.#welcomed && this.#welcomeTimer === null) {
+			this.#welcomeTimer = setTimeout(() => {
+				this.#welcomeTimer = null;
+				if (!this.#welcomed) this.#end("timed out waiting for the host's welcome");
+			}, WELCOME_TIMEOUT_MS);
+		}
+		this.#phase = this.#everConnected ? "reconnecting" : "connecting";
+		this.#commit();
+	}
+
 	close(): void {
 		this.#clearWelcomeTimer();
 		this.#clearSnapshotProgressTimer();

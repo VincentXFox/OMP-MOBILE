@@ -2,8 +2,9 @@ import { ArrowLeft, Check, CircleAlert, Folder, Lock, OctagonPause, Play, Plus, 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { basename } from "../../lib/format";
-import type { HostInfo, ProjectFileEntry, SuperAgent, SuperBoard } from "../../lib/gateway";
-import { fetchSuperBoard, listProjectFiles, startAgent } from "../../lib/gateway";
+import type { HostInfo, ModelOption, ProjectFileEntry, SuperAgent, SuperBoard } from "../../lib/gateway";
+import { fetchModels, fetchSuperBoard, listProjectFiles, resumeAgentHost, startAgent } from "../../lib/gateway";
+import { ModelPickerSheet } from "../shell/ModelPickerSheet";
 import "./agents.css";
 
 export type HostStatus = {
@@ -15,6 +16,9 @@ export type HostStatus = {
 };
 
 export function hostStatus(host: HostInfo): HostStatus {
+	// Мёртвый процесс реестра: join невозможен — только resume.
+	if (host.alive === false)
+		return { label: "Завершён", tone: "muted", pulse: false, icon: <Check size={14} /> };
 	if (!host.relayConnected)
 		return { label: "Нет связи", tone: "muted", pulse: false, icon: <CircleAlert size={14} /> };
 	if (host.inputRequired)
@@ -114,22 +118,23 @@ function agoText(startedAt: number): string {
 	return `${Math.floor(h / 24)} дн назад`;
 }
 
-function HostCard(props: { host: HostInfo; board: SuperBoard | null; onOpen: (host: HostInfo) => void }): ReactNode {
-	const { host, board, onOpen } = props;
+function HostCard(props: { host: HostInfo; board: SuperBoard | null; opening?: boolean; onOpen: (host: HostInfo) => void }): ReactNode {
+	const { host, board, opening = false, onOpen } = props;
 	const status = hostStatus(host);
 	const dim = !host.relayConnected;
 	// Re-render every 30s so «5 мин назад» stays fresh.
 	useTick(30_000);
 	return (
 		<button
-			className={`pk-card pk-host${dim ? " pk-host--dim" : ""}${host.inputRequired ? " pk-host--attention" : ""}`}
+			className={`pk-card pk-host${dim ? " pk-host--dim" : ""}${host.inputRequired ? " pk-host--attention" : ""}${opening ? " pk-host--opening" : ""}`}
+			disabled={opening}
 			onClick={() => onOpen(host)}
 		>
 			<span className="ag-name">{hostDisplayName(host, board)}</span>
 			<span className="ag-status">
 				<span className={`pk-dot pk-dot--${status.tone}${status.pulse ? " pk-dot--pulse" : ""}`} />
 				<span className="ag-status-icon">{status.icon}</span>
-				<span>{status.label}</span>
+				<span>{opening ? "Открываю…" : status.label}</span>
 				{host.busy && (
 					<span className="ag-elapsed">
 						<Timer size={12} />
@@ -284,6 +289,26 @@ function FolderPickerSheet(props: {
 	);
 }
 
+const MODEL_KEY = "ompPocket.lastModel";
+
+/** Последняя выбранная модель — как дефолт для следующего «Нового агента». */
+function storedModel(): string {
+	try {
+		return window.localStorage.getItem(MODEL_KEY) ?? "";
+	} catch {
+		return "";
+	}
+}
+
+function rememberModel(selector: string): void {
+	try {
+		if (selector === "") window.localStorage.removeItem(MODEL_KEY);
+		else window.localStorage.setItem(MODEL_KEY, selector);
+	} catch {
+		// приватный режим — выбор живёт только в этой сессии
+	}
+}
+
 function NewAgentSheet(props: {
 	suggestions: readonly string[];
 	onClose: () => void;
@@ -292,12 +317,30 @@ function NewAgentSheet(props: {
 }): ReactNode {
 	const { suggestions, onClose, onCreated, onToast } = props;
 	const [cwd, setCwd] = useState(suggestions[0] ?? "");
-	const [model, setModel] = useState("");
+	const [model, setModel] = useState(storedModel);
+	const [models, setModels] = useState<readonly ModelOption[] | null>(null);
 	const [label, setLabel] = useState("");
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [pickerOpen, setPickerOpen] = useState(false);
+	const [modelPickerOpen, setModelPickerOpen] = useState(false);
 	const sheetRef = useRef<HTMLDivElement | null>(null);
+
+	// Каталог моделей грузим один раз на открытие шита: без него кнопка ведёт
+	// в пустой лист, но создать агента с моделью по умолчанию можно и так.
+	useEffect(() => {
+		let alive = true;
+		fetchModels()
+			.then(list => {
+				if (alive) setModels(list);
+			})
+			.catch(() => {
+				if (alive) setModels([]);
+			});
+		return () => {
+			alive = false;
+		};
+	}, []);
 
 	// Подтверждение пикера: папка существует ⇔ листится без ошибки.
 	const pickFolder = useCallback(
@@ -386,17 +429,18 @@ function NewAgentSheet(props: {
 					)}
 				</div>
 				<div className="pk-field">
-					<label className="pk-field-label" htmlFor="na-model">
-						Модель (необязательно)
-					</label>
-					<input
-						id="na-model"
-						className="pk-field-input"
-						value={model}
-						placeholder="glm-5.3-flash"
-						spellCheck={false}
-						onChange={e => setModel(e.target.value)}
-					/>
+					<div className="pk-field-label" id="na-model-label">
+						Модель
+					</div>
+					<button
+						type="button"
+						className="ag-pick-btn ag-model-btn"
+						aria-labelledby="na-model-label"
+						aria-haspopup="dialog"
+						onClick={() => setModelPickerOpen(true)}
+					>
+						{model === "" ? "По умолчанию (настройки omp)" : model}
+					</button>
 				</div>
 				<div className="pk-field">
 					<label className="pk-field-label" htmlFor="na-label">
@@ -423,6 +467,90 @@ function NewAgentSheet(props: {
 					onClose={() => setPickerOpen(false)}
 				/>
 			)}
+			<ModelPickerSheet
+				open={modelPickerOpen}
+				title="Модель агента"
+				models={models ?? []}
+				current={model === "" ? null : model}
+				allowDefault
+				defaultLabel="По умолчанию (настройки omp)"
+				note={models === null ? "Загружаю каталог моделей…" : models.length === 0 ? "Каталог моделей недоступен — агент стартует на модели по умолчанию." : null}
+				onPick={selector => {
+					const next = selector ?? "";
+					setModel(next);
+					rememberModel(next);
+					setModelPickerOpen(false);
+				}}
+				onClose={() => setModelPickerOpen(false)}
+			/>
+		</>
+	);
+}
+
+/** Шит мёртвой сессии: join невозможен, предлагаем resume через шлюз. */
+function DeadSessionSheet(props: {
+	host: HostInfo;
+	onClose: () => void;
+	onResumed: () => void;
+}): ReactNode {
+	const { host, onClose, onResumed } = props;
+	const [resuming, setResuming] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const sheetRef = useRef<HTMLDivElement | null>(null);
+
+	useEffect(() => {
+		const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		sheetRef.current?.focus();
+		const onKey = (e: KeyboardEvent): void => {
+			if (e.key === "Escape" && !resuming) onClose();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => {
+			window.removeEventListener("keydown", onKey);
+			prev?.focus();
+		};
+	}, [onClose, resuming]);
+
+	const resume = useCallback(async () => {
+		if (resuming) return;
+		if (host.sessionFile == null) {
+			setError("Файл сессии не найден — возобновление невозможно.");
+			return;
+		}
+		setResuming(true);
+		setError(null);
+		const result = await resumeAgentHost(host.cwd, host.sessionFile);
+		if (result.ok) {
+			onResumed();
+		} else {
+			setError(result.error);
+			setResuming(false);
+		}
+	}, [host.cwd, host.sessionFile, onResumed, resuming]);
+
+	return (
+		<>
+			<div className="pk-sheet-backdrop" onClick={resuming ? undefined : onClose} />
+			<div className="pk-sheet ag-dead-sheet" role="dialog" aria-modal="true" aria-labelledby="ds-title" ref={sheetRef} tabIndex={-1}>
+				<div className="pk-sheet-handle" />
+				<div className="pk-sheet-title" id="ds-title">
+					Сессия завершена
+				</div>
+				<div className="ag-dead-text">Агент этой сессии не запущен.</div>
+				{error != null && (
+					<div className="pk-form-error ag-dead-error" role="alert">
+						{error}
+					</div>
+				)}
+				<div className="ag-dead-actions">
+					<button type="button" className="pk-btn pk-btn--primary ag-dead-resume" disabled={resuming} onClick={() => void resume()}>
+						{resuming ? <span className="pk-spinner" aria-label="Возобновление…" /> : "Возобновить"}
+					</button>
+					<button type="button" className="pk-btn pk-btn--ghost ag-dead-close" disabled={resuming} onClick={onClose}>
+						Закрыть
+					</button>
+				</div>
+			</div>
 		</>
 	);
 }
@@ -431,14 +559,26 @@ export function AgentsScreen(props: {
 	hosts: HostInfo[] | null;
 	error: string | null;
 	filterCwd: string | null;
+	/** instanceId карточки, которая сейчас открывается (mintLink + коннект). */
+	openingId?: string | null;
 	onClearFilter: () => void;
 	onOpen: (host: HostInfo) => void;
 	onRefresh?: () => void;
 }): ReactNode {
-	const { hosts, error, filterCwd, onClearFilter, onOpen, onRefresh } = props;
+	const { hosts, error, filterCwd, openingId = null, onClearFilter, onOpen, onRefresh } = props;
 	const [sheetOpen, setSheetOpen] = useState(false);
+	const [deadHost, setDeadHost] = useState<HostInfo | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
 	const board = useSuperBoardOnce();
+
+	// Мёртвая карточка не открывает чат: вместо join — шит с resume.
+	const openHost = useCallback(
+		(host: HostInfo) => {
+			if (host.alive === false) setDeadHost(host);
+			else onOpen(host);
+		},
+		[onOpen],
+	);
 
 	// Polling errors must not blank the screen: keep the last good list.
 	const lastHosts = useRef<HostInfo[] | null>(null);
@@ -519,7 +659,7 @@ export function AgentsScreen(props: {
 					{[...filtered]
 						.sort((a, b) => statusRank(a) - statusRank(b) || b.startedAt - a.startedAt)
 						.map(h => (
-							<HostCard key={h.instanceId} host={h} board={board} onOpen={onOpen} />
+							<HostCard key={h.instanceId} host={h} board={board} opening={h.instanceId === openingId} onOpen={openHost} />
 						))}
 				</div>
 			);
@@ -540,6 +680,16 @@ export function AgentsScreen(props: {
 					onClose={() => setSheetOpen(false)}
 					onCreated={() => onRefresh?.()}
 					onToast={showToast}
+				/>
+			)}
+			{deadHost != null && (
+				<DeadSessionSheet
+					host={deadHost}
+					onClose={() => setDeadHost(null)}
+					onResumed={() => {
+						setDeadHost(null);
+						onRefresh?.();
+					}}
 				/>
 			)}
 			{toast != null && (

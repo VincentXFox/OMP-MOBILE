@@ -15,6 +15,19 @@
 }
 
 /* header */
+.pk-insecure-banner {
+	position: sticky;
+	top: 0;
+	z-index: calc(var(--z-nav) + 5);
+	padding: 10px 16px;
+	background: var(--warn-muted, rgba(255, 178, 36, 0.14));
+	color: var(--warning);
+	font-size: 0.8125rem;
+	line-height: 1.45;
+	text-align: center;
+	border-bottom: 1px solid var(--warning);
+}
+
 .pk-header {
 	display: flex;
 	align-items: center;

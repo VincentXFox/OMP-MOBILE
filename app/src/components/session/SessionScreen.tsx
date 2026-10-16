@@ -18,6 +18,7 @@ import {
 	Pencil,
 	Play,
 	Plus,
+	SlidersHorizontal,
 	Square,
 	Terminal,
 	TriangleAlert,
@@ -26,13 +27,14 @@ import {
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { GuestClient, GuestSnapshot, Notice } from "../../lib/client";
-import type { HostInfo, ProjectFileEntry } from "../../lib/gateway";
-import { fetchHosts, getTerminal, listProjectFiles, readProjectFile, renameAgent, stopAgent, uploadAttachment } from "../../lib/gateway";
+import type { AgentChatSettings, HostInfo, ProjectFileEntry } from "../../lib/gateway";
+import { applyAgentSettings, fetchAgentSettings, fetchHosts, fetchModels, getTerminal, listProjectFiles, readProjectFile, renameAgent, stopAgent, uploadAttachment } from "../../lib/gateway";
 import { basename, pluralRu, relTime } from "../../lib/format";
 import { todoBoardFromEntries } from "../../lib/todo-board";
 import { cancelSpeech, isTtsEnabled, speakAssistantText } from "../../lib/tts";
 import { useGuestSnapshot } from "../../lib/use-guest";
 import { ConfirmSheet } from "../shell/ConfirmSheet";
+import { ModelPickerSheet } from "../shell/ModelPickerSheet";
 import { FilesScreen } from "../files/FilesScreen";
 import { TodoBar } from "./TodoBar";
 import { VoiceRecorder } from "../shell/VoiceRecorder";
@@ -196,7 +198,8 @@ function optionTone(label: string): OptionTone {
 const PHASE_TEXT: Record<GuestSnapshot["phase"], string> = {
 	connecting: "Подключение…",
 	waiting: "Подключение…",
-	live: "Работает…",
+	// «live» = сокет с комнатой открыт; работает агент или нет — видно по пульсу.
+	live: "На связи",
 	reconnecting: "Переподключение…",
 	ended: "Завершено",
 };
@@ -489,11 +492,12 @@ function InfoSheet(props: {
 	snap: GuestSnapshot;
 	host: HostInfo | undefined;
 	onLeave: () => void;
+	onOpenModel: () => void;
 	onOpenTerminal: () => void;
 	onOpenFiles: () => void;
 	onClose: () => void;
 }): ReactNode {
-	const { snap, host, onLeave, onOpenTerminal, onOpenFiles, onClose } = props;
+	const { snap, host, onLeave, onOpenModel, onOpenTerminal, onOpenFiles, onClose } = props;
 	const [confirmMode, setConfirmMode] = useState<null | "stop" | "force">(null);
 	const [stopping, setStopping] = useState(false);
 	const [stopError, setStopError] = useState<string | null>(null);
@@ -570,6 +574,13 @@ function InfoSheet(props: {
 				<InfoRow label="sessionId" value={snap.header?.id ?? "—"} mono />
 				<InfoRow label="Папка" value={cwd ?? "—"} mono />
 				{model && <InfoRow label="Модель" value={`${model.provider}/${model.id}`} mono />}
+				{host && (
+					<div className="ss-info-group">
+						<button type="button" className="ss-opt ss-opt--accent" onClick={onOpenModel}>
+							<SlidersHorizontal size={16} /> Сменить модель и усилие
+						</button>
+					</div>
+				)}
 				{usage && usage.percent != null && (
 					<InfoRow
 						label="Контекст"
@@ -656,6 +667,124 @@ function InfoSheet(props: {
 			/>
 		</>
 	);
+}
+
+/**
+ * Лист «Модель и усилие» живого чата: каталог моделей omp + чипы усилия.
+ * Смена идёт клавишами в TUI агента (gateway /settings), поэтому кнопки
+ * выключены, пока агент занят — esc в этот момент прерывает ход.
+ */
+function AgentModelSheet(props: {
+	instanceId: string;
+	open: boolean;
+	host: HostInfo | undefined;
+	onClose: () => void;
+	onToast: (text: string) => void;
+}): ReactNode {
+	const { instanceId, open, host, onClose, onToast } = props;
+	const [settings, setSettings] = useState<AgentChatSettings | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+
+	useEffect(() => {
+		if (!open) return;
+		let alive = true;
+		setSettings(null);
+		setError(null);
+		fetchAgentSettings(instanceId)
+			.then(next => {
+				if (alive) setSettings(next);
+			})
+			.catch(err => {
+				if (!alive) return;
+				// Не herdr-агент (или панель не найдена): показываем каталог, но менять нельзя.
+				void fetchModels()
+					.then(list => {
+						if (!alive) return;
+						setSettings({ model: null, thinking: null, models: list });
+						setError(err instanceof Error ? err.message : String(err));
+					})
+					.catch(() => {
+						if (alive) setError(err instanceof Error ? err.message : String(err));
+					});
+			});
+		return () => {
+			alive = false;
+		};
+	}, [open, instanceId]);
+
+	const busyAgent = host?.busy === true || host?.inputRequired === true;
+	const note = busyAgent
+		? "Агент сейчас работает — смена модели подождёт конца хода (иначе ход прервётся)."
+		: error !== null
+			? null
+			: host === undefined
+				? "Агент не в herdr — смена модели недоступна."
+				: null;
+
+	const apply = useCallback(
+		async (change: { model?: string; thinking?: string }): Promise<void> => {
+			setBusy(true);
+			setError(null);
+			try {
+				const next = await applyAgentSettings(instanceId, change);
+				setSettings(next);
+				onToast(change.model !== undefined ? `Модель: ${change.model}` : `Усилие: ${change.thinking ?? "по умолчанию"}`);
+			} catch (err) {
+				setError(err instanceof Error ? err.message : String(err));
+			} finally {
+				setBusy(false);
+			}
+		},
+		[instanceId, onToast],
+	);
+
+	const currentSelector = settings?.model === null || settings?.model === undefined ? null : `${settings.model.provider}/${settings.model.id}`;
+	// Уровни усилия текущей модели + нейтральные «off/auto» из меню /effort.
+	const graded = settings?.models.find(m => m.selector === currentSelector)?.thinking ?? [];
+	const levels = ["off", "auto", ...graded.filter(level => level !== "off" && level !== "auto")];
+
+	return (
+		<ModelPickerSheet
+			open={open}
+			title="Модель и усилие"
+			models={settings?.models ?? []}
+			current={currentSelector}
+			busy={busy || busyAgent}
+			error={error}
+			note={note ?? (settings === null ? "Загружаю настройки агента…" : null)}
+			header={
+				<div className="mp-effort">
+					<div className="mp-effort-label">Уровень усилия</div>
+					<div className="mp-effort-row">
+						{levels.map(level => (
+							<button
+								key={level}
+								type="button"
+								className={`pk-chip${settings?.thinking === level ? " pk-chip--on" : ""}`}
+								disabled={busy || busyAgent}
+								onClick={() => void apply({ thinking: level })}
+							>
+								{level}
+							</button>
+						))}
+					</div>
+				</div>
+			}
+			onPick={selector => {
+				if (selector === null || selector === currentSelector) return;
+				void apply({ model: selector });
+			}}
+			onClose={onClose}
+		/>
+	);
+}
+
+/** Человекочитаемые причины завершения; остальные — как есть. */
+function endedReasonText(reason: string): string {
+	if (reason === "timed out waiting for the host's welcome")
+		return "Сессия не отвечает — возможно, агент завершён. Вернись в Агенты и возобнови.";
+	return reason;
 }
 
 export function SessionScreen(props: { client: GuestClient; onLeave: () => void; host?: HostInfo; onReopen?: (instanceId: string) => void }): ReactNode {
@@ -947,6 +1076,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 	);
 
 	const [infoOpen, setInfoOpen] = useState(false);
+	const [modelSheetOpen, setModelSheetOpen] = useState(false);
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [filesOpen, setFilesOpen] = useState(false);
 
@@ -1125,7 +1255,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 			<div className="ss-root ss-root--ended">
 				<div className="ss-ended-card">
 					<div className="ss-ended-title">Сессия закрыта</div>
-					{snap.endedReason && <div className="ss-ended-reason">{snap.endedReason}</div>}
+					{snap.endedReason && <div className="ss-ended-reason">{endedReasonText(snap.endedReason)}</div>}
 					{rejoinWaiting && (
 						<div className="ss-ended-reason">
 							Ищу поднятого агента с этой сессией — чат откроется сам, когда агент вернётся.
@@ -1221,7 +1351,12 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 					</button>
 				)}
 				{snap.phase === "reconnecting" && (
-					<div className="ss-phase-banner">Нет сети — переподключение…</div>
+					<div className="ss-phase-banner">
+						Нет сети — переподключение…
+						<button type="button" className="ss-phase-action" onClick={() => client.reconnectNow()}>
+							Сейчас
+						</button>
+					</div>
 				)}
 				{snap.phase === "connecting" && <div className="ss-phase-banner">Подключение…</div>}
 				{snap.phase === "waiting" && (
@@ -1356,9 +1491,9 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 							<button
 								type="button"
 								className="ss-model-chip"
-								onClick={() => setInfoOpen(true)}
-								aria-label="Модель и агент — подробнее"
-								title="Модель и агент"
+								onClick={() => setModelSheetOpen(true)}
+								aria-label="Сменить модель и усилие"
+								title="Сменить модель и усилие"
 							>
 								{host.model.id}
 							</button>
@@ -1396,11 +1531,22 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 					onClose={() => setOpenAgentId(null)}
 				/>
 			)}
+			<AgentModelSheet
+				instanceId={instanceId}
+				open={modelSheetOpen}
+				host={host}
+				onClose={() => setModelSheetOpen(false)}
+				onToast={showToast}
+			/>
 			{infoOpen && (
 				<InfoSheet
 					snap={snap}
 					host={host}
 					onLeave={onLeave}
+					onOpenModel={() => {
+						setInfoOpen(false);
+						setModelSheetOpen(true);
+					}}
 					onOpenTerminal={() => void openTerminal()}
 					onOpenFiles={() => {
 						setInfoOpen(false);

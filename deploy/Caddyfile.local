@@ -1,0 +1,8 @@
+{
+	auto_https off
+	admin off
+}
+https://192.168.1.18:8443 {
+	tls /home/vincentfox/omp-mobile/certs/leaf.crt /home/vincentfox/omp-mobile/certs/leaf.key
+	reverse_proxy 127.0.0.1:8088
+}

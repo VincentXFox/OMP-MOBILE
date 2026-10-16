@@ -35,6 +35,18 @@ const CHAR_KEY_ALIASES: Record<string, string> = {
   " ": "space",
 };
 
+/** Печатаемые ASCII → клавиши herdr; не-ASCII/управляющие — null. */
+function textToKeys(text: string): string[] | null {
+  const keys: string[] = [];
+  for (const ch of text) {
+    const alias = CHAR_KEY_ALIASES[ch];
+    if (alias !== undefined) keys.push(alias);
+    else if (/^[\x21-\x7e]$/.test(ch)) keys.push(ch);
+    else return null;
+  }
+  return keys.length === 0 ? null : keys;
+}
+
 async function runGit(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(["git", ...args], { stdout: "pipe", stderr: "pipe" });
   const timer = setTimeout(() => proc.kill(), SPAWN_TIMEOUT_MS);
@@ -174,18 +186,8 @@ export async function sendTerminalText(instanceId: string, text: string): Promis
 
 // Посимвольный набор: печатаемые ASCII — как клавиши, «/» и пробел — именованные.
 export async function sendTerminalChars(instanceId: string, text: string): Promise<TerminalSend> {
-  const keys: string[] = [];
-  for (const ch of text) {
-    const alias = CHAR_KEY_ALIASES[ch];
-    if (alias !== undefined) {
-      keys.push(alias);
-    } else if (!/^[\x21-\x7e]$/.test(ch)) {
-      return { kind: "bad_key", error: `unsupported char: ${JSON.stringify(ch)}` };
-    } else {
-      keys.push(ch);
-    }
-  }
-  if (keys.length === 0) return { kind: "bad_key", error: "empty text" };
+  const keys = textToKeys(text);
+  if (keys === null) return { kind: "bad_key", error: "empty text or unsupported char" };
   const pane = await resolvePane(instanceId);
   if (pane.kind !== "ok") return pane;
   const sent = unwrapHerdr(await runHerdr(["pane", "send-keys", pane.paneId, ...keys], SPAWN_TIMEOUT_MS));
@@ -214,6 +216,9 @@ export type AgentSettingsOutcome =
   | { kind: "not_herdr" }
   | { kind: "bad_request"; error: string }
   | { kind: "failed"; error: string };
+
+/** Чтение настроек не бывает bad_request — узкий тип для GET-роута. */
+export type AgentSettingsRead = Exclude<AgentSettingsOutcome, { kind: "bad_request" }>;
 
 const MODELS_CACHE_TTL_MS = 10 * 60 * 1000;
 let modelsCache: { at: number; entries: AgentModelOption[] } | null = null;
@@ -253,21 +258,36 @@ async function runOmpModels(): Promise<AgentModelOption[]> {
     }));
 }
 
-async function modelCatalog(): Promise<AgentModelOption[]> {
+/** Каталог моделей omp для пикеров; при сбое отдаём прошлый снимок, если он есть. */
+export async function listModelOptions(): Promise<AgentModelOption[]> {
   if (modelsCache && Date.now() - modelsCache.at < MODELS_CACHE_TTL_MS) return modelsCache.entries;
-  const entries = await runOmpModels();
-  modelsCache = { at: Date.now(), entries };
-  return entries;
+  try {
+    const entries = await runOmpModels();
+    modelsCache = { at: Date.now(), entries };
+    return entries;
+  } catch (err) {
+    if (modelsCache) return modelsCache.entries;
+    throw err;
+  }
 }
 
-// Текущий уровень усилия — хвост панели: последний «Thinking set to <level>».
-function parseThinking(text: string): string | null {
-  let thinking: string | null = null;
-  for (const match of text.matchAll(/Thinking set to ([a-z]+)/gi)) thinking = match[1];
-  return thinking;
+// Уровень усилия omp печатает глифом перед моделью в статус-строке панели
+// («π > ◒ DeepSeek V4 Flash > …»): «Thinking set to …» из старых версий больше нет.
+// Маппинг снят вживую на v18.10.4: off→⦸, auto→⟳, low→◔, high→◒, max→◉.
+const THINKING_GLYPHS: Record<string, string> = {
+  "⦸": "off",
+  "⟳": "auto",
+  "◔": "low",
+  "◒": "high",
+  "◉": "max",
+};
+
+function parseThinkingGlyph(text: string): string | null {
+  const match = /π\s*>\s*(\S+)\s/.exec(text);
+  return match === null ? null : (THINKING_GLYPHS[match[1]] ?? null);
 }
 
-function settingsError(resolution: PaneResolution): AgentSettingsOutcome | null {
+function settingsError(resolution: PaneResolution): AgentSettingsRead | null {
   if (resolution.kind === "ok") return null;
   if (resolution.kind === "not_found") return { kind: "not_found", error: resolution.error };
   if (resolution.kind === "not_herdr") return { kind: "not_herdr" };
@@ -296,27 +316,156 @@ async function currentSettings(instanceId: string, catalog: AgentModelOption[], 
     const read = await readTerminal(instanceId);
     tail = read.kind === "ok" ? read.text : null;
   }
-  const thinking = tail === null ? null : parseThinking(tail.slice(-4000));
+  const thinking = tail === null ? null : parseThinkingGlyph(tail.slice(-4000));
   return { model, thinking, models: catalog };
 }
 
-export async function getAgentSettings(instanceId: string): Promise<AgentSettingsOutcome> {
+export async function getAgentSettings(instanceId: string): Promise<AgentSettingsRead> {
   const pane = await resolvePane(instanceId);
   const blocked = settingsError(pane);
   if (blocked) return blocked;
   try {
-    return { kind: "ok", settings: await currentSettings(instanceId, await modelCatalog(), pane.kind === "ok" ? pane.paneId : undefined) };
+    return { kind: "ok", settings: await currentSettings(instanceId, await listModelOptions(), pane.kind === "ok" ? pane.paneId : undefined) };
   } catch (err) {
     return { kind: "failed", error: err instanceof Error ? err.message : String(err) };
   }
 }
 
-const SETTLE_MS = 2500;
+/** Пауза после партии клавиш: TUI не переваривает залп, набранный без пауз. */
+const SETTLE_MS = 350;
+/** Пауза на открытие модального пикера. */
+const MODAL_MS = 900;
+/** Позиции меню усилия (/effort) в порядке отрисовки. */
+const EFFORT_LEVELS = ["off", "auto", "low", "high", "max"];
 
 function delay(ms: number): Promise<void> {
   const { promise, resolve } = Promise.withResolvers<void>();
   setTimeout(resolve, ms);
   return promise;
+}
+
+type PaneKeys = { ok: true } | { ok: false; error: string };
+
+/** Партия клавиш в панель с паузой на перерисовку TUI. */
+async function pressKeys(paneId: string, keys: string[], settleMs = SETTLE_MS): Promise<PaneKeys> {
+  const sent = unwrapHerdr(await runHerdr(["pane", "send-keys", paneId, ...keys], SPAWN_TIMEOUT_MS));
+  if (!sent.ok) return { ok: false, error: `herdr pane send-keys failed: ${truncateError(sent.error)}` };
+  await delay(settleMs);
+  return { ok: true };
+}
+
+async function typeIntoPane(paneId: string, text: string): Promise<PaneKeys> {
+  const keys = textToKeys(text);
+  if (keys === null) return { ok: false, error: `в панель не набрать: ${JSON.stringify(text)}` };
+  return pressKeys(paneId, keys);
+}
+
+/** Маркеры открытого меню/пикера в панели: их закрывает esc. */
+const MENU_MARKERS = /assign roles|type to search|Thinking Level|↑\/↓ (?:models|providers)|⏎\/→ models/;
+
+/** Текст в строке композера («╰─ …») — пусто, если строки нет. */
+function composerText(tail: string): string {
+  const lines = tail.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const idx = lines[i].indexOf("╰─");
+    if (idx >= 0) return lines[i].slice(idx + 2).trim();
+  }
+  return "";
+}
+
+/**
+ * Привести панель к чистому композеру. Esc в чистом композере omp — это
+ * rewind сессии, поэтому esc шлём только пока на экране открытое меню/пикер,
+ * а остатки набранного текста убираем backspace'ами.
+ */
+async function clearComposer(paneId: string): Promise<PaneKeys> {
+  for (let i = 0; i < 4; i++) {
+    if (!MENU_MARKERS.test(await paneTail(paneId))) break;
+    const esc = await pressKeys(paneId, ["esc"]);
+    if (!esc.ok) return esc;
+  }
+  if (MENU_MARKERS.test(await paneTail(paneId))) return { ok: false, error: "меню в панели не закрывается" };
+  const typed = composerText(await paneTail(paneId));
+  if (typed.length === 0) return { ok: true };
+  return pressKeys(paneId, Array.from({ length: Math.min(typed.length + 4, 32) }, () => "backspace"));
+}
+
+async function paneTail(paneId: string): Promise<string> {
+  return (await readPanelTail(paneId, 40)) ?? "";
+}
+
+/** Текущий уровень усилия — подсветка «❯ level» в открытом меню /effort. */
+function highlightedLevel(text: string): string | null {
+  const match = /❯\s+(\w+)/.exec(text);
+  return match === null || !EFFORT_LEVELS.includes(match[1]) ? null : match[1];
+}
+
+/**
+ * Смена модели в живом TUI: «/» → «model» → пикер → поиск селектора →
+ * роль default → уровень усилия по умолчанию → закрыть пикер.
+ * Каждый шаг проверяется по экрану панели; при расхождении — ошибка,
+ * а не молчаливо отправленное в чат сообщение (так ломался прежний вариант).
+ */
+async function switchModelInPane(paneId: string, selector: string): Promise<PaneKeys> {
+  const cleared = await clearComposer(paneId);
+  if (!cleared.ok) return cleared;
+  const palette = await pressKeys(paneId, ["slash"], 600);
+  if (!palette.ok) return palette;
+  const command = await typeIntoPane(paneId, "model");
+  if (!command.ok) return command;
+  await pressKeys(paneId, ["enter"], MODAL_MS);
+  // Свежеоткрытый пикер: «⏎/→ models · ↑/↓ providers · type to search».
+  if (!/type to search/.test(await paneTail(paneId))) return { ok: false, error: "пикер моделей не открылся" };
+
+  const search = await typeIntoPane(paneId, selector);
+  if (!search.ok) return search;
+  if (!/assign roles/.test(await paneTail(paneId))) return { ok: false, error: "поиск в пикере моделей не сработал" };
+
+  await pressKeys(paneId, ["enter"], MODAL_MS);
+  if (!/→\s*\[/.test(await paneTail(paneId))) return { ok: false, error: `модель ${selector} не нашлась в пикере` };
+  await pressKeys(paneId, ["enter"], MODAL_MS);
+  if (/inherit/.test(await paneTail(paneId))) await pressKeys(paneId, ["enter"], MODAL_MS);
+  // Закрываем по состоянию экрана: первый esc чистит поиск, второй закрывает
+  // пикер; лишний esc в чистом композере — rewind сессии.
+  for (let i = 0; i < 3; i++) {
+    if (!/type to search/.test(await paneTail(paneId))) break;
+    const esc = await pressKeys(paneId, ["esc"]);
+    if (!esc.ok) return esc;
+  }
+  if (/type to search/.test(await paneTail(paneId))) return { ok: false, error: "пикер моделей не закрылся" };
+  return { ok: true };
+}
+
+/** Смена уровня усилия: «/effort» → стрелками до нужного уровня → enter. */
+async function switchThinkingInPane(paneId: string, level: string): Promise<PaneKeys> {
+  const cleared = await clearComposer(paneId);
+  if (!cleared.ok) return cleared;
+  const palette = await pressKeys(paneId, ["slash"], 600);
+  if (!palette.ok) return palette;
+  const command = await typeIntoPane(paneId, "effort");
+  if (!command.ok) return command;
+  await pressKeys(paneId, ["enter"], MODAL_MS);
+  if (!(await paneTail(paneId)).includes("Thinking Level")) return { ok: false, error: "меню усилия не открылось" };
+
+  let tail = await paneTail(paneId);
+  for (let step = 0; step <= EFFORT_LEVELS.length; step++) {
+    const current = highlightedLevel(tail);
+    if (current === null) return { ok: false, error: "не вижу текущий уровень усилия" };
+    if (current === level) break;
+    const moved = await pressKeys(paneId, [EFFORT_LEVELS.indexOf(level) < EFFORT_LEVELS.indexOf(current) ? "up" : "down"]);
+    if (!moved.ok) return moved;
+    tail = await paneTail(paneId);
+  }
+  if (highlightedLevel(tail) !== level) return { ok: false, error: `уровень ${level} не выбрался` };
+  const applied = await pressKeys(paneId, ["enter"], 600);
+  if (!applied.ok) return applied;
+  for (let i = 0; i < 3; i++) {
+    if (!(await paneTail(paneId)).includes("Thinking Level")) break;
+    const esc = await pressKeys(paneId, ["esc"]);
+    if (!esc.ok) return esc;
+  }
+  if ((await paneTail(paneId)).includes("Thinking Level")) return { ok: false, error: "меню усилия не закрылось" };
+  return { ok: true };
 }
 
 export async function setAgentSettings(
@@ -330,65 +479,62 @@ export async function setAgentSettings(
 
   let catalog: AgentModelOption[];
   try {
-    catalog = await modelCatalog();
+    catalog = await listModelOptions();
   } catch (err) {
     return { kind: "failed", error: err instanceof Error ? err.message : String(err) };
   }
 
-  let selector: string | null = null;
+  let modelSelector: string | null = null;
   if (change.model !== undefined) {
     if (typeof change.model !== "string" || change.model.trim() === "") {
       return { kind: "bad_request", error: "model must be a non-empty string" };
     }
     const entry = catalog.find((m) => m.selector === change.model);
     if (!entry) return { kind: "bad_request", error: `Неизвестная модель: ${change.model}` };
-    selector = entry.selector;
+    modelSelector = entry.selector;
   }
+  let thinkingLevel: string | null = null;
   if (change.thinking !== undefined) {
-    if (typeof change.thinking !== "string" || change.thinking.trim() === "") {
-      return { kind: "bad_request", error: "thinking must be a non-empty string" };
+    if (typeof change.thinking !== "string" || !EFFORT_LEVELS.includes(change.thinking)) {
+      return { kind: "bad_request", error: `Уровень усилия: один из ${EFFORT_LEVELS.join(", ")}` };
     }
-    const current = await currentSettings(instanceId, catalog);
-    const baseSelector = current.model
-      ? catalog.find((m) => m.selector === `${current.model.provider}/${current.model.id}`)?.selector ??
-        `${current.model.provider}/${current.model.id}`
-      : null;
-    if (!baseSelector) return { kind: "bad_request", error: "Не удалось определить текущую модель агента" };
-    selector = `${baseSelector}-${change.thinking.trim()}`;
+    thinkingLevel = change.thinking;
   }
-  if (!selector) return { kind: "bad_request", error: "Ничего не передано: нужны model и/или thinking" };
+  if (modelSelector === null && thinkingLevel === null) {
+    return { kind: "bad_request", error: "Ничего не передано: нужны model и/или thinking" };
+  }
 
-  const settled = delay(SETTLE_MS);
-  const keysOutcome = await (async () => {
-    const esc = unwrapHerdr(await runHerdr(["pane", "send-keys", pane.paneId, "esc", "backspace"], SPAWN_TIMEOUT_MS));
-    if (!esc.ok) return { kind: "failed" as const, error: `herdr pane send-keys failed: ${truncateError(esc.error)}` };
-    // «/» отдельной партией — иначе меню не успевает открыться и текст
-    // уходит в поле как обычное сообщение.
-    const slash = unwrapHerdr(await runHerdr(["pane", "send-keys", pane.paneId, "slash"], SPAWN_TIMEOUT_MS));
-    if (!slash.ok) return { kind: "failed" as const, error: `herdr pane send-keys failed: ${truncateError(slash.error)}` };
-    await delay(150);
-    const typed = await sendTerminalChars(instanceId, `model ${selector}`);
-    if (typed.kind !== "ok") return typed;
-    await delay(150);
-    const enter = unwrapHerdr(await runHerdr(["pane", "send-keys", pane.paneId, "enter"], SPAWN_TIMEOUT_MS));
-    if (!enter.ok) return { kind: "failed" as const, error: `herdr pane send-keys failed: ${truncateError(enter.error)}` };
-    return { kind: "ok" as const };
-  })();
-  if (keysOutcome.kind !== "ok") return keysOutcome;
+  // Esc — клавиша прерывания хода и диалогов: под живой работой клавиши не шлём.
+  const host = (await listHosts()).hosts.find((h) => h.instanceId === instanceId);
+  if (host !== undefined && (host.busy || host.inputRequired)) {
+    return { kind: "bad_request", error: "Агент занят — дождись конца хода и попробуй снова" };
+  }
 
-  await settled;
-  const tail = (await readPanelTail(pane.paneId, 60)) ?? "";
-  if (/Unknown model|Failed to set model/i.test(tail)) {
-    return { kind: "failed", error: "omp отклонил команду: Unknown model / Failed to set model" };
+  const before = await currentSettings(instanceId, catalog, pane.paneId);
+  const currentSelector = before.model === null ? null : `${before.model.provider}/${before.model.id}`;
+  if (modelSelector !== null && modelSelector !== currentSelector) {
+    const switched = await switchModelInPane(pane.paneId, modelSelector);
+    if (!switched.ok) return { kind: "failed", error: switched.error };
   }
-  if (!/Model set to|Thinking set to/i.test(tail)) {
-    return { kind: "failed", error: "omp не подтвердил смену модели" };
+  if (thinkingLevel !== null && thinkingLevel !== before.thinking) {
+    const switched = await switchThinkingInPane(pane.paneId, thinkingLevel);
+    if (!switched.ok) return { kind: "failed", error: switched.error };
   }
-  try {
-    return { kind: "ok", settings: await currentSettings(instanceId, catalog, pane.paneId) };
-  } catch (err) {
-    return { kind: "failed", error: err instanceof Error ? err.message : String(err) };
+
+  let settings = await currentSettings(instanceId, catalog, pane.paneId);
+  const appliedSelector = settings.model === null ? null : `${settings.model.provider}/${settings.model.id}`;
+  if (modelSelector !== null && appliedSelector !== modelSelector) {
+    return { kind: "failed", error: `omp не подтвердил смену модели (сейчас ${appliedSelector ?? "неизвестно"})` };
   }
+  if (thinkingLevel !== null && settings.thinking !== thinkingLevel) {
+    // глиф статус-строки перерисовывается не мгновенно — читаем ещё раз
+    await delay(500);
+    settings = await currentSettings(instanceId, catalog, pane.paneId);
+    if (settings.thinking !== thinkingLevel) {
+      return { kind: "failed", error: `уровень усилия не подтвердился (сейчас ${settings.thinking ?? "неизвестен"})` };
+    }
+  }
+  return { kind: "ok", settings };
 }
 
 export interface ProjectEntry {
