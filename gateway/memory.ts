@@ -14,7 +14,7 @@ export function isMemoryTable(value: string): value is MemoryTable {
   return (MEMORY_TABLES as readonly string[]).includes(value);
 }
 
-/** Bank directory names are machine-generated (`<scope>-<random>`); keep the route safe. */
+/** Банки называются `<scope>-<случайный хвост>`; хвост — служебный, в UI не нужен. */
 function isBankName(name: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(name) && !name.includes("..");
 }
@@ -22,6 +22,8 @@ function isBankName(name: string): boolean {
 /** One normalized memory row; each table maps into this shape for the UI. */
 export interface MemoryEntry {
   id: string;
+  /** Из какой таблицы пришла запись — заполняется в режиме «по всем разделам». */
+  table?: MemoryTable;
   title: string | null;
   body: string;
   ts: string | null;
@@ -32,6 +34,12 @@ export interface MemoryEntry {
   recallCount: number | null;
   sessionId: string | null;
   memoryId: string | null;
+  /** Провенанс Mnemopi: occurred_on, has_source и прочие метки этой памяти. */
+  annotations?: { kind: string; value: string }[];
+  /** Короткая выжимка памяти (таблица gists), если она есть. */
+  gist?: string | null;
+  /** Для гиста — текст родительского эпизода, чтобы строка не читалась обрубком. */
+  episode?: string | null;
 }
 
 export interface MemoryBankInfo {
@@ -42,11 +50,87 @@ export interface MemoryBankInfo {
   mtime: number;
 }
 
+export type MemorySort = "ts" | "importance" | "recall" | "confidence";
+
 interface QueryOptions {
   q?: string;
+  sort?: MemorySort;
+  source?: string;
+  kind?: string;
+  minImportance?: number;
   limit: number;
   offset: number;
 }
+
+/** Всё, что нужно знать о таблице, чтобы одинаково её фильтровать и сортировать. */
+interface TableSpec {
+  columns: string;
+  timeColumn: string;
+  searchColumns: string;
+  sourceColumn: string | null;
+  kindColumn: string | null;
+  importanceColumn: string | null;
+  recallColumn: string | null;
+  confidenceColumn: string | null;
+}
+
+const TABLE_SPEC: Record<MemoryTable, TableSpec> = {
+  working_memory: {
+    columns: `id, NULL AS title, content AS body, timestamp AS ts, source, memory_type AS kind,
+       importance, NULL AS confidence, recall_count AS recallCount, session_id AS sessionId, NULL AS memoryId`,
+    timeColumn: "timestamp",
+    searchColumns: "content",
+    sourceColumn: "source",
+    kindColumn: "memory_type",
+    importanceColumn: "importance",
+    recallColumn: "recall_count",
+    confidenceColumn: null,
+  },
+  episodic_memory: {
+    columns: `id, NULL AS title, content AS body, timestamp AS ts, source, memory_type AS kind,
+       importance, NULL AS confidence, recall_count AS recallCount, session_id AS sessionId, NULL AS memoryId`,
+    timeColumn: "timestamp",
+    searchColumns: "content",
+    sourceColumn: "source",
+    kindColumn: "memory_type",
+    importanceColumn: "importance",
+    recallColumn: "recall_count",
+    confidenceColumn: null,
+  },
+  facts: {
+    columns: `fact_id AS id, subject || ' ' || predicate AS title, object AS body, timestamp AS ts, NULL AS source,
+       predicate AS kind, NULL AS importance, confidence, NULL AS recallCount, session_id AS sessionId, NULL AS memoryId`,
+    timeColumn: "timestamp",
+    searchColumns: "subject || ' ' || predicate || ' ' || object",
+    sourceColumn: null,
+    kindColumn: "predicate",
+    importanceColumn: null,
+    recallColumn: null,
+    confidenceColumn: "confidence",
+  },
+  gists: {
+    columns: `id, NULL AS title, text AS body, timestamp AS ts, NULL AS source, NULL AS kind,
+       NULL AS importance, NULL AS confidence, NULL AS recallCount, NULL AS sessionId, memory_id AS memoryId`,
+    timeColumn: "timestamp",
+    searchColumns: "text",
+    sourceColumn: null,
+    kindColumn: null,
+    importanceColumn: null,
+    recallColumn: null,
+    confidenceColumn: null,
+  },
+  annotations: {
+    columns: `CAST(id AS TEXT) AS id, kind AS title, value AS body, created_at AS ts, source, kind,
+       NULL AS importance, confidence, NULL AS recallCount, NULL AS sessionId, memory_id AS memoryId`,
+    timeColumn: "created_at",
+    searchColumns: "kind || ' ' || value",
+    sourceColumn: "source",
+    kindColumn: "kind",
+    importanceColumn: null,
+    recallColumn: null,
+    confidenceColumn: "confidence",
+  },
+};
 
 function tableExists(db: Database, table: string): boolean {
   const row = db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name = ?").get(table);
@@ -76,43 +160,113 @@ function likePattern(q: string): string {
   return `%${q.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
 }
 
-function queryEntries(db: Database, table: MemoryTable, opts: QueryOptions): { total: number; entries: MemoryEntry[] } {
+/** Колонка сортировки: оценка, которой у таблицы нет, откатывается на время. */
+function sortColumn(spec: TableSpec, sort: MemorySort | undefined): string {
+  const bySort: Record<MemorySort, string | null> = {
+    ts: spec.timeColumn,
+    importance: spec.importanceColumn,
+    recall: spec.recallColumn,
+    confidence: spec.confidenceColumn,
+  };
+  const column = sort === undefined ? spec.timeColumn : bySort[sort];
+  return column ?? spec.timeColumn;
+}
+
+interface Where {
+  sql: string;
+  params: (string | number)[];
+}
+
+/** Условия отбора: текст, источник, вид записи и порог важности. */
+function buildWhere(spec: TableSpec, opts: QueryOptions): Where {
+  const clauses: string[] = [];
   const params: (string | number)[] = [];
-  let where = "";
   if (opts.q) {
-    const searchColumns: Record<MemoryTable, string> = {
-      working_memory: "content",
-      episodic_memory: "content",
-      facts: "subject || ' ' || predicate || ' ' || object",
-      gists: "text",
-      annotations: "kind || ' ' || value",
-    };
-    where = ` WHERE ${searchColumns[table]} LIKE ? ESCAPE '\\'`;
+    clauses.push(`(${spec.searchColumns}) LIKE ? ESCAPE '\\'`);
     params.push(likePattern(opts.q));
   }
+  if (opts.source && spec.sourceColumn !== null) {
+    clauses.push(`${spec.sourceColumn} = ?`);
+    params.push(opts.source);
+  }
+  if (opts.kind && spec.kindColumn !== null) {
+    clauses.push(`${spec.kindColumn} = ?`);
+    params.push(opts.kind);
+  }
+  if (opts.minImportance !== undefined && spec.importanceColumn !== null) {
+    clauses.push(`${spec.importanceColumn} >= ?`);
+    params.push(opts.minImportance);
+  }
+  return { sql: clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "", params };
+}
 
+function queryEntries(db: Database, table: MemoryTable, opts: QueryOptions): { total: number; entries: MemoryEntry[] } {
+  const spec = TABLE_SPEC[table];
+  const where = buildWhere(spec, opts);
+  const binder = [...where.params, opts.limit, opts.offset];
   const total = (() => {
-    const row = db.query<{ n: number }, unknown[]>(`SELECT count(*) AS n FROM "${table}"${where}`).get(...params);
+    const row = db.query<{ n: number }, (string | number)[]>(`SELECT count(*) AS n FROM "${table}"${where.sql}`).get(...where.params);
     return row?.n ?? 0;
   })();
-
-  const columns: Record<MemoryTable, string> = {
-    working_memory: `id, NULL AS title, content AS body, timestamp AS ts, source, memory_type AS kind,
-       importance, NULL AS confidence, recall_count AS recallCount, session_id AS sessionId, NULL AS memoryId`,
-    episodic_memory: `id, NULL AS title, content AS body, timestamp AS ts, source, memory_type AS kind,
-       importance, NULL AS confidence, recall_count AS recallCount, session_id AS sessionId, NULL AS memoryId`,
-    facts: `fact_id AS id, subject || ' ' || predicate AS title, object AS body, timestamp AS ts, NULL AS source,
-       predicate AS kind, NULL AS importance, confidence, NULL AS recallCount, session_id AS sessionId, NULL AS memoryId`,
-    gists: `id, NULL AS title, text AS body, timestamp AS ts, NULL AS source, NULL AS kind,
-       NULL AS importance, NULL AS confidence, NULL AS recallCount, NULL AS sessionId, memory_id AS memoryId`,
-    annotations: `id, kind AS title, value AS body, created_at AS ts, source, kind, NULL AS importance, confidence,
-       NULL AS recallCount, NULL AS sessionId, memory_id AS memoryId`,
-  };
-
   const rows = db
-    .query<MemoryEntry, unknown[]>(`SELECT ${columns[table]} FROM "${table}"${where} ORDER BY ts DESC LIMIT ? OFFSET ?`)
-    .all(...params, opts.limit, opts.offset);
-  return { total, entries: rows };
+    .query<MemoryEntry, (string | number)[]>(
+      `SELECT ${spec.columns} FROM "${table}"${where.sql} ORDER BY ${sortColumn(spec, opts.sort)} DESC NULLS LAST LIMIT ? OFFSET ?`,
+    )
+    .all(...binder);
+  return { total, entries: rows.map(row => ({ ...row, table })) };
+}
+
+/** Провенанс и выжимки страницы: две пачки запросов на всю страницу, не по одной
+ * на запись. Родителя ищем через memory_id (gists/annotations ссылаются на память). */
+function enrichPage(db: Database, table: MemoryTable, entries: MemoryEntry[]): void {
+  if (entries.length === 0) return;
+  if (table === "working_memory" || table === "episodic_memory") {
+    const ids = entries.map(entry => entry.id);
+    const placeholders = ids.map(() => "?").join(", ");
+    if (tableExists(db, "annotations")) {
+      const rows = db
+        .query<{ memory_id: string; kind: string; value: string }, string[]>(
+          `SELECT memory_id, kind, value FROM annotations WHERE memory_id IN (${placeholders}) ORDER BY id`,
+        )
+        .all(...ids);
+      const byMemory = new Map<string, { kind: string; value: string }[]>();
+      for (const row of rows) {
+        const list = byMemory.get(row.memory_id) ?? [];
+        list.push({ kind: row.kind, value: row.value });
+        byMemory.set(row.memory_id, list);
+      }
+      for (const entry of entries) entry.annotations = byMemory.get(entry.id) ?? [];
+    }
+    if (tableExists(db, "gists")) {
+      const rows = db
+        .query<{ memory_id: string; text: string }, string[]>(`SELECT memory_id, text FROM gists WHERE memory_id IN (${placeholders})`)
+        .all(...ids);
+      const gistByMemory = new Map(rows.map(row => [row.memory_id, row.text]));
+      for (const entry of entries) entry.gist = gistByMemory.get(entry.id) ?? null;
+    }
+    return;
+  }
+  if (table === "gists") {
+    const memoryIds = entries.map(entry => entry.memoryId).filter((id): id is string => id !== null && id.length > 0);
+    if (memoryIds.length === 0 || !tableExists(db, "episodic_memory")) return;
+    const placeholders = memoryIds.map(() => "?").join(", ");
+    const rows = db
+      .query<{ id: string; content: string }, string[]>(`SELECT id, content FROM episodic_memory WHERE id IN (${placeholders})`)
+      .all(...memoryIds);
+    const episodeById = new Map(rows.map(row => [row.id, row.content]));
+    for (const entry of entries) entry.episode = entry.memoryId === null ? null : (episodeById.get(entry.memoryId) ?? null);
+    return;
+  }
+  if (table === "annotations") {
+    const memoryIds = entries.map(entry => entry.memoryId).filter((id): id is string => id !== null && id.length > 0);
+    if (memoryIds.length === 0 || !tableExists(db, "working_memory")) return;
+    const placeholders = memoryIds.map(() => "?").join(", ");
+    const rows = db
+      .query<{ id: string; content: string }, string[]>(`SELECT id, content FROM working_memory WHERE id IN (${placeholders})`)
+      .all(...memoryIds);
+    const memoryById = new Map(rows.map(row => [row.id, row.content]));
+    for (const entry of entries) entry.episode = entry.memoryId === null ? null : (memoryById.get(entry.memoryId) ?? null);
+  }
 }
 
 export function listBanks(): MemoryBankInfo[] {
@@ -161,7 +315,61 @@ export function listEntries(
   if (!db) return null;
   try {
     if (!tableExists(db, table)) return { total: 0, entries: [] };
-    return queryEntries(db, table, opts);
+    const result = queryEntries(db, table, opts);
+    enrichPage(db, table, result.entries);
+    return result;
+  } finally {
+    db.close();
+  }
+}
+
+/** Поиск сразу по всем разделам: «где я это писал» не должно требовать угадать
+ * вкладку. Слияние по времени; total — сумма совпадений по всем таблицам. */
+export function searchAllEntries(bank: string, opts: QueryOptions): { total: number; entries: MemoryEntry[] } | null {
+  const db = openBankDb(bank);
+  if (!db) return null;
+  try {
+    let total = 0;
+    const merged: MemoryEntry[] = [];
+    for (const table of MEMORY_TABLES) {
+      if (!tableExists(db, table)) continue;
+      // Фильтр по источнику таблица без этой колонки применить не может — такие
+      // разделы в режиме «по источнику» просто не участвуют.
+      if (opts.source !== undefined && TABLE_SPEC[table].sourceColumn === null) continue;
+      const result = queryEntries(db, table, { ...opts, offset: 0, limit: opts.limit + opts.offset });
+      total += result.total;
+      enrichPage(db, table, result.entries);
+      merged.push(...result.entries);
+    }
+    merged.sort((a, b) => Date.parse(b.ts ?? "") - Date.parse(a.ts ?? ""));
+    return { total, entries: merged.slice(opts.offset, opts.offset + opts.limit) };
+  } finally {
+    db.close();
+  }
+}
+
+export interface MemoryFacets {
+  sources: { value: string; count: number }[];
+  kinds: { value: string; count: number }[];
+}
+
+/** Значения для чипов-фильтров с частотами: без них фильтр — угадайка. */
+export function listFacets(bank: string, table: MemoryTable): MemoryFacets | null {
+  const db = openBankDb(bank);
+  if (!db) return null;
+  try {
+    if (!tableExists(db, table)) return { sources: [], kinds: [] };
+    const spec = TABLE_SPEC[table];
+    const group = (column: string | null): { value: string; count: number }[] => {
+      if (column === null) return [];
+      const rows = db
+        .query<{ value: string | null; count: number }, []>(
+          `SELECT ${column} AS value, count(*) AS count FROM "${table}" WHERE ${column} IS NOT NULL AND ${column} != '' GROUP BY ${column} ORDER BY count DESC, value`,
+        )
+        .all();
+      return rows.filter((row): row is { value: string; count: number } => row.value !== null);
+    };
+    return { sources: group(spec.sourceColumn), kinds: group(spec.kindColumn) };
   } finally {
     db.close();
   }

@@ -188,6 +188,8 @@ export interface MemoryBank {
 /** Normalized memory row; the gateway maps every mnemopi table into this shape. */
 export interface MemoryEntry {
 	id: string;
+	/** Раздел, из которого пришла запись (заполняется в режиме «всё»). */
+	table?: MemoryTable;
 	title: string | null;
 	body: string;
 	ts: string | null;
@@ -198,11 +200,34 @@ export interface MemoryEntry {
 	recallCount: number | null;
 	sessionId: string | null;
 	memoryId: string | null;
+	/** Провенанс Mnemopi: occurred_on, has_source и прочие метки памяти. */
+	annotations?: { kind: string; value: string }[];
+	/** Короткая выжимка памяти (таблица gists). */
+	gist?: string | null;
+	/** Для гиста/аннотации — текст родительской записи, чтобы строка не читалась обрубком. */
+	episode?: string | null;
+}
+
+/** По чему сортировать раздел: свежесть, важность, число вспоминаний, уверенность. */
+export type MemorySort = "ts" | "importance" | "recall" | "confidence";
+
+/** Раздел памяти либо поиск сразу по всем разделам. */
+export type MemoryScope = MemoryTable | "all";
+
+export interface MemoryFacets {
+	sources: { value: string; count: number }[];
+	kinds: { value: string; count: number }[];
 }
 
 export async function fetchMemoryBanks(signal?: AbortSignal): Promise<MemoryBank[]> {
 	const data = await request<{ banks: MemoryBank[] }>("/api/memory/banks", { signal });
 	return Array.isArray(data.banks) ? data.banks : [];
+}
+
+export async function fetchMemoryFacets(bank: string, type: MemoryTable, signal?: AbortSignal): Promise<MemoryFacets> {
+	const params = new URLSearchParams({ type });
+	const data = await request<MemoryFacets>(`/api/memory/banks/${encodeURIComponent(bank)}/facets?${params}`, { signal });
+	return { sources: data.sources ?? [], kinds: data.kinds ?? [] };
 }
 
 /* ---- persisted sessions (resurrect dead agents) ---- */
@@ -340,11 +365,15 @@ export function resumeAgentHost(cwd: string, sessionFile: string): Promise<Agent
 
 export async function fetchMemoryEntries(
 	bank: string,
-	type: MemoryTable,
-	opts: { q?: string; limit?: number; offset?: number; signal?: AbortSignal } = {},
+	type: MemoryScope,
+	opts: { q?: string; sort?: MemorySort; source?: string; kind?: string; minImportance?: number; limit?: number; offset?: number; signal?: AbortSignal } = {},
 ): Promise<{ total: number; entries: MemoryEntry[] }> {
 	const params = new URLSearchParams({ type });
 	if (opts.q) params.set("q", opts.q);
+	if (opts.sort) params.set("sort", opts.sort);
+	if (opts.source) params.set("source", opts.source);
+	if (opts.kind) params.set("kind", opts.kind);
+	if (opts.minImportance != null) params.set("minImportance", String(opts.minImportance));
 	if (opts.limit != null) params.set("limit", String(opts.limit));
 	if (opts.offset != null) params.set("offset", String(opts.offset));
 	return request(`/api/memory/banks/${encodeURIComponent(bank)}/entries?${params}`, { signal: opts.signal });

@@ -12,7 +12,7 @@ import { bootRestore, observeHosts, remapInstance } from "./restore.ts";
 import { getAgentSettings, listModelOptions, listProjectFiles, projectGit, readProjectFile, readTerminal, renameAgent, sendTerminalKeys, sendTerminalText, setAgentSettings, MAX_TERMINAL_TEXT_BYTES } from "./files.ts";
 import { PushManager } from "./push.ts";
 import { readAttachment, saveAttachment } from "./attach.ts";
-import { isMemoryTable, listBanks, listEntries } from "./memory.ts";
+import { isMemoryTable, listBanks, listEntries, listFacets, searchAllEntries } from "./memory.ts";
 import { Updater, LIVE_UPDATER_PATHS, isComponentId } from "./updater.ts";
 import { dispatchTasks, superActivity, superBoard, validateDispatchItems } from "./super.ts";
 
@@ -182,15 +182,35 @@ async function route(req: Request, url: URL): Promise<Response> {
   const memMatch = /^\/api\/memory\/banks\/([^/]+)\/entries$/.exec(url.pathname);
   if (memMatch && req.method === "GET") {
     const type = url.searchParams.get("type") ?? "";
-    if (!isMemoryTable(type)) return json(400, { error: "unknown memory type" });
+    // type=all — поиск сразу по всем разделам памяти, без угадывания вкладки.
+    if (type !== "all" && !isMemoryTable(type)) return json(400, { error: "unknown memory type" });
     const limitRaw = Number(url.searchParams.get("limit"));
     const offsetRaw = Number(url.searchParams.get("offset"));
     const limit = Number.isInteger(limitRaw) && limitRaw >= 1 && limitRaw <= 200 ? limitRaw : 50;
     const offset = Number.isInteger(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
     const q = url.searchParams.get("q")?.trim() || undefined;
-    const result = listEntries(decodeURIComponent(memMatch[1]), type, { q, limit, offset });
+    const sortRaw = url.searchParams.get("sort") ?? "";
+    const sort = sortRaw === "importance" || sortRaw === "recall" || sortRaw === "confidence" || sortRaw === "ts" ? sortRaw : undefined;
+    const source = url.searchParams.get("source")?.trim() || undefined;
+    const kind = url.searchParams.get("kind")?.trim() || undefined;
+    const minRaw = Number(url.searchParams.get("minImportance"));
+    const minImportance = Number.isFinite(minRaw) && minRaw > 0 ? minRaw : undefined;
+    const bank = decodeURIComponent(memMatch[1]);
+    const result =
+      type === "all"
+        ? searchAllEntries(bank, { q, sort, source, kind, minImportance, limit, offset })
+        : listEntries(bank, type, { q, sort, source, kind, minImportance, limit, offset });
     if (!result) return json(404, { error: "bank not found" });
     return json(200, result);
+  }
+
+  const memFacetMatch = /^\/api\/memory\/banks\/([^/]+)\/facets$/.exec(url.pathname);
+  if (memFacetMatch && req.method === "GET") {
+    const type = url.searchParams.get("type") ?? "";
+    if (!isMemoryTable(type)) return json(400, { error: "unknown memory type" });
+    const facets = listFacets(decodeURIComponent(memFacetMatch[1]), type);
+    if (!facets) return json(404, { error: "bank not found" });
+    return json(200, facets);
   }
 
   const linkMatch = /^\/api\/hosts\/([^/]+)\/link$/.exec(url.pathname);
