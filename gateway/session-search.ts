@@ -205,6 +205,20 @@ export function warmSearchIndex(): Promise<void> {
   return refreshIndex(120_000);
 }
 
+/**
+ * Обновление индекса с бюджетом ожидания: идущий полный прогрев не держит ответ
+ * до конца сканирования — лучше отдать частичный индекс и остаток в pendingFiles.
+ */
+export function refreshIndexWithin(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const timer = setTimeout(resolve, ms);
+  void refreshIndex(ms).finally(() => {
+    clearTimeout(timer);
+    resolve();
+  });
+  return promise;
+}
+
 export function searchIndexStatus(): SessionSearchStatus {
   let messages = 0;
   for (const entry of index.values()) messages += entry.messages.length;

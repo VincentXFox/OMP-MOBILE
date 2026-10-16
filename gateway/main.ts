@@ -6,7 +6,7 @@ import { listHosts, mintLink } from "./hosts.ts";
 import type { OmpHostsOutput } from "./hosts.ts";
 import { resumeAgent, startAgent, stopAgent } from "./agents.ts";
 import { findSessionFile, listSessions, parseSessionHead, renameSession, type RenameOutcome } from "./sessions.ts";
-import { refreshIndex, searchIndexStatus, searchSessions, SEARCH_QUERY_MIN, warmSearchIndex } from "./session-search.ts";
+import { refreshIndexWithin, searchIndexStatus, searchSessions, SEARCH_QUERY_MIN, warmSearchIndex } from "./session-search.ts";
 import { displayName, setDisplayName } from "./names.ts";
 import { bootRestore, observeHosts, remapInstance } from "./restore.ts";
 import { getAgentSettings, listModelOptions, listProjectFiles, projectGit, readProjectFile, readTerminal, renameAgent, sendTerminalKeys, sendTerminalText, setAgentSettings, MAX_TERMINAL_TEXT_BYTES } from "./files.ts";
@@ -306,12 +306,14 @@ async function route(req: Request, url: URL): Promise<Response> {
 
   // Полнотекстовый поиск по репликам всех сессий (по умолчанию — только слова
   // пользователя). Индекс в памяти шлюза: пока он дочитывает изменённые файлы,
-  // в status.pendingFiles видно остаток, и клиент доопрашивает.
+  // в status.pendingFiles видно остаток, и клиент доопрашивает. Ожидание
+  // ограничено бюджетом: идущий прогрев не должен держать ответ до конца
+  // сканирования — лучше отдать частичный индекс и остаток в pendingFiles.
   if (url.pathname === "/api/sessions/search" && req.method === "GET") {
     const query = (url.searchParams.get("q") ?? "").trim();
     if (query.length < SEARCH_QUERY_MIN) return json(400, { error: `запрос короче ${SEARCH_QUERY_MIN} символов` });
     const role = url.searchParams.get("role") === "all" ? "all" : "user";
-    await refreshIndex(1500);
+    await refreshIndexWithin(1200);
     return json(200, { query, role, status: searchIndexStatus(), results: searchSessions(query, role) });
   }
 
