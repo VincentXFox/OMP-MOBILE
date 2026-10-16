@@ -241,6 +241,16 @@ export function findSessionFile(sessionId: string): string | null {
   return null;
 }
 
+/** Каталог сессий читается: отличает «файла действительно нет» от «ФС недоступна». */
+export function sessionsRootReadable(): boolean {
+  try {
+    readdirSync(SESSIONS_DIR);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export type RenameOutcome =
   | { kind: "ok"; title: string; previousTitle: string | null }
   | { kind: "no_slot"; error: string }

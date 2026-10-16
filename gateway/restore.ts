@@ -1,7 +1,7 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resumeAgent, runHerdr, unwrapHerdr, type ResumeMode } from "./agents.ts";
-import { findSessionFile, listSessions, parseSessionHead } from "./sessions.ts";
+import { findSessionFile, listSessions, parseSessionHead, sessionsRootReadable } from "./sessions.ts";
 import { displayName } from "./names.ts";
 import { listHosts, type OmpHost } from "./hosts.ts";
 
@@ -203,7 +203,12 @@ export async function restoreVictims(liveHosts: readonly OmpHost[]): Promise<Res
     if (stillLive !== null) continue;
     const path = findSessionFile(victim.sessionId);
     if (path === null) {
-      report.details.push(`нет файла сессии для ${victim.sessionId}`);
+      // Файла нет (сессию удалили) — TTL 30 дней только шумит на каждом старте.
+      // Недоступная ФС (не читается корневой каталог) запись не трогает.
+      if (sessionsRootReadable()) {
+        manifest.delete(victim.sessionId);
+        persistManifest();
+      }
       continue;
     }
     const label = displayName(victim.sessionId) ?? victim.name ?? parseSessionHead(path).title ?? undefined;
