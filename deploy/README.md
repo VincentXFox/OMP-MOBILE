@@ -63,6 +63,18 @@ omp config set tools.approvalMode write   # правки файлов — сам
 | `~/.config/systemd/user/omp-pocket-tunnel.service` | user-юнит reverse-SSH-туннеля: `de5:8088` → gateway `127.0.0.1:8088` (публичный адрес `https://pocket.31-77-109-219.sslip.io`) |
 | `~/.config/systemd/user/herdr-mobile-relay.service` | user-юнит фонового сервиса релея (env: `~/.config/herdr/plugins/config/herdr-mobile-relay.events/relay.env`) |
 | `/etc/caddy/Caddyfile` | TLS-фронт (системный юнит `caddy`) |
+| `~/tools/gigaam-data` | STT-сервис GigaAM2-RNNT (распознавание голосовых) |
+
+## Голосовой ввод (STT)
+
+Голосовое из приложения уходит на `POST /api/stt` шлюза (Bearer-токен); шлюз конвертирует
+webm → wav (ffmpeg) и распознаёт GigaAM2-RNNT (Sber) на `127.0.0.1:9110`, при отказе —
+whisper.cpp на `127.0.0.1:9100` (медленнее и хуже на русском). С 2026-10-16 основной STT
+живёт на DE5 (4 vCPU VPS, ~2 ГБ с mmap модели): Thor1 ходит к нему через user-юнит
+`gigaam-tunnel.service` (`ssh -L 127.0.0.1:9110:127.0.0.1:9110 de5`), локальная копия
+сервиса на Thor1 осталась ручным фолбэком и конфликтует с туннелем по порту.
+Шлюз о переезде не знает — он всегда ходит в `127.0.0.1:9110`. Установка, патч
+`weights_only=False` под torch≥2.6, переключение и замеры — `~/tools/gigaam-data/README.md`.
 
 ## Systemd-юниты и linger
 
