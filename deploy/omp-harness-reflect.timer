@@ -1,0 +1,11 @@
+[Unit]
+Description=Ежедневная рефлексия гарнесса (04:30, после организатора штата)
+
+[Timer]
+OnCalendar=*-*-* 04:30
+# Пропущенный при выключенном ноутбуке прогон выполняется при первом включении.
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

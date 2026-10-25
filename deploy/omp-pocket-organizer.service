@@ -1,0 +1,15 @@
+[Unit]
+Description=OMP Pocket organizer — суточная раскладка агентов по папкам штата
+After=omp-pocket-gateway.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/vincentfox/.bun/bin/bun /home/vincentfox/omp-mobile/bin/organizer.ts run
+WorkingDirectory=/home/vincentfox/omp-mobile
+# Разбор двадцати агентов моделью идёт минутами: не рубим прогон на 90 с.
+TimeoutStartSec=1200
+# omp живёт в ~/.local/bin: без PATH организатор не найдёт модель-раннер.
+Environment=HOME=/home/vincentfox
+Environment=PATH=/home/vincentfox/.local/bin:/home/vincentfox/.bun/bin:/usr/local/bin:/usr/bin:/bin
+# Только flash: pro/платные провайдеры в автоматике не используем.
+Environment=OMP_POCKET_ORGANIZER_MODEL=deepseek/deepseek-v4-flash

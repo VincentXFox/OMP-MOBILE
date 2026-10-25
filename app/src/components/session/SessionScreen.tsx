@@ -1,3 +1,4 @@
+import type { SessionEntry } from "@oh-my-pi/pi-wire";
 import type {
 	AgentSnapshot,
 	CollabUiRequest,
@@ -24,12 +25,13 @@ import {
 	TriangleAlert,
 	X,
 } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ClipboardEvent, CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { GuestClient, GuestSnapshot, Notice } from "../../lib/client";
 import { agentName } from "../../lib/agent-name";
 import type { AgentChatSettings, HostInfo, ProjectFileEntry } from "../../lib/gateway";
-import { applyAgentSettings, fetchAgentSettings, fetchHosts, fetchModels, getTerminal, listProjectFiles, readProjectFile, renameAgent, stopAgent, uploadAttachment } from "../../lib/gateway";
+import { readTail, writeTail } from "../../lib/tail-cache";
+import { fetchSessionTail, applyAgentSettings, fetchAgentSettings, fetchHosts, fetchModels, getTerminal, listProjectFiles, readProjectFile, renameAgent, stopAgent, uploadAttachment } from "../../lib/gateway";
 import { basename, pluralRu, relTime } from "../../lib/format";
 import { todoBoardFromEntries } from "../../lib/todo-board";
 import { cancelSpeech, isTtsEnabled, speakAssistantText } from "../../lib/tts";
@@ -41,6 +43,7 @@ import { TodoBar } from "./TodoBar";
 import { VoiceRecorder } from "../shell/VoiceRecorder";
 import { TerminalScreen } from "../terminal/TerminalScreen";
 import { Transcript } from "../transcript/Transcript";
+import { decideTranscriptPoll } from "../../lib/transcript-poll";
 import "./session-attach.css";
 import "./session.css";
 
@@ -51,8 +54,10 @@ interface PendingImage {
 }
 
 const MAX_IMAGES = 10;
-const MAX_IMAGE_B64 = 4 * 1024 * 1024;
-const MAX_IMAGE_DIM = 1568;
+const MAX_IMAGE_B64 = 4_000_000;
+const MAX_IMAGE_DIM = 4096;
+/** Площадь: провайдеры режут и «много мегапикселей», не только сторону. */
+const MAX_IMAGE_PIXELS = 16_000_000;
 
 /** Text files ride in the prompt as fenced blocks; max 5 pending, 256 КБ each. */
 const MAX_TEXT_FILES = 5;
@@ -96,34 +101,84 @@ function b64FromDataUrl(dataUrl: string): string {
 	return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
-async function fileToPendingImage(file: File): Promise<PendingImage | null> {
-	const mimeType = file.type.startsWith("image/") ? file.type : "image/png";
-	let dataUrl = await readAsDataUrl(file);
-	for (let attempt = 0; attempt < 6; attempt++) {
-		if (b64FromDataUrl(dataUrl).length <= MAX_IMAGE_B64) {
-			return { data: b64FromDataUrl(dataUrl), mimeType, url: dataUrl };
-		}
-		// Too big after encoding — downscale through canvas to the long-side cap.
-		const bitmap = await createImageBitmap(file);
-		try {
-			const scale = Math.min(
-				MAX_IMAGE_DIM / Math.max(bitmap.width, bitmap.height),
-				0.8 ** (attempt + 1),
-			);
-			const w = Math.max(1, Math.round(bitmap.width * scale));
-			const h = Math.max(1, Math.round(bitmap.height * scale));
-			const canvas = document.createElement("canvas");
-			canvas.width = w;
-			canvas.height = h;
-			const ctx = canvas.getContext("2d");
-			if (!ctx) return null;
-			ctx.drawImage(bitmap, 0, 0, w, h);
-			dataUrl = canvas.toDataURL(mimeType === "image/png" ? "image/png" : "image/jpeg", 0.85);
-		} finally {
-			bitmap.close();
-		}
+/** Провайдеры моделей принимают только эти типы; HEIC/SVG/иное → 400
+ *  «unsupported image», и битый блок навсегда застревает в истории сессии. */
+const SUPPORTED_IMAGE_MIME: Record<string, string> = {
+	"image/png": "image/png",
+	"image/jpeg": "image/jpeg",
+	"image/jpg": "image/jpeg",
+	"image/webp": "image/webp",
+	"image/gif": "image/gif",
+};
+
+/** Длинный скриншот одним полотном не читается и думает минутами, а провайдер
+ *  ещё и рубит сторону (DeepSeek 8192/4096 px, GLM ~6000). Поэтому очень
+ *  вытянутые картинки режем на тайлы: текст остаётся читаемым, каждая картинка
+ *  мелкая и быстрая для модели. */
+const MAX_TILES = 6;
+/** Высота тайла относительно ширины: 1.5 — читаемые строки без огромных высот. */
+const TILE_ASPECT = 1.5;
+/** С такого соотношения сторон начинаем нарезку. */
+const TILE_MIN_ASPECT = 3;
+
+async function fileToPendingImages(file: File): Promise<PendingImage[]> {
+	const declared = SUPPORTED_IMAGE_MIME[file.type.toLowerCase()] ?? null;
+	let bitmap: ImageBitmap;
+	try {
+		bitmap = await createImageBitmap(file);
+	} catch {
+		return []; // не изображение вовсе
 	}
-	return null;
+	try {
+		const { width, height } = bitmap;
+		const target = declared ?? "image/jpeg";
+		// Очень вытянутое полотно режем ПЕРВЫМ делом: даже если оно формально
+		// проходит по лимитам, модель его читает плохо и очень долго.
+		const sourceAspect = Math.max(width, height) / Math.min(width, height);
+		// Уже в пределах и не полотно — отдаём исходник как есть.
+		if (sourceAspect < TILE_MIN_ASPECT && declared !== null && Math.max(width, height) <= MAX_IMAGE_DIM && width * height <= MAX_IMAGE_PIXELS) {
+			const dataUrl = await readAsDataUrl(file);
+			if (b64FromDataUrl(dataUrl).length <= MAX_IMAGE_B64) {
+				return [{ data: b64FromDataUrl(dataUrl), mimeType: declared, url: dataUrl }];
+			}
+		}
+		const encodeTile = (sx: number, sy: number, sw: number, sh: number, dw: number, dh: number): string => {
+			const canvas = document.createElement("canvas");
+			canvas.width = dw;
+			canvas.height = dh;
+			const ctx = canvas.getContext("2d");
+			if (!ctx) return "";
+			ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, dw, dh);
+			return canvas.toDataURL(target, 0.85);
+		};
+		const fitScale = Math.min(1, MAX_IMAGE_DIM / Math.max(width, height), Math.sqrt(MAX_IMAGE_PIXELS / (width * height)));
+		const w = Math.max(1, Math.round(width * fitScale));
+		const h = Math.max(1, Math.round(height * fitScale));
+		const aspect = Math.max(w, h) / Math.min(w, h);
+		const tiles: PendingImage[] = [];
+		if (aspect >= TILE_MIN_ASPECT) {
+			const portrait = h >= w;
+			const longSide = portrait ? h : w;
+			const shortSide = portrait ? w : h;
+			let tileLen = Math.max(1, Math.round(shortSide * TILE_ASPECT));
+			if (Math.ceil(longSide / tileLen) > MAX_TILES) tileLen = Math.ceil(longSide / MAX_TILES);
+			const count = Math.ceil(longSide / tileLen);
+			for (let i = 0; i < count; i++) {
+				const startScaled = i * tileLen;
+				const lenScaled = Math.min(tileLen, longSide - startScaled);
+				const dataUrl = portrait
+					? encodeTile(0, startScaled / fitScale, width, lenScaled / fitScale, w, lenScaled)
+					: encodeTile(startScaled / fitScale, 0, lenScaled / fitScale, height, lenScaled, h);
+				if (dataUrl.length > 0) tiles.push({ data: b64FromDataUrl(dataUrl), mimeType: target, url: dataUrl });
+			}
+			if (tiles.length > 0) return tiles;
+		}
+		const dataUrl = encodeTile(0, 0, width, height, w, h);
+		if (dataUrl.length === 0 || b64FromDataUrl(dataUrl).length > MAX_IMAGE_B64) return [];
+		return [{ data: b64FromDataUrl(dataUrl), mimeType: target, url: dataUrl }];
+	} finally {
+		bitmap.close();
+	}
 }
 
 const TEXT_FILE_EXTENSIONS: Record<string, true> = {
@@ -298,19 +353,36 @@ function AgentDrawer({
 	const [transcript, setTranscript] = useState<string | null>(null);
 	const [loadingTranscript, setLoadingTranscript] = useState(false);
 	const [transcriptError, setTranscriptError] = useState<string | null>(null);
+	// Курсор дочитывания: повторный тап не гонит весь файл заново, а работающий
+	// сабагент дочитывается сам — раньше транскрипт замирал навсегда.
+	const transcriptCursor = useRef<{ fromByte: number; carry: string }>({ fromByte: 0, carry: "" });
 	const [chatDraft, setChatDraft] = useState("");
 	const [confirmingKill, setConfirmingKill] = useState(false);
 	const preRef = useRef<HTMLPreElement | null>(null);
 
-	const loadTranscript = useCallback(async () => {
-		setLoadingTranscript(true);
+	const loadTranscript = useCallback(async (silent = false) => {
+		if (!silent) setLoadingTranscript(true);
 		setTranscriptError(null);
-		const result = await client.fetchTranscript(agent.id, 0);
-		if (result === null) setTranscriptError("Не удалось загрузить транскрипт");
-		else if (result.kind === "error") setTranscriptError(result.message);
-		else setTranscript(result.text);
-		setLoadingTranscript(false);
+		const reply = await client.fetchTranscript(agent.id, transcriptCursor.current.fromByte);
+		const decision = decideTranscriptPoll(reply, transcriptCursor.current.carry);
+		if (decision.action === "retry") {
+			if (!silent) setTranscriptError("Транскрипт не пришёл — нажми ещё раз");
+		} else if (decision.action === "stop") {
+			setTranscriptError(decision.message);
+		} else {
+			transcriptCursor.current = { fromByte: decision.newSize, carry: decision.carry };
+			// Полные строки куска: хвост (carry) допишется следующим опросом.
+			if (decision.chunk.length > 0) setTranscript(prev => (prev ?? "") + decision.chunk);
+		}
+		if (!silent) setLoadingTranscript(false);
 	}, [client, agent.id]);
+
+	// Работающий сабагент дописывается сам; остановленный не опрашивается.
+	useEffect(() => {
+		if (agent.status !== "running") return;
+		const timer = window.setInterval(() => void loadTranscript(true), 3000);
+		return () => window.clearInterval(timer);
+	}, [agent.status, loadTranscript]);
 
 	useEffect(() => {
 		const el = preRef.current;
@@ -517,7 +589,7 @@ function InfoSheet(props: {
 		setRenameError(null);
 		try {
 			// Шлюз сохраняет кириллическое имя по sessionId (живёт рестарты) и
-			// пишет его в title-слот сессии; herdr-слаг остаётся служебным.
+			// пишет его в title-слот сессии; слаг из панели остаётся служебным.
 			await renameAgent(host.instanceId, name);
 			setRenaming(false);
 		} catch (err) {
@@ -560,7 +632,7 @@ function InfoSheet(props: {
 	const state = snap.state;
 	const usage = state?.contextUsage;
 	const model = state?.model;
-	// Имя агента из шлюза (заголовок сессии) свежее и человечнее, чем herdr-слаг
+	// Имя агента из шлюза (заголовок сессии) свежее и человечнее, чем слаг
 	// в снапшоте: у сессии, начатой с телефона, снапшот отдаёт «vincentfox».
 	const title = (host ? agentName(host) : null) ?? state?.sessionName ?? snap.header?.title ?? null;
 	const cwd = snap.header?.cwd ?? state?.cwd ?? null;
@@ -698,7 +770,7 @@ function AgentModelSheet(props: {
 			})
 			.catch(err => {
 				if (!alive) return;
-				// Не herdr-агент (или панель не найдена): показываем каталог, но менять нельзя.
+				// Не агент в панели шлюза (или панель не найдена): показываем каталог, но менять нельзя.
 				void fetchModels()
 					.then(list => {
 						if (!alive) return;
@@ -720,7 +792,7 @@ function AgentModelSheet(props: {
 		: error !== null
 			? null
 			: host === undefined
-				? "Агент не в herdr — смена модели недоступна."
+				? "Агент не в панели шлюза — смена модели недоступна."
 				: null;
 
 	const apply = useCallback(
@@ -803,6 +875,61 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 	const queuedCount = snap.state?.queuedMessageCount ?? 0;
 	const todoBoard = useMemo(() => todoBoardFromEntries(snap.entries), [snap.entries]);
 
+	// Пока коллаб-гость догружает полный снапшот (у больших сессий это мегабайты через
+	// релей — секунды), рисуем хвост: сначала из кеша (мгновенно), затем — с шлюза
+	// (локальное чтение), и в конце живой снапшот заменяет всё это.
+	const sessionFile = host?.sessionFile ?? null;
+	// При открытии по deep-link карточки хоста ещё нет — id сессии приходит в первом
+	// же кадре комнаты, и шлюз найдёт файл сам.
+	const cacheId = snap.header?.id ?? host?.sessionId ?? null;
+	const [preview, setPreview] = useState<readonly SessionEntry[] | null>(() => readTail(host?.sessionId ?? null));
+	const [previewSource, setPreviewSource] = useState<"cache" | "net" | null>(preview !== null ? "cache" : null);
+
+	useEffect(() => {
+		if (snap.entries.length > 0 || preview !== null) return;
+		if (cacheId !== null) {
+			const cached = readTail(cacheId);
+			if (cached !== null) {
+				setPreview(cached);
+				setPreviewSource("cache");
+				return;
+			}
+		}
+		if (sessionFile === null && cacheId === null) return;
+		let alive = true;
+		const controller = new AbortController();
+		// 40 записей: хвост должен приехать одним коротким ответом даже на мобильном
+		// канале (80 записей с крупными tool-результатами — это уже ~250 КБ).
+		fetchSessionTail({ path: sessionFile, id: cacheId }, 40, controller.signal)
+			.then(entries => {
+				if (!alive || entries.length === 0) return;
+				setPreview(entries);
+				setPreviewSource("net");
+				writeTail(cacheId, entries);
+			})
+			.catch(() => {
+				// превью — ускорение, а не обязательный путь: молча ждём снапшот
+			});
+		return () => {
+			alive = false;
+			controller.abort();
+		};
+	}, [sessionFile, cacheId, snap.entries.length, preview]);
+
+	// Снапшот пришёл — обновляем кеш его хвостом: следующее открытие будет мгновенным
+	// и покажет уже актуальные сообщения. Пишем не чаще раза в 5 с: сериализация
+	// 40 записей с tool-результатами — это ~150 КБ, на каждый токен это лишний jank.
+	const lastCacheWrite = useRef(0);
+	useEffect(() => {
+		if (snap.entries.length === 0) return;
+		const now = Date.now();
+		if (now - lastCacheWrite.current < 5000) return;
+		lastCacheWrite.current = now;
+		writeTail(cacheId, snap.entries);
+	}, [cacheId, snap.entries]);
+
+	const previewing = snap.entries.length === 0 && preview !== null;
+
 	// Автопереподключение: агент умер/перезапустился (сбой питания, апдейт) —
 	// ищем живой хост с той же сессией и молча открываем его, чат сам вернётся.
 	const sessionId = snap.header?.id ?? null;
@@ -879,7 +1006,24 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		setShowJump(false);
 	}, []);
 
-	const [draft, setDraft] = useState("");
+	// Черновик переживает авто-обновление страницы (SW перезагружает её сам,
+	// когда приходит новый билд) и случайный уход с экрана.
+	const draftKey = `ompPocket.draft.${instanceId}`;
+	const [draft, setDraft] = useState(() => {
+		try {
+			return window.localStorage.getItem(draftKey) ?? "";
+		} catch {
+			return "";
+		}
+	});
+	useEffect(() => {
+		try {
+			if (draft.length > 0) window.localStorage.setItem(draftKey, draft);
+			else window.localStorage.removeItem(draftKey);
+		} catch {
+			// приватный режим/переполнение — черновик просто не переживёт reload
+		}
+	}, [draft, draftKey]);
 	const [images, setImages] = useState<PendingImage[]>([]);
 	const [attachError, setAttachError] = useState<string | null>(null);
 	const [textFiles, setTextFiles] = useState<PendingTextFile[]>([]);
@@ -889,14 +1033,19 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 	const fileRef = useRef<HTMLInputElement | null>(null);
 	const anyFileRef = useRef<HTMLInputElement | null>(null);
 	const taRef = useRef<HTMLTextAreaElement | null>(null);
-	// Auto-grow 1..6 rows (20px line-height + 16px padding).
+	// Auto-grow 1..6 строк, высота кратна line-height: иначе верхняя строка
+	// оказывается обрезанной и часть текста не видна.
 	useLayoutEffect(() => {
 		const el = taRef.current;
 		if (!el) return;
+		const LINE = 20;
+		const PAD = 8; // padding 4px сверху и снизу
+		const MAX_ROWS = 6;
 		el.style.height = "auto";
-		const max = 6 * 20 + 16;
-		el.style.height = `${Math.min(el.scrollHeight, max)}px`;
-		el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
+		const lines = Math.max(1, Math.ceil((el.scrollHeight - PAD) / LINE));
+		el.style.height = `${Math.min(lines, MAX_ROWS) * LINE + PAD}px`;
+		el.style.overflowY = lines > MAX_ROWS ? "auto" : "hidden";
+		el.scrollTop = el.scrollHeight;
 	}, [draft]);
 
 	// Composer is writable while live AND while reconnecting: sends land in the
@@ -952,8 +1101,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		if (files.length > slots) setAttachError(`Больше ${MAX_IMAGES - images.length} не влезет — лимит ${MAX_IMAGES}`);
 		const encoded: PendingImage[] = [];
 		for (const file of picked) {
-			const img = await fileToPendingImage(file);
-			if (img) encoded.push(img);
+			encoded.push(...(await fileToPendingImages(file)));
 		}
 		setImages(prev => [...prev, ...encoded].slice(0, MAX_IMAGES));
 	}, [images.length]);
@@ -1011,7 +1159,8 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 			setProjectError(null);
 			try {
 				const res = await listProjectFiles(dir);
-				setProjectEntries(res.entries.filter(e => e.type === "file"));
+				// Папки тоже нужны: без них из корня проекта не попасть в src/.
+				setProjectEntries(res.entries);
 				setProjectDir(dir);
 			} catch (err) {
 				setProjectError(err instanceof Error ? err.message : String(err));
@@ -1088,7 +1237,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 	// «Файл» menu path: text files become pending chips (inlined at send time);
 	// photos picked here fall through to the photo pipeline; the rest is binary.
 	const pickAnyFiles = useCallback(
-		async (files: FileList | null) => {
+		async (files: FileList | File[] | null) => {
 			if (!files || files.length === 0) return;
 			const all = Array.from(files);
 			const photos = all.filter(file => file.type.startsWith("image/"));
@@ -1135,7 +1284,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		[pickFiles, textFiles.length, binaries.length, showToast],
 	);
 
-	// Terminal is herdr-only: probe before opening, keep the sheet closed on refusal.
+	// Terminal is pane-only: probe before opening, keep the sheet closed on refusal.
 	const openTerminal = useCallback(async () => {
 		if (!host) return;
 		setInfoOpen(false);
@@ -1145,11 +1294,27 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 				setTerminalOpen(true);
 				return;
 			}
-			showToast("Терминал доступен только для Herdr-агентов");
+			showToast("Терминал доступен только для агентов в панелях шлюза");
 		} catch (err) {
 			showToast(err instanceof Error ? err.message : String(err));
 		}
 	}, [host, showToast]);
+	// Ctrl+V / ⌘V: a screenshot arrives as a file item on clipboardData. Text
+	// paste stays untouched — the handler bows out when no file is present.
+	const pasteFiles = useCallback(
+		(event: ClipboardEvent<HTMLElement>): void => {
+			if (readOnly || !composerActive) return;
+			const files = Array.from(event.clipboardData.items)
+				.filter(item => item.kind === "file")
+				.map(item => item.getAsFile())
+				.filter((file): file is File => file !== null);
+			if (files.length === 0) return;
+			event.preventDefault();
+			void pickAnyFiles(files);
+		},
+		[composerActive, pickAnyFiles, readOnly],
+	);
+
 
 	// Locally dismissed uiRequest: the host clears it only after the response
 	// frame round-trips, so hide optimistically to keep the tap feeling instant.
@@ -1338,8 +1503,15 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 					</div>
 				)}
 				<div ref={scrollRef} className="ss-transcript">
+					{previewing && (
+						<div className="ss-preview-note" role="status">
+							{previewSource === "cache"
+								? "Последние сообщения из кеша · обновляю…"
+								: "Показаны последние сообщения · догружаю полную историю…"}
+						</div>
+					)}
 					<Transcript
-						entries={snap.entries}
+						entries={snap.entries.length > 0 ? snap.entries : (preview ?? [])}
 						stream={snap.stream}
 						streamDone={snap.streamDone}
 						activeTools={snap.activeTools}
@@ -1421,7 +1593,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 					</div>
 				)}
 				{attachError != null && <div className="ss-attach-error">{attachError}</div>}
-				<div className="ss-composer">
+				<div className="ss-composer" onPaste={pasteFiles}>
 					{images.length > 0 && (
 						<div className="ss-attach-row">
 							{images.map((img, i) => (
@@ -1656,7 +1828,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 								),
 							)}
 						{!projectBusy && projectEntries != null && projectEntries.length === 0 && (
-							<div className="sa-item ss-proj-busy">В папке нет файлов</div>
+							<div className="sa-item ss-proj-busy">В папке пусто</div>
 						)}
 						<button type="button" className="sa-item sa-item--cancel" onClick={() => setProjectPickerOpen(false)}>
 							Готово

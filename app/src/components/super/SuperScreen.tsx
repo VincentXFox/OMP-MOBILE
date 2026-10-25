@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { basename, relTime } from "../../lib/format";
 import type { DispatchResult, SuperActivity, SuperAgent, SuperAgentStatus, SuperBoard } from "../../lib/gateway";
 import { dispatchSuperTasks, fetchSuperActivity, fetchSuperBoard } from "../../lib/gateway";
+import { TasksSection } from "./TasksSection";
 import "./super.css";
 
 const BOARD_POLL_MS = 3000;
@@ -325,7 +326,7 @@ export function SuperScreen(props: {
 								</button>
 							);
 						})}
-						{agents.length === 0 && <span className="su-none">Нет агентов в herdr</span>}
+						{agents.length === 0 && <span className="su-none">Нет агентов в панелях</span>}
 					</div>
 					{agents.length > 0 && (
 						<button type="button" className="su-all" onClick={selectAll}>
@@ -360,6 +361,10 @@ export function SuperScreen(props: {
 				)}
 			</div>
 
+			{/* Автономные задачи: цель, бюджет и подтверждённые проверкой результаты.
+			    Живут на сервере, поэтому секция — просто витрина с паузой/отменой. */}
+			<TasksSection />
+
 			{boardError && <div className="su-error">Доска недоступна: {boardError}</div>}
 			{board === null && !boardError && <div className="su-loading">Загрузка доски…</div>}
 			{board !== null && agents.length === 0 && (
@@ -383,7 +388,7 @@ export function SuperScreen(props: {
 
 			{board !== null && board.orphans.length > 0 && (
 				<div className="su-orphans">
-					Вне herdr: {board.orphans.map(o => o.sessionName ?? basename(o.cwd)).join(", ")}
+					Вне панелей: {board.orphans.map(o => o.sessionName ?? basename(o.cwd)).join(", ")}
 				</div>
 			)}
 		</div>

@@ -5,8 +5,7 @@ import { dirname, join } from "node:path";
  * User-facing agent/chat display names keyed by omp sessionId.
  * instanceId is volatile (new process ⇒ new id); sessionId survives resume and
  * gateway restarts, so it is the only stable key for «человек назвал кириллицей».
- * herdr agent_name stays a Latin slug (herdr only accepts [a-z0-9_-]{1,32});
- * this store keeps the original display string for the UI.
+ * Здесь хранится пользовательская строка для UI, независимо от имени панели.
  */
 const NAMES_FILE = join(new URL(".", import.meta.url).pathname, "agent-names.json");
 
@@ -27,9 +26,20 @@ function load(): void {
 		const parsed: unknown = JSON.parse(readFileSync(NAMES_FILE, "utf8"));
 		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return;
 		for (const [sessionId, value] of Object.entries(parsed as Record<string, unknown>)) {
-			if (typeof value !== "string") continue;
-			const name = cleanName(value);
-			if (name !== null) names.set(sessionId, { name, cwd: null, updatedAt: 0 });
+			// Формат файла — объекты {name, cwd, updatedAt}; старый — голые строки.
+			// Раньше читались только строки, и все имена терялись при каждом
+			// рестарте шлюза (сессии снова показывались под авто-тайтлом omp).
+			if (typeof value === "string") {
+				const legacy = cleanName(value);
+				if (legacy !== null) names.set(sessionId, { name: legacy, cwd: null, updatedAt: 0 });
+				continue;
+			}
+			if (value === null || typeof value !== "object" || !("name" in value) || typeof value.name !== "string") continue;
+			const name = cleanName(value.name);
+			if (name === null) continue;
+			const cwd = "cwd" in value && typeof value.cwd === "string" ? value.cwd : null;
+			const updatedAt = "updatedAt" in value && typeof value.updatedAt === "number" ? value.updatedAt : 0;
+			names.set(sessionId, { name, cwd, updatedAt });
 		}
 	} catch {
 		// no file yet — fresh store

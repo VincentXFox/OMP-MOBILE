@@ -11,3 +11,21 @@ app/agents-round11.webp
 # Локальный TLS-стенд: приватные ключи CA/листа не покидают машину
 certs/
 app/public/pocket-root-ca.crt
+gateway/crew.json
+gateway/organizer-state.json
+gateway/tasks/
+
+gateway/runtime-live.json
+# состояние апдейтера (не коммитим), код движка — в репозитории
+gateway/update/jobs/
+gateway/update/ACTIVE
+gateway/update/*.lock
+gateway/update-state.json
+# автохарнесс: состояние прогонов и проектные скилы (машинное, не репозиторное)
+/.claude/
+
+# локальные бэкапы конфигов деплоя (сняты перед правками, не репозиторий)
+deploy/*.bak-*
+
+# манифест панелей пишется рантаймом на старте (состояние, не код)
+gateway/runtime-manifest.json

@@ -17,8 +17,9 @@ export type TranscriptPollDecision =
 	| { action: "retry" }
 	/** Terminal host error: stop polling and surface the message (prior rows stay). */
 	| { action: "stop"; message: string }
-	/** Rows read: advance the cursor and append the parsed entries. */
-	| { action: "advance"; newSize: number; carry: string; fresh: readonly SessionEntry[] };
+	/** Rows read: advance the cursor and append the parsed entries.
+	 *  `chunk` — сырой текст прочитанного куска без незавершённого хвоста. */
+	| { action: "advance"; newSize: number; carry: string; fresh: readonly SessionEntry[]; chunk: string };
 
 /** Maps one {@link TranscriptResult} reply to a polling decision. */
 export function decideTranscriptPoll(reply: TranscriptResult | null, carry: string): TranscriptPollDecision {
@@ -31,5 +32,5 @@ export function decideTranscriptPoll(reply: TranscriptResult | null, carry: stri
 		if ("type" in item && item.type === "session") continue;
 		fresh.push(item as SessionEntry);
 	}
-	return { action: "advance", newSize: reply.newSize, carry: parsed.carry, fresh };
+	return { action: "advance", newSize: reply.newSize, carry: parsed.carry, fresh, chunk: reply.text.slice(0, reply.text.length - parsed.carry.length) };
 }

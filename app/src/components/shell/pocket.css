@@ -52,6 +52,50 @@
 	white-space: nowrap;
 }
 
+/* ---- индикатор связи в шапке ---- */
+.pk-net {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	font-size: 0.75rem;
+	color: var(--muted);
+}
+
+.pk-net-dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--success);
+}
+
+.pk-net--degraded .pk-net-dot {
+	background: var(--warning);
+}
+
+.pk-net--offline .pk-net-dot {
+	background: var(--error);
+}
+
+.pk-net-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.pk-net-retry {
+	flex: none;
+	padding: 4px 2px;
+	border: none;
+	background: none;
+	color: var(--accent-text);
+	font-size: 0.8125rem;
+	font-weight: var(--weight-semibold);
+	cursor: pointer;
+}
+
 /* bottom nav */
 .pk-nav {
 	position: fixed;
@@ -111,7 +155,7 @@
 }
 
 .pk-nav-item--on {
-	color: var(--accent);
+	color: var(--accent-text);
 }
 
 .pk-nav-item--on .pk-nav-label {
@@ -234,7 +278,7 @@
 	flex-shrink: 0;
 	font-size: 0.6875rem;
 	font-weight: 600;
-	color: var(--accent);
+	color: var(--accent-text);
 	background: var(--accent-muted);
 	border-radius: var(--radius-pill);
 	padding: 3px 9px;
@@ -330,7 +374,7 @@
 }
 
 .pk-row-icon--tool {
-	color: var(--accent);
+	color: var(--accent-text);
 }
 
 .pk-row-title {
@@ -437,7 +481,7 @@
 
 .pk-btn--ghost {
 	background: none;
-	color: var(--accent);
+	color: var(--accent-text);
 	border: 1px solid var(--border-strong);
 }
 
@@ -503,7 +547,7 @@
 .pk-filter {
 	align-self: flex-start;
 	font-size: 0.8125rem;
-	color: var(--accent);
+	color: var(--accent-text);
 	background: var(--accent-muted);
 	border-radius: var(--radius-pill);
 	padding: 6px 14px;
@@ -769,6 +813,11 @@
 }
 @media (prefers-reduced-motion: reduce) {
 	.pk-skeleton {
+		animation: none;
+	}
+
+	.pk-sheet,
+	.pk-sheet-backdrop {
 		animation: none;
 	}
 }

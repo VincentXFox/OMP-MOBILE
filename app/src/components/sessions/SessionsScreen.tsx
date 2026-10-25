@@ -85,11 +85,11 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 			setResumeError(null);
 			const mode = isCrashVictim(session) ? "restore" : "resume";
 			const result = await resumeSession(session.cwd, session.path, { mode });
-			if (result.ok === true) {
+			if (result.ok && result.instanceId !== undefined) {
 				await reload();
 				onOpenInstance(result.instanceId);
 			} else {
-				setResumeError(`${rowTitle(session)}: ${result.error}`);
+				setResumeError(`${rowTitle(session)}: ${result.error ?? "не удалось возобновить"}`);
 			}
 			setResumingPath(null);
 		},
@@ -118,11 +118,16 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 
 	const groups = useMemo(() => (sessions ? groupSessions(sessions) : []), [sessions]);
 
-	if (error != null) {
+	// Ошибка не должна стирать уже загруженный список: показываем её баннером
+	// с повтором, а данные остаются на экране.
+	if (error != null && sessions == null) {
 		return (
 			<div className="pk-empty">
 				<div className="pk-empty-title">Не удалось получить сессии</div>
 				<div className="pk-empty-text">{error}</div>
+				<button type="button" className="pk-btn pk-btn--ghost" onClick={() => void reload()}>
+					Повторить
+				</button>
 			</div>
 		);
 	}
@@ -149,6 +154,14 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 
 	return (
 		<div className="sess-groups">
+			{error != null && (
+				<div className="pk-form-error sess-resume-error" role="alert">
+					{error}{" "}
+					<button type="button" className="pk-btn pk-btn--ghost" onClick={() => void reload()}>
+						Повторить
+					</button>
+				</div>
+			)}
 			{resumeError != null && <div className="pk-form-error sess-resume-error">{resumeError}</div>}
 			{groups.map(group => (
 				<section key={group.key} className="sess-group">

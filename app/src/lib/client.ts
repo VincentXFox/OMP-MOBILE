@@ -26,6 +26,7 @@ import type {
 	SubagentProgressPayload,
 } from "@oh-my-pi/pi-wire";
 import { importRoomKey } from "./codec";
+import { nextWorking } from "./stale-working";
 import { COLLAB_PROTO, encodeBase64Url, parseCollabLink } from "./link";
 import { CollabSocket } from "./socket";
 
@@ -153,6 +154,8 @@ export class GuestClient {
 	#streamDone = false;
 	#activeTools: ReadonlyMap<string, ActiveTool> = new Map();
 	#working = false;
+	/** Сколько подряд опросов реестра сказали «хост не работает» (само-починка индикатора). */
+	#idleHostHits = 0;
 	#readOnly = false;
 	#uiRequest: CollabUiRequest | null = null;
 	#uiRequestQueue: CollabUiRequest[] = [];
@@ -234,6 +237,24 @@ export class GuestClient {
 	/** Cached stable reference; replaced per commit (at most once per animation frame for streaming frames). */
 	getSnapshot(): GuestSnapshot {
 		return this.#snapshot;
+	}
+
+	/**
+	 * Сверка с реестром шлюза (`/api/hosts`): если два опроса подряд говорят «хост не
+	 * работает», а локально индикатор ещё горит — гасим. Это лечит пропущенный
+	 * `agent_end` после сна телефона/обрыва релея: иначе «thinking…» висит вечно.
+	 */
+	syncHostBusy(hostBusy: boolean | null): void {
+		const verdict = nextWorking(this.#working, hostBusy, this.#idleHostHits);
+		this.#idleHostHits = verdict.idleHits;
+		if (!verdict.healed) return;
+		this.#working = false;
+		// Хост простаивает — значит ни один инструмент не может быть активен:
+		// заодно снимаем карточки, залипшие без `tool_execution_end`.
+		this.#activeTools = new Map();
+		this.#streamDone = true;
+		this.#pushNotice("info", "Агент не работает — индикатор снят (пропущено событие окончания хода)");
+		this.#commit();
 	}
 
 	sendPrompt(text: string): void {
@@ -394,6 +415,7 @@ export class GuestClient {
 				this.#lifecycle = new Map();
 				this.#unlistedBusIds.clear();
 				this.#working = frame.state.isStreaming;
+				this.#idleHostHits = 0;
 				this.#readOnly = frame.readOnly === true;
 				this.#clearUiRequests();
 				this.#welcomed = true;
@@ -452,6 +474,7 @@ export class GuestClient {
 				// This covers a connected guest that misses the discrete `agent_start`
 				// without receiving a new `welcome` (for example, mid-stream).
 				this.#working = frame.state.isStreaming;
+				this.#idleHostHits = 0;
 				if (!frame.state.isStreaming) {
 					// Host idle implies no tool can be running, so clear any card
 					// pinned by a dropped `tool_execution_end` off this signal.

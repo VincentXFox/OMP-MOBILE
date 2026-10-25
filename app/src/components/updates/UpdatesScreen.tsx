@@ -8,18 +8,22 @@ import {
 	Download,
 	LoaderCircle,
 	MonitorSmartphone,
+	Radio,
 	RefreshCw,
 	RotateCcw,
 	Server,
+	Terminal,
 	X,
 	XCircle,
 } from "lucide-react";
 import {
 	applyUpdate,
-	createUpdateBackup,
 	fetchUpdateJob,
 	fetchUpdateStatus,
 	isComponentId,
+	isJobActive,
+	isJobFailed,
+	PHASE_LABELS,
 	GatewayError,
 	rollbackUpdate,
 	UpdateBusyError,
@@ -39,12 +43,16 @@ const COMPONENT_ICONS: Record<UpdateComponentId, ReactNode> = {
 	omp: <Cpu size={20} />,
 	gateway: <Server size={20} />,
 	frontend: <MonitorSmartphone size={20} />,
+	relay: <Radio size={20} />,
+	runtime: <Terminal size={20} />,
 };
 
 const COMPONENT_TITLES: Record<UpdateComponentId, string> = {
 	omp: "OMP",
 	gateway: "Gateway",
 	frontend: "Frontend",
+	relay: "Релей",
+	runtime: "Рантайм",
 };
 
 interface BusyDialog {
@@ -140,59 +148,80 @@ function ComponentCard(props: {
 
 function JobCard(props: { job: UpdateJob; rollingBack: boolean; onRollback: (id: UpdateComponentId) => void }): ReactNode {
 	const { job, rollingBack, onRollback } = props;
-	const failed = job.error != null;
-	const rollbackId = isComponentId(job.id) ? job.id : null;
-	const title = isComponentId(job.id) ? COMPONENT_TITLES[job.id] : "Обновление";
+	const active = isJobActive(job);
+	const failed = isJobFailed(job);
+	const rollbackComponent = isComponentId(job.component) ? job.component : null;
+	const title = isComponentId(job.component) ? COMPONENT_TITLES[job.component] : "Обновление";
+	const versions =
+		job.versions.from != null || job.versions.to != null ? `${job.versions.from ?? "?"} → ${job.versions.to ?? "?"}` : null;
 	return (
 		<div className="pk-card upd-job">
 			<div className="upd-job-head">
-				<span className="upd-job-title">{title}</span>
-				{job.running ? (
+				<span className="upd-job-title">
+					{title}
+					{versions != null && <span className="upd-job-versions"> {versions}</span>}
+				</span>
+				{active ? (
 					<span className="upd-job-status upd-job-status--run">
 						<LoaderCircle size={14} className="upd-spin" />
-						Выполняется…
+						{PHASE_LABELS[job.phase]}
 					</span>
 				) : failed ? (
 					<span className="upd-job-status upd-job-status--fail">
 						<XCircle size={14} />
-						Ошибка
+						{PHASE_LABELS[job.phase]}
 					</span>
 				) : (
 					<span className="upd-job-status upd-job-status--ok">
 						<CheckCircle2 size={14} />
-						Готово
+						{PHASE_LABELS[job.phase]}
 					</span>
 				)}
 			</div>
 			{job.steps.length > 0 && (
 				<ul className="upd-steps">
-					{job.steps.map((step, i) => (
-						<li key={`${i}-${step.label}`} className={`upd-step upd-step--${step.status}`}>
+					{job.steps.map(step => (
+						<li key={step.id} className={`upd-step upd-step--${step.status}`}>
 							<span className="upd-step-icon">
 								{step.status === "run" && <LoaderCircle size={14} className="upd-spin" />}
 								{step.status === "ok" && <CheckCircle2 size={14} />}
 								{step.status === "fail" && <XCircle size={14} />}
+								{step.status === "skipped" && <ArrowRight size={14} />}
 							</span>
 							<span className="upd-step-body">
 								<span className="upd-step-label">{step.label}</span>
-								{step.detail != null && step.detail.length > 0 && (
-									<span className="upd-step-detail">{step.detail}</span>
-								)}
+								{step.detail != null && step.detail.length > 0 && <span className="upd-step-detail">{step.detail}</span>}
 							</span>
 						</li>
 					))}
 				</ul>
 			)}
-			{failed && rollbackId != null && (
+			{job.result != null && (
+				<div className="upd-result">
+					{Object.entries(job.result.verifiedVersions).map(([component, version]) => (
+						<span key={component} className="upd-result-item">
+							{component}: {version ?? "?"}
+						</span>
+					))}
+					<span className="upd-result-item">сессий восстановлено: {job.result.restored}</span>
+					<span className="upd-result-item">задач продолжено: {job.result.resumed}</span>
+					{job.result.blocked.length > 0 && (
+						<span className="upd-result-item upd-result-item--warn">заблокировано: {job.result.blocked.length}</span>
+					)}
+				</div>
+			)}
+			{failed && job.error != null && (
 				<div className="upd-error">
 					<span className="upd-error-text">
 						<CircleAlert size={16} />
-						{job.error}
+						{job.error.message}
 					</span>
-					<button className="pk-btn upd-btn--secondary" disabled={rollingBack} onClick={() => onRollback(rollbackId)}>
-						<RotateCcw size={14} />
-						Откатить
-					</button>
+					{job.rollback?.available === true && rollbackComponent != null && (
+						<button className="pk-btn upd-btn--secondary" disabled={rollingBack} onClick={() => onRollback(rollbackComponent)}>
+							<RotateCcw size={14} />
+							Откатить
+						</button>
+					)}
 				</div>
 			)}
 		</div>
@@ -206,7 +235,6 @@ export function UpdatesScreen(): ReactNode {
 	const [job, setJob] = useState<UpdateJob | null>(null);
 	const [busyDialog, setBusyDialog] = useState<BusyDialog | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
-	const [backupDir, setBackupDir] = useState<string | null>(null);
 	const [rollingBack, setRollingBack] = useState(false);
 	const [confirm, setConfirm] = useState<
 		| { kind: "apply"; ids: UpdateComponentId[] }
@@ -251,39 +279,78 @@ export function UpdatesScreen(): ReactNode {
 		}
 	}, []);
 
-	/** Polls /api/update/job until the active job finishes, then refreshes the status. */
+	/** Опрос /api/update/job до терминальной фазы: задача живёт в отдельном юните
+	 * systemd, поэтому переживает рестарт шлюза и перезагрузку страницы. */
 	const trackJob = useCallback(async (): Promise<void> => {
+		let misses = 0;
+		const deadline = Date.now() + 20 * 60_000;
 		for (;;) {
 			if (!aliveRef.current) return;
-			let next: UpdateJob;
+			let next: UpdateJob | null;
 			try {
 				next = await fetchUpdateJob();
+				misses = 0;
 			} catch {
-				await sleep(1500); // the gateway may restart mid-apply — keep tracking
+				misses++;
+				if (misses >= 60 || Date.now() > deadline) {
+					if (!aliveRef.current) return;
+					showToast("Шлюз не отвечает — обновление идёт в отдельном процессе, открой экран позже");
+					return;
+				}
+				await sleep(2000);
 				continue;
 			}
 			if (!aliveRef.current) return;
-			setJob(next);
-			if (!next.running) break;
+			if (next !== null) setJob(next);
+			if (next === null || !isJobActive(next)) break;
 			await sleep(1500);
 		}
 		void refreshStatus();
-	}, [refreshStatus]);
+	}, [refreshStatus, showToast]);
 
-	// auto-load on mount + pick up a job that is already running (e.g. started before reload)
+	// auto-load on mount + подхват задачи, запущенной извне (другой клиент, рестарт страницы):
+	// экран сам замечает новую задачу и не требует ручного обновления
 	useEffect(() => {
 		void refreshStatus();
 		void (async () => {
 			try {
 				const current = await fetchUpdateJob();
-				if (!aliveRef.current || !current.running) return;
+				if (!aliveRef.current || current === null) return;
 				setJob(current);
-				await trackJob();
+				if (isJobActive(current)) await trackJob();
 			} catch {
 				// gateway offline — surfaced by the status card
 			}
 		})();
 	}, [refreshStatus, trackJob]);
+
+	useEffect(() => {
+		let stopped = false;
+		let busy = false;
+		const timer = window.setInterval(() => {
+			if (stopped || busy || isJobActive(job)) return;
+			busy = true;
+			void (async () => {
+				try {
+					const current = await fetchUpdateJob();
+					if (!aliveRef.current || current === null) return;
+					setJob(previous => (previous?.jobId === current.jobId && previous.phase === current.phase ? previous : current));
+					if (isJobActive(current)) {
+						await trackJob();
+						void refreshStatus();
+					}
+				} catch {
+					// шлюз перезапускается — следующий тик попробует снова
+				} finally {
+					busy = false;
+				}
+			})();
+		}, 5000);
+		return () => {
+			stopped = true;
+			window.clearInterval(timer);
+		};
+	}, [job, refreshStatus, trackJob]);
 
 	const runQueue = useCallback(
 		async (ids: UpdateComponentId[], confirmBusy: boolean): Promise<void> => {
@@ -293,23 +360,14 @@ export function UpdatesScreen(): ReactNode {
 				// a single job may be active — wait for the previous one to finish
 				try {
 					const current = await fetchUpdateJob();
-					if (current.running) {
+					if (current !== null && isJobActive(current)) {
 						setJob(current);
 						await trackJob();
 					}
 				} catch {
 					// job status unavailable — the server will reject a second apply anyway
 				}
-				// backup right before each apply; without it — no update
-				let dir: string;
-				try {
-					dir = await createUpdateBackup();
-				} catch (err) {
-					showToast(`Бэкап не удался — «${COMPONENT_TITLES[id]}» не обновлено: ${err instanceof Error ? err.message : String(err)}`);
-					return;
-				}
 				if (!aliveRef.current) return;
-				setBackupDir(dir);
 				try {
 					await applyUpdate(id, confirmBusy);
 				} catch (err) {
@@ -323,7 +381,6 @@ export function UpdatesScreen(): ReactNode {
 					);
 					return;
 				}
-				setJob({ running: true, id, steps: [], error: null, startedAt: Date.now() });
 				await trackJob();
 			}
 			void refreshStatus();
@@ -349,30 +406,18 @@ export function UpdatesScreen(): ReactNode {
 		setConfirm({ kind: "apply", ids: targets });
 	}, [status, availableCount]);
 
-	const manualBackup = useCallback(async (): Promise<void> => {
-		try {
-			const dir = await createUpdateBackup();
-			if (!aliveRef.current) return;
-			setBackupDir(dir);
-			showToast("Резервная копия создана");
-		} catch (err) {
-			if (!aliveRef.current) return;
-			showToast(`Бэкап не удался: ${err instanceof Error ? err.message : String(err)}`);
-		}
-	}, [showToast]);
-
 	const rollback = useCallback(
 		async (id: UpdateComponentId): Promise<void> => {
 			setRollingBack(true);
 			try {
-				await rollbackUpdate(id);
+				const jobId = await rollbackUpdate(id);
 				if (!aliveRef.current) return;
-				showToast(`Откат «${COMPONENT_TITLES[id]}» запущен`);
+				showToast(`Откат «${COMPONENT_TITLES[id]}» запущен${jobId === null ? "" : ` (${jobId})`}`);
 				try {
 					const current = await fetchUpdateJob();
 					if (!aliveRef.current) return;
-					setJob(current);
-					if (current.running) {
+					if (current !== null) setJob(current);
+					if (current !== null && isJobActive(current)) {
 						await trackJob();
 						return;
 					}
@@ -391,7 +436,7 @@ export function UpdatesScreen(): ReactNode {
 		[refreshStatus, showToast, trackJob],
 	);
 
-	const frozen = job?.running === true || rollingBack;
+	const frozen = isJobActive(job) || rollingBack;
 
 	if (statusError != null) {
 		return (
@@ -419,8 +464,8 @@ export function UpdatesScreen(): ReactNode {
 		);
 	}
 
-	const showJob = job != null && (job.running || job.error != null || job.steps.length > 0);
-	const lastCheck = lastCheckText(status.lastCheck);
+	const showJob = job != null && (isJobActive(job) || job.error != null || job.steps.length > 0);
+	const lastCheck = lastCheckText(status.job === null ? null : Date.parse(status.job.updatedAt));
 
 	return (
 		<div className="upd-wrap">
@@ -433,9 +478,14 @@ export function UpdatesScreen(): ReactNode {
 					<RefreshCw size={14} className={checking ? "upd-spin" : undefined} />
 					{checking ? "Проверяю…" : "Проверить"}
 				</button>
-				<button className="pk-btn upd-btn--secondary" disabled={frozen} onClick={() => void manualBackup()}>
+				<button
+					className="pk-btn upd-btn--secondary"
+					disabled={frozen}
+					onClick={() => setConfirm({ kind: "apply", ids: ["omp"] })}
+					title="Бэкап конфигов и снимок сессий делаются автоматически в фазе подготовки"
+				>
 					<Archive size={14} />
-					Резервная копия
+					Снимок и бэкап
 				</button>
 			</div>
 			{(lastCheck != null || !status.remoteConfigured) && (
@@ -444,7 +494,6 @@ export function UpdatesScreen(): ReactNode {
 					{!status.remoteConfigured && <span className="upd-meta-warn">git remote не настроен — Gateway/Frontend не обновить</span>}
 				</div>
 			)}
-			{backupDir != null && <div className="upd-backup">бэкап: ок · {shortenPath(backupDir)}</div>}
 			{showJob && job != null && <JobCard job={job} rollingBack={rollingBack} onRollback={id => setConfirm({ kind: "rollback", id })} />}
 			<div className="pk-list upd-list">
 				{status.components.map(component => (
@@ -467,8 +516,8 @@ export function UpdatesScreen(): ReactNode {
 				<ConfirmSheet
 					open
 					title={confirm.ids.length > 1 ? "Обновить всё?" : `Обновить «${COMPONENT_TITLES[confirm.ids[0]]}»?`}
-					body="Сначала будет создана резервная копия, затем компонент обновится. Работающие агенты могут быть прерваны."
-					command={confirm.ids.map(id => `omp update ${id}`).join("\n")}
+					body="Пайплайн: проверка версий → бэкап конфигов и снимок активных сессий → установка с проверкой SHA-256 → перезапуск компонентов → проверка работающих версий → восстановление сессий и продолжение прерванных задач. Опасные операции повторно не выполняются."
+					command={confirm.ids.map(id => `bun gateway/update/orchestrator.ts --component ${id} --job ${id}-<ts>`).join("\n")}
 					confirmLabel="Обновить"
 					danger
 					onConfirm={() => {
@@ -483,8 +532,8 @@ export function UpdatesScreen(): ReactNode {
 				<ConfirmSheet
 					open
 					title={`Откатить «${COMPONENT_TITLES[confirm.id]}»?`}
-					body="Компонент вернётся к предыдущей версии. Текущая установка будет заменена."
-					command={`omp rollback ${confirm.id}`}
+					body="Компонент вернётся к предыдущей версии (сохранённый бинарь или git SHA), затем перезапуск и проверка. Откат выполняется тем же автономным оркестратором."
+					command={`bun gateway/update/orchestrator.ts --component ${confirm.id} --job ${confirm.id}-rollback-<ts> --rollback`}
 					confirmLabel="Откатить"
 					danger
 					onConfirm={() => {

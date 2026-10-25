@@ -142,6 +142,28 @@ export function formatCollabLink(relayUrl: string, roomId: string, key: Uint8Arr
 	return `${compact}/r/${roomId}.${keyText}`;
 }
 
+/**
+ * Перевешивает collab-ссылку на origin, с которого открыта страница.
+ *
+ * Шлюз минтит ссылку с адресом релея, известным только самой машине и LAN
+ * (`thor1.local:8443`). Телефон в мобильной сети такой хост не резолвит: WS до
+ * релея не открывается, лента уходит в офлайн-кэш и показывает «Сессия
+ * закрыта». Публичный origin отдаёт тот же релей по `/r/*`, поэтому при
+ * https-странице берём хост из неё, а комната и ключ остаются исходными.
+ *
+ * Не трогаем: http-страницу (wss на её хост не открыть) и нечитаемую ссылку.
+ */
+export function rebaseCollabLink(link: string, pageOrigin: string): string {
+	if (!pageOrigin.startsWith("https://")) return link;
+	const parsed = parseCollabLink(link);
+	if ("error" in parsed) return link;
+	try {
+		return formatCollabLink(pageOrigin, parsed.roomId, parsed.key, parsed.writeToken);
+	} catch {
+		return link;
+	}
+}
+
 export function parseCollabLink(link: string): ParsedCollabLink | { error: string } {
 	// Lenient input: terminals that open OSC 8 links through strict URL stacks
 	// (macOS Foundation) percent-encode the legacy second `#` to `%23`.

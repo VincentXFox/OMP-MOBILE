@@ -1,3 +1,5 @@
+import type { SessionEntry } from "@oh-my-pi/pi-wire";
+
 export interface HostInfo {
 	instanceId: string;
 	generation: number;
@@ -19,30 +21,111 @@ export interface HostInfo {
 	/** Полный путь к .jsonl сессии (для resume), null/undefined если не найден. */
 	sessionFile?: string | null;
 	/** Заголовок из файла сессии: имя на момент старта реестр не знает,
-	 * у сессий без herdr-панели его нет вообще. */
+	 * у сессий без панели шлюза его нет вообще. */
 	sessionTitle?: string | null;
 	/** Первый запрос пользователя — имя для сессии без заголовка. */
 	sessionPreview?: string | null;
+	/** Стол штата: своя папка и закреплённая ответственность (null — агент вне штата). */
+	desk?: DeskRef | null;
+	/** Сводка туду-борда сессии для полоски в карточке (null — туду не трогали). */
+	todo?: TodoProgressRef | null;
 }
 
-const BASE_KEY = "ompPocket.gwBase";
+/** Прогресс туду-борда агента: счётчик и подпись текущей фазы. */
+export interface TodoProgressRef {
+	done: number;
+	total: number;
+	activePhase: string | null;
+}
+
+/** Стол штата: папка ~/OMP/<slug> и то, за что в ней отвечают. */
+export interface DeskRef {
+	slug: string;
+	role: string;
+	dir: string;
+}
+
+const BASES_KEY = "ompPocket.gwBases";
+const ACTIVE_KEY = "ompPocket.gwActive";
+const LEGACY_BASE_KEY = "ompPocket.gwBase";
 const TOKEN_KEY = "ompPocket.token";
 
-export function getGatewayBase(): string {
+/** Пробелы и хвостовые слэши не делают адрес другим: `BASE/` ≡ `BASE`. */
+function normalizeBase(v: string): string {
+	return v.trim().replace(/\/+$/, "");
+}
+
+/** Список адресов шлюза. При первом чтении после обновления переносит старый одиночный ключ. */
+function readBases(): string[] {
 	try {
-		return localStorage.getItem(BASE_KEY) ?? "";
+		const raw = localStorage.getItem(BASES_KEY);
+		if (raw !== null) {
+			const parsed: unknown = JSON.parse(raw);
+			if (!Array.isArray(parsed)) return [];
+			const out: string[] = [];
+			for (const item of parsed) {
+				if (typeof item !== "string") continue;
+				const base = normalizeBase(item);
+				if (base && !out.includes(base)) out.push(base);
+			}
+			return out;
+		}
+		// Миграция: ompPocket.gwBase → массив; старый ключ удаляем.
+		const legacy = localStorage.getItem(LEGACY_BASE_KEY);
+		if (legacy !== null) {
+			localStorage.removeItem(LEGACY_BASE_KEY);
+			const base = normalizeBase(legacy);
+			const migrated = base ? [base] : [];
+			localStorage.setItem(BASES_KEY, JSON.stringify(migrated));
+			return migrated;
+		}
+		return [];
 	} catch {
-		return "";
+		return [];
 	}
 }
 
-export function setGatewayBase(v: string): void {
+/** Адреса-кандидаты в порядке приоритета (первый = желаемый, пустой список = origin приложения). */
+export function getGatewayBases(): string[] {
+	return readBases();
+}
+
+export function setGatewayBases(bases: string[]): void {
+	const clean: string[] = [];
+	for (const item of bases) {
+		if (typeof item !== "string") continue;
+		const base = normalizeBase(item);
+		if (base && !clean.includes(base)) clean.push(base);
+	}
 	try {
-		if (v) localStorage.setItem(BASE_KEY, v);
-		else localStorage.removeItem(BASE_KEY);
+		localStorage.setItem(BASES_KEY, JSON.stringify(clean));
 	} catch {
 		// storage unavailable — non-fatal
 	}
+}
+
+/** Текущий рабочий адрес. "" = origin приложения (same-origin /api/*). */
+export function getActiveBase(): string {
+	try {
+		const stored = localStorage.getItem(ACTIVE_KEY);
+		if (stored !== null) return stored;
+	} catch {
+		// storage unavailable — падаем на первый из списка
+	}
+	return readBases()[0] ?? "";
+}
+
+export function setActiveBase(base: string): void {
+	try {
+		localStorage.setItem(ACTIVE_KEY, normalizeBase(base));
+	} catch {
+		// storage unavailable — non-fatal
+	}
+}
+
+/** Активный адрес шлюза (для push.ts / sw.js): "" = тот же origin, что и приложение. */
+export function getGatewayBase(): string {
+	return getActiveBase();
 }
 
 export function getToken(): string {
@@ -58,13 +141,8 @@ export async function uploadAttachment(bytes: Uint8Array, mimeType: string, orig
 	const form = new FormData();
 	const file = new File([bytes as BlobPart], originalName, { type: mimeType });
 	form.append("file", file);
-	const res = await fetch(`${getGatewayBase()}/api/attach`, {
-		method: "POST",
-		headers: { authorization: `Bearer ${getToken()}` },
-		body: form,
-	});
-	const data = (await res.json()) as { url?: string; error?: string };
-	if (!res.ok || !data.url) throw new Error(data.error ?? `шлюз вернул ${res.status}`);
+	const data = await request<{ url?: string }>("/api/attach", { method: "POST", body: form });
+	if (!data.url) throw new Error("шлюз не вернул ссылку на вложение");
 	return data.url;
 }
 
@@ -79,16 +157,44 @@ export function setToken(v: string): void {
 
 export class GatewayError extends Error {
 	status: number;
+	/** Машинный код ошибки из тела ответа шлюза ("agent_not_managed" и т.п.), если он есть. */
+	code?: string;
 
-	constructor(status: number, message: string) {
+	constructor(status: number, message: string, code?: string) {
 		super(message);
 		this.name = "GatewayError";
 		this.status = status;
+		this.code = code;
 	}
 }
 
-function gatewayUrl(path: string): string {
-	return `${getGatewayBase().replace(/\/+$/, "")}${path}`;
+function baseUrl(base: string, path: string): string {
+	return `${normalizeBase(base)}${path}`;
+}
+
+/** Кандидаты: активный адрес первым, затем остальные из списка, затем origin приложения. */
+function candidateBases(): string[] {
+	const list: string[] = [];
+	const add = (base: string): void => {
+		if (!list.includes(base)) list.push(base);
+	};
+	add(getActiveBase());
+	for (const base of readBases()) add(base);
+	add("");
+	return list;
+}
+
+/**
+ * Проверка живости адреса: любой HTTP-ответ (включая 401/404) = true,
+ * сетевая ошибка или таймаут = false. /api/health отвечает без токена.
+ */
+export async function pingBase(base: string, timeoutMs = 3000): Promise<boolean> {
+	try {
+		await fetch(`${normalizeBase(base)}/api/health`, { method: "GET", signal: AbortSignal.timeout(timeoutMs) });
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 function authHeaders(init?: HeadersInit): Headers {
@@ -99,33 +205,64 @@ function authHeaders(init?: HeadersInit): Headers {
 
 async function errorFromResponse(res: Response): Promise<GatewayError> {
 	let message = `HTTP ${res.status}`;
+	let code: string | undefined;
 	try {
 		const body: unknown = await res.json();
-		if (body && typeof body === "object" && "error" in body && typeof body.error === "string") message = body.error;
+		if (body && typeof body === "object") {
+			if ("error" in body && typeof body.error === "string") message = body.error;
+			if ("code" in body && typeof body.code === "string") code = body.code;
+		}
 	} catch {
 		// non-JSON body — keep the generic message
 	}
-	return new GatewayError(res.status, message);
+	return new GatewayError(res.status, message, code);
+}
+
+async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+	// таймаут 10с: недостижимый base (упавший LAN-адрес/мёртвый туннель)
+	// не должен висеть до TCP-таймаута ОС, пока поллинг плодит запросы.
+	// AbortSignal.any есть не во всех браузерах — фолбэк на одиночный таймаут.
+	const timeout = AbortSignal.timeout(10_000);
+	const signal = typeof AbortSignal.any === "function" && init?.signal
+		? AbortSignal.any([init.signal, timeout])
+		: (init?.signal ?? timeout);
+	return fetch(url, { ...init, headers: authHeaders(init?.headers), signal });
+}
+
+/**
+ * Идёт по кандидатам, пока не получит HTTP-ответ. Сетевая ошибка/таймаут (соединение
+ * не установилось) → следующий адрес; любой ответ (даже ошибка сервера) фиксирует
+ * победителя в ompPocket.gwActive и отдаётся вызывающему. Повтора того же адреса нет.
+ * Отмена вызывающей стороной (init.signal) прерывает перебор.
+ *
+ * Небезопасные методы (POST/PUT/DELETE) перебора НЕ получают: запрос мог выполниться,
+ * а ответ — потеряться (например, раздача задачи супер-агенту), и повтор на другом
+ * адресе дал бы дубль. Переключение на живой адрес к тому моменту уже сделал поллинг
+ * /api/hosts, поэтому одиночная попытка бьёт по правильному кандидату.
+ */
+async function fetchWithFailover(path: string, init?: RequestInit): Promise<Response> {
+	const active = getActiveBase();
+	const method = (init?.method ?? "GET").toUpperCase();
+	if (method !== "GET" && method !== "HEAD") {
+		return fetchWithTimeout(baseUrl(active, path), init);
+	}
+	let lastErr: GatewayError | null = null;
+	for (const base of candidateBases()) {
+		try {
+			const res = await fetchWithTimeout(baseUrl(base, path), init);
+			if (base !== active) setActiveBase(base);
+			return res;
+		} catch (err) {
+			const failure = err instanceof GatewayError ? err : new GatewayError(0, err instanceof Error ? err.message : String(err));
+			if (init?.signal?.aborted) throw failure;
+			lastErr = failure;
+		}
+	}
+	throw lastErr ?? new GatewayError(0, "нет доступных адресов шлюза");
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-	let res: Response;
-	try {
-		// таймаут 10с: недостижимый base (упавший LAN-адрес/мёртвый туннель)
-		// не должен висеть до TCP-таймаута ОС, пока поллинг плодит запросы.
-		// AbortSignal.any есть не во всех браузерах — фолбэк на одиночный таймаут.
-		const timeout = AbortSignal.timeout(10_000);
-		const signal = typeof AbortSignal.any === "function" && init?.signal
-			? AbortSignal.any([init.signal, timeout])
-			: (init?.signal ?? timeout);
-		res = await fetch(gatewayUrl(path), {
-			...init,
-			headers: authHeaders(init?.headers),
-			signal,
-		});
-	} catch (err) {
-		throw new GatewayError(0, err instanceof Error ? err.message : String(err));
-	}
+	const res = await fetchWithFailover(path, init);
 	if (res.status === 401) throw new GatewayError(401, "Требуется токен доступа");
 	if (!res.ok) throw await errorFromResponse(res);
 	return (await res.json()) as T;
@@ -151,7 +288,7 @@ export async function fetchHosts(signal?: AbortSignal): Promise<HostInfo[]> {
 	return Array.isArray(data.hosts) ? data.hosts : [];
 }
 
-/** Переименовать herdr-агента (видно в списках приложения). */
+/** Переименовать агента (видно в списках приложения). */
 export function renameAgent(instanceId: string, name: string): Promise<void> {
 	return request<void>(`/api/agents/${encodeURIComponent(instanceId)}/rename`, {
 		method: "POST",
@@ -282,6 +419,25 @@ export async function fetchSessions(signal?: AbortSignal): Promise<SessionSummar
 	return Array.isArray(data.sessions) ? data.sessions : [];
 }
 
+/* ---- лента активности по сессиям ---- */
+
+export interface ActivityRow {
+	id: string;
+	sessionId: string;
+	sessionPath: string;
+	sessionTitle: string | null;
+	cwd: string | null;
+	kind: "message" | "tool" | "error";
+	role: string | null;
+	text: string;
+	ts: string;
+}
+
+export async function fetchActivity(limit = 60, signal?: AbortSignal): Promise<ActivityRow[]> {
+	const data = await request<{ rows?: ActivityRow[] }>(`/api/activity?limit=${limit}`, { signal });
+	return Array.isArray(data.rows) ? data.rows : [];
+}
+
 /* ---- полнотекстовый поиск по репликам сессий ---- */
 
 /** role=user — только то, что писал человек; all — плюс ответы агента. */
@@ -340,7 +496,14 @@ export async function searchSessions(query: string, role: SessionSearchRole, sig
 	};
 }
 
-export type AgentResumeResult = { ok: true; instanceId: string } | { ok: false; error: string };
+/** Результат запуска/возобновления. Поля необязательные сознательно: проект
+ *  собирается без `strictNullChecks`, и там `ok: true` не сужает объединение —
+ *  вызывающий обязан проверить значение, а не доверять литералу. */
+export interface AgentResumeResult {
+	ok: boolean;
+	instanceId?: string;
+	error?: string;
+}
 
 export type ResumeMode = "resume" | "restore";
 
@@ -411,20 +574,152 @@ export async function deletePushSubscription(endpoint: string): Promise<void> {
 
 /* ---- agent lifecycle ---- */
 
-export type AgentStartResult = { ok: true; instanceId: string } | { ok: false; error: string };
+export interface AgentStartResult {
+	ok: boolean;
+	instanceId?: string;
+	cwd?: string;
+	desk?: DeskRef | null;
+	error?: string;
+}
 
-export async function startAgent(cwd: string, model: string | undefined, label: string | undefined): Promise<AgentStartResult> {
+export async function startAgent(
+	cwd: string,
+	model: string | undefined,
+	label: string | undefined,
+	desk?: { role?: string; slug?: string; charter?: string; charterSource?: string },
+): Promise<AgentStartResult> {
 	try {
-		const data = await request<{ ok?: boolean; instanceId?: unknown; error?: unknown }>("/api/agents/start", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ cwd, model, label }),
-		});
-		if (typeof data.instanceId === "string") return { ok: true, instanceId: data.instanceId };
+		const data = await request<{ ok?: boolean; instanceId?: unknown; error?: unknown; cwd?: unknown; desk?: DeskRef | null }>(
+			"/api/agents/start",
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					cwd,
+					model,
+					label,
+					role: desk?.role,
+					desk: desk?.slug,
+					charter: desk?.charter,
+					charterSource: desk?.charterSource,
+				}),
+			},
+		);
+		if (typeof data.instanceId === "string") {
+			return {
+				ok: true,
+				instanceId: data.instanceId,
+				cwd: typeof data.cwd === "string" ? data.cwd : cwd,
+				desk: data.desk ?? null,
+			};
+		}
 		return { ok: false, error: typeof data.error === "string" ? data.error : "Некорректный ответ шлюза" };
 	} catch (err) {
 		return { ok: false, error: err instanceof Error ? err.message : String(err) };
 	}
+}
+
+/* ---- библиотека системных промптов AI-инструментов ---- */
+
+export interface PromptDoc {
+	id: string;
+	tool: string;
+	title: string;
+	bytes: number;
+	preview: string;
+}
+
+export interface PromptHit extends PromptDoc {
+	/** Кусок текста вокруг совпадения — когда запрос нашёлся в содержимом. */
+	snippet: string | null;
+}
+
+export interface PromptsResult {
+	available: boolean;
+	root: string;
+	tools: { name: string; count: number }[];
+	docs: PromptHit[];
+	total: number;
+}
+
+export interface PromptDocBody {
+	doc: PromptDoc;
+	text: string;
+	truncated: boolean;
+}
+
+export async function fetchPrompts(q = "", tool = "", signal?: AbortSignal): Promise<PromptsResult> {
+	const params = new URLSearchParams();
+	if (q.trim() !== "") params.set("q", q.trim());
+	if (tool !== "") params.set("tool", tool);
+	const suffix = params.toString() === "" ? "" : `?${params.toString()}`;
+	return request<PromptsResult>(`/api/prompts${suffix}`, { signal });
+}
+
+/** Хвост транскрипта с шлюза: локальное чтение, миллисекунды вместо мегабайт через релей. */
+export async function fetchSessionTail(
+	target: { path?: string | null; id?: string | null },
+	limit = 80,
+	signal?: AbortSignal,
+): Promise<SessionEntry[]> {
+	const params = new URLSearchParams({ limit: String(limit) });
+	if (target.path !== null && target.path !== undefined && target.path !== "") params.set("path", target.path);
+	else if (target.id !== null && target.id !== undefined && target.id !== "") params.set("id", target.id);
+	else return [];
+	const data = await request<{ entries?: unknown[] }>(`/api/sessions/tail?${params.toString()}`, { signal });
+	return Array.isArray(data.entries) ? (data.entries as SessionEntry[]) : [];
+}
+
+export function fetchPromptDoc(id: string): Promise<PromptDocBody> {
+	return request<PromptDocBody>(`/api/prompts/${encodeURIComponent(id)}`);
+}
+
+/* ---- штат: папки агентов и кто за что отвечает ---- */
+
+export type OrganizerMode = "llm" | "deterministic" | "noop";
+
+export interface OrganizerStatus {
+	lastRunAt: number | null;
+	lastTrigger: string | null;
+	lastMode: OrganizerMode | null;
+	lastSummary: string | null;
+	lastError: string | null;
+	lastCandidates: number;
+	lastDesks: number;
+	running: boolean;
+	nextRunAt: number | null;
+}
+
+export interface CrewDesk extends DeskRef {
+	brief: string;
+	createdAt: number;
+	updatedAt: number;
+	assignedBy: "organizer" | "start" | "manual" | "adopted";
+	sessions: string[];
+}
+
+export interface CrewResponse {
+	root: string;
+	/** Живые агенты в общих папках без стола: их ещё предстоит разложить. */
+	loose: number;
+	desks: CrewDesk[];
+	bindings: Record<string, { slug: string; at: number; by: string }>;
+	organizer: OrganizerStatus;
+	/** Заголовки сессий участников: sessionId → имя. */
+	titles: Record<string, string | null>;
+}
+
+export function fetchCrew(signal?: AbortSignal): Promise<CrewResponse> {
+	return request<CrewResponse>("/api/crew", { signal });
+}
+
+/** Раскладка живёт минутами: шлюз отвечает 202, прогресс — в /api/crew (organizer.running). */
+export async function organizeCrew(dryRun = false): Promise<void> {
+	await request<{ ok: boolean }>("/api/crew/organize", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ dryRun }),
+	});
 }
 
 export type StopResult = "ok" | "missing" | "not_started_here";
@@ -447,7 +742,7 @@ export async function stopAgent(instanceId: string, force = false): Promise<Stop
 
 /* ---- update center ---- */
 
-export type UpdateComponentId = "omp" | "gateway" | "frontend";
+export type UpdateComponentId = "omp" | "gateway" | "frontend" | "relay" | "runtime";
 
 export interface UpdateCompatibility {
 	status: "ok" | "warn" | "unknown";
@@ -467,23 +762,85 @@ export interface UpdateComponent {
 
 export interface UpdateStatus {
 	components: UpdateComponent[];
-	lastCheck: number | null;
+	job: UpdateJob | null;
+	active: boolean;
 	remoteConfigured: boolean;
 }
 
+export type UpdateJobPhase =
+	| "IDLE"
+	| "CHECKING"
+	| "PREPARING"
+	| "CHECKPOINTING"
+	| "INSTALLING"
+	| "RESTARTING"
+	| "VERIFYING"
+	| "RESTORING"
+	| "RESUMING"
+	| "COMPLETED"
+	| "ROLLING_BACK"
+	| "ROLLED_BACK"
+	| "FAILED"
+	| "BLOCKED";
+
 export interface UpdateJobStep {
+	id: string;
 	label: string;
-	status: "run" | "ok" | "fail";
+	status: "run" | "ok" | "fail" | "skipped";
 	detail?: string;
+	startedAt: string;
+	finishedAt?: string;
+}
+
+export interface UpdateJobResult {
+	verifiedVersions: Record<string, string | null>;
+	restored: number;
+	resumed: number;
+	blocked: string[];
 }
 
 export interface UpdateJob {
-	running: boolean;
-	id: string | null;
+	schema: 2;
+	jobId: string;
+	component: UpdateComponentId;
+	phase: UpdateJobPhase;
+	createdAt: string;
+	updatedAt: string;
+	attempt: number;
 	steps: UpdateJobStep[];
-	error: string | null;
-	startedAt: number;
-	finishedAt?: number;
+	error: { message: string; phase: UpdateJobPhase } | null;
+	rollback: { available: boolean; reason: string } | null;
+	versions: { from: string | null; to: string | null };
+	checkpointFile: string | null;
+	result: UpdateJobResult | null;
+	finishedAt: string | null;
+}
+
+export const PHASE_LABELS: Record<UpdateJobPhase, string> = {
+	IDLE: "Подготовка",
+	CHECKING: "Проверка версий",
+	PREPARING: "Подготовка и бэкап",
+	CHECKPOINTING: "Снимок сессий",
+	INSTALLING: "Установка",
+	RESTARTING: "Перезапуск компонентов",
+	VERIFYING: "Проверка работающих версий",
+	RESTORING: "Восстановление сессий",
+	RESUMING: "Продолжение задач",
+	COMPLETED: "Готово",
+	ROLLING_BACK: "Откат",
+	ROLLED_BACK: "Откат завершён",
+	FAILED: "Ошибка",
+	BLOCKED: "Заблокировано",
+};
+
+const TERMINAL_PHASES: UpdateJobPhase[] = ["COMPLETED", "ROLLED_BACK", "FAILED", "BLOCKED"];
+
+export function isJobActive(job: UpdateJob | null): boolean {
+	return job !== null && !TERMINAL_PHASES.includes(job.phase);
+}
+
+export function isJobFailed(job: UpdateJob | null): boolean {
+	return job !== null && (job.phase === "FAILED" || job.phase === "BLOCKED");
 }
 
 export interface BusyAgent {
@@ -503,7 +860,7 @@ export class UpdateBusyError extends GatewayError {
 }
 
 export function isComponentId(value: string | null): value is UpdateComponentId {
-	return value === "omp" || value === "gateway" || value === "frontend";
+	return value === "omp" || value === "gateway" || value === "frontend" || value === "relay" || value === "runtime";
 }
 
 function busyAgentsOf(value: unknown): BusyAgent[] {
@@ -524,22 +881,13 @@ export async function fetchUpdateStatus(): Promise<UpdateStatus> {
 	return { ...data, components: Array.isArray(data.components) ? data.components : [] };
 }
 
-export async function createUpdateBackup(): Promise<string> {
-	const data = await request<{ ok: boolean; dir: string }>("/api/update/backup", { method: "POST" });
-	return data.dir;
-}
-
-export async function applyUpdate(id: UpdateComponentId, confirmBusy = false): Promise<boolean> {
-	let res: Response;
-	try {
-		res = await fetch(gatewayUrl("/api/update/apply"), {
-			method: "POST",
-			headers: authHeaders({ "Content-Type": "application/json" }),
-			body: JSON.stringify(confirmBusy ? { id, confirmBusy: true } : { id }),
-		});
-	} catch (err) {
-		throw new GatewayError(0, err instanceof Error ? err.message : String(err));
-	}
+/** Запуск задачи. Возвращает jobId: прогресс идёт через /api/update/events или опрос /api/update/job. */
+export async function applyUpdate(id: UpdateComponentId, confirmBusy = false): Promise<string | null> {
+	const res = await fetchWithFailover("/api/update/apply", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(confirmBusy ? { id, confirmBusy: true } : { id }),
+	});
 	if (res.status === 401) throw new GatewayError(401, "Требуется токен доступа");
 	if (res.status === 409) {
 		let message = "Есть работающие агенты";
@@ -557,33 +905,63 @@ export async function applyUpdate(id: UpdateComponentId, confirmBusy = false): P
 	}
 	if (!res.ok) throw await errorFromResponse(res);
 	const data: unknown = await res.json();
-	return typeof data === "object" && data !== null && "job" in data && data.job === true;
+	if (typeof data === "object" && data !== null && "jobId" in data && typeof data.jobId === "string") return data.jobId;
+	return null;
 }
 
-export async function rollbackUpdate(id: UpdateComponentId): Promise<boolean> {
-	const data = await request<{ ok: boolean }>("/api/update/rollback", {
+export async function rollbackUpdate(id: UpdateComponentId): Promise<string | null> {
+	const data = await request<{ ok: boolean; jobId?: string }>("/api/update/rollback", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ id }),
 	});
-	return data.ok === true;
+	return data.jobId ?? null;
 }
 
-export async function fetchUpdateJob(): Promise<UpdateJob> {
-	return request<UpdateJob>("/api/update/job");
+export async function fetchUpdateJob(): Promise<UpdateJob | null> {
+	return request<UpdateJob | null>("/api/update/job");
 }
 
-/* ---- terminal (herdr agents) ---- */
+export interface UpdateEvent {
+	seq: number;
+	at: string;
+	jobId: string;
+	phase: UpdateJobPhase;
+	kind: string;
+	message: string | null;
+	data: Record<string, unknown> | null;
+}
 
-export type TerminalResult = { paneId: string; text: string } | { error: "not-herdr-agent" };
+/** Лента событий задачи: сначала всё, что уже записано, затем — если шлюз отдал
+ * поток — реальные события SSE. Переподключение идёт с since=последний seq. */
+export async function fetchUpdateEvents(jobId: string, since = 0): Promise<UpdateEvent[]> {
+	const data = await request<{ events: UpdateEvent[] }>(`/api/update/events?job=${encodeURIComponent(jobId)}&since=${since}`);
+	return Array.isArray(data.events) ? data.events : [];
+}
+
+/* ---- terminal (панели шлюза) ---- */
+
+export type TerminalResult = { paneId: string; text: string; format?: "ansi" } | { error: "agent_not_managed" };
 
 /* ---- каталог моделей и настройки чата (модель + усилие) ---- */
+
+export interface ModelCost {
+	/** USD за 1M входных токенов. */
+	input: number;
+	/** USD за 1M выходных токенов. */
+	output: number;
+	cacheRead?: number;
+	cacheWrite?: number;
+}
 
 export interface ModelOption {
 	selector: string;
 	name: string;
 	thinking: string[];
 	contextWindow: number;
+	/** Цена из каталога шлюза; null — провайдер её не сообщает. */
+	cost?: ModelCost | null;
+	pricingStatus?: string;
 }
 
 export interface AgentChatSettings {
@@ -625,19 +1003,19 @@ export async function applyAgentSettings(
 	);
 }
 
-/** Terminal pane snapshot. `null` = unknown host; `{error}` = agent is not herdr-managed. */
-export async function getTerminal(instanceId: string): Promise<TerminalResult | null> {
+/** Terminal pane snapshot. `null` = unknown host; `{error}` = agent is not managed by a gateway pane. */
+export async function getTerminal(instanceId: string, format: "plain" | "ansi" = "plain"): Promise<TerminalResult | null> {
 	try {
-		const data = await request<{ paneId?: unknown; text?: unknown }>(
-			`/api/agents/${encodeURIComponent(instanceId)}/terminal`,
+		const data = await request<{ paneId?: unknown; text?: unknown; format?: unknown }>(
+			`/api/agents/${encodeURIComponent(instanceId)}/terminal${format === "ansi" ? "?format=ansi" : ""}`,
 		);
 		if (typeof data.paneId === "string" && typeof data.text === "string") {
-			return { paneId: data.paneId, text: data.text };
+			return { paneId: data.paneId, text: data.text, ...(data.format === "ansi" ? { format: "ansi" as const } : {}) };
 		}
 		return null;
 	} catch (err) {
 		if (err instanceof GatewayError && err.status === 404) {
-			if (err.message === "not-herdr-agent") return { error: "not-herdr-agent" };
+			if (err.code === "agent_not_managed") return { error: "agent_not_managed" };
 			return null; // host not found
 		}
 		throw err;
@@ -686,7 +1064,7 @@ export interface SuperHostInfo {
 }
 
 export interface SuperAgent {
-	/** herdr pane id — dispatch target ("w1:p1"). */
+	/** id панели — dispatch target ("w1:p1"). */
 	target: string;
 	name: string;
 	agentStatus: SuperAgentStatus;
@@ -730,6 +1108,166 @@ export async function dispatchSuperTasks(items: { target: string; text: string }
 
 export async function fetchSuperActivity(target: string, signal?: AbortSignal): Promise<SuperActivity> {
 	return request<SuperActivity>(`/api/super/agent/${encodeURIComponent(target)}/activity`, { signal });
+}
+
+/* ---- autonomous tasks (оказывается, задачи ставятся и без человека) ---- */
+
+/** Статус задачи. Успех — только `done`: остальные терминальные — причины, почему нет. */
+export type TaskStatus =
+	| "queued"
+	| "running"
+	| "verifying"
+	| "awaiting_approval"
+	| "paused"
+	| "blocked"
+	| "budget_exhausted"
+	| "no_progress"
+	| "cancelled"
+	| "failed"
+	| "done";
+
+export type TaskStopReasonKind = "done" | "budget" | "no_progress" | "blocked" | "cancelled" | "failed";
+
+export interface TaskStopReason {
+	kind: TaskStopReasonKind;
+	detail: string;
+}
+
+export interface TaskCheckSpec {
+	command: string;
+	expectExit?: number;
+	expectContains?: string;
+	expectAbsent?: string;
+	timeoutMs?: number;
+}
+
+export interface TaskCriterion {
+	id: string;
+	statement: string;
+	check?: TaskCheckSpec;
+	passed: boolean;
+	lastResult?: string;
+	checkedAt?: number;
+}
+
+export interface TaskAttempt {
+	index: number;
+	startedAt: number;
+	finishedAt?: number;
+	strategy: string;
+	summary: string;
+	progress: boolean;
+	failures: string[];
+}
+
+export interface TaskEvidence {
+	at: number;
+	criterionId: string;
+	command: string;
+	ok: boolean;
+	exitCode: number | null;
+	output: string;
+	durationMs: number;
+}
+
+export interface TaskSpend {
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	/** null — цены модели не заданы: деньги не выдумываем. */
+	costUsd: number | null;
+	turns: number;
+}
+
+export interface TaskBudget {
+	maxTokens: number;
+	reserveTokens: number;
+	maxCostUsd?: number;
+}
+
+export interface TaskApproval {
+	requestId: string;
+	title: string;
+	detail: string;
+	requestedAt: number;
+	decision: "allow" | "deny" | null;
+}
+
+/** Сокращённый вид для списка: всё, что рисует карточка, без журналов. */
+export interface TaskSummary {
+	id: string;
+	goal: string;
+	cwd: string;
+	model: string;
+	status: TaskStatus;
+	stage: string;
+	turns: number;
+	spend: TaskSpend;
+	/** Сумма оплачиваемых токенов (вход+выход+кэш). */
+	tokensUsed: number;
+	budget: TaskBudget;
+	stopReason: TaskStopReason | null;
+	lastVerifiedResult: string | null;
+	approval: TaskApproval | null;
+	criteriaTotal: number;
+	criteriaPassed: number;
+	createdAt: number;
+	updatedAt: number;
+}
+
+/** Полная задача: как её отдаёт GET /api/tasks/<id>. Вычисляемых полей списка
+ *  (tokensUsed, criteriaTotal/Passed) в ответе нет — их считает только витрина. */
+export interface TaskDetail extends Omit<TaskSummary, "tokensUsed" | "criteriaTotal" | "criteriaPassed"> {
+	criteria: TaskCriterion[];
+	attempts: TaskAttempt[];
+	evidence: TaskEvidence[];
+	strategiesTried: string[];
+	noProgressStreak: number;
+	autoApprove: string[];
+	nextInstruction: string | null;
+}
+
+export interface NewTaskInput {
+	goal: string;
+	cwd: string;
+	model?: string;
+	criteria: { id: string; statement: string; check?: TaskCheckSpec }[];
+	budget: TaskBudget;
+	autoApprove?: string[];
+}
+
+export type TaskAction = "pause" | "resume" | "cancel" | "start";
+
+export async function fetchTasks(signal?: AbortSignal): Promise<TaskSummary[]> {
+	const data = await request<{ tasks?: unknown }>("/api/tasks", { signal });
+	return Array.isArray(data.tasks) ? (data.tasks as TaskSummary[]) : [];
+}
+
+export async function fetchTask(id: string, signal?: AbortSignal): Promise<TaskDetail> {
+	return request<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`, { signal });
+}
+
+export async function createTask(input: NewTaskInput): Promise<TaskSummary> {
+	const data = await request<{ task?: unknown }>("/api/tasks", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(input),
+	});
+	if (!data.task) throw new GatewayError(502, "шлюз не вернул задачу");
+	return data.task as TaskSummary;
+}
+
+export async function taskAction(id: string, action: TaskAction): Promise<void> {
+	await request<{ ok: boolean }>(`/api/tasks/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+}
+
+export async function answerTaskApproval(id: string, decision: "allow" | "deny"): Promise<void> {
+	await request<{ ok: boolean }>(`/api/tasks/${encodeURIComponent(id)}/approval`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ decision }),
+	});
 }
 
 /* ---- project files / git ---- */

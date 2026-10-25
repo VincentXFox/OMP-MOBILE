@@ -1,0 +1,188 @@
+/* Telegram screen: bridge chat is read-only here — the bot owns the writing.
+ * Two panes on a desktop (sessions rail + transcript), one pane on a phone. */
+
+.tg-screen {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-height: 100%;
+}
+
+/* ---- sessions rail ---- */
+.tg-rail {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.tg-rail-head {
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: var(--muted);
+}
+
+.tg-rail-list {
+	display: flex;
+	gap: 8px;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.tg-rail-list::-webkit-scrollbar {
+	display: none;
+}
+
+.tg-rail-item {
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	max-width: 220px;
+	padding: 8px 12px;
+	text-align: left;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--fg-muted);
+}
+
+.tg-rail-item--on {
+	color: var(--fg);
+	border-color: var(--accent);
+	background: var(--selected);
+}
+
+.tg-rail-title {
+	font-size: 0.875rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tg-rail-meta {
+	font-size: 0.75rem;
+	color: var(--fg-faint);
+	white-space: nowrap;
+}
+
+.tg-rail-foot {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.tg-rail-foot .pk-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	text-decoration: none;
+}
+
+/* ---- chat pane ---- */
+.tg-chat {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-height: 0;
+	flex: 1;
+}
+
+.tg-chat-head {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--border);
+}
+
+.tg-chat-title {
+	font-size: 0.9375rem;
+	font-weight: 600;
+}
+
+.tg-chat-sub {
+	font-size: 0.8125rem;
+	color: var(--muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.tg-refresh {
+	margin-left: auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.tg-error {
+	margin: 0;
+}
+
+.tg-transcript {
+	min-height: 0;
+}
+
+.tg-note {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding-top: 8px;
+	font-size: 0.8125rem;
+	color: var(--fg-faint);
+}
+
+/* Desktop: rail becomes a real column beside the chat. */
+@media (min-width: 1024px) {
+	/* Две колонки без привязки к высоте контейнера: страница скроллится сама,
+	 * иначе рейл получает нулевую высоту и его содержимое уезжает. */
+	.tg-screen {
+		display: grid;
+		grid-template-columns: 260px minmax(0, 1fr);
+		gap: 20px;
+		align-items: start;
+		height: auto;
+	}
+
+	.tg-rail {
+		flex: none;
+		position: sticky;
+		top: 0;
+		border-right: 1px solid var(--border);
+		padding-right: 16px;
+	}
+
+	.tg-rail-list {
+		flex-direction: column;
+		flex: none;
+		overflow: visible;
+	}
+
+	.tg-rail-list::-webkit-scrollbar {
+		display: none;
+	}
+
+	.tg-rail-item {
+		max-width: none;
+	}
+
+	.tg-rail-foot {
+		flex-direction: column;
+	}
+
+	.tg-chat {
+		min-width: 0;
+	}
+
+	.tg-transcript {
+		flex: none;
+		overflow: visible;
+	}
+
+	.tg-transcript .tr-root {
+		padding: 6px 0;
+	}
+
+	.tg-transcript .tr-root .tr-row {
+		max-width: 940px;
+		margin-inline: auto;
+	}
+}

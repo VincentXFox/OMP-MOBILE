@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { resolveBin } from "./bins.ts";
 import { findSessionFile, parseSessionHead } from "./sessions.ts";
+import { todoProgressOf, type TodoProgress } from "./todo-progress.ts";
 
 export interface OmpHost {
   instanceId: string;
@@ -21,11 +22,13 @@ export interface OmpHost {
   /** Полный путь к .jsonl сессии — для resume мёртвого агента. */
   sessionFile: string | null;
   /** Заголовок из файла сессии (256-байтный title-слот omp, включая переименования
-   * из TUI). Реестр отдаёт только имя на момент старта, а сессия без herdr-панели —
+   * из TUI). Реестр отдаёт только имя на момент старта, а сессия без панели —
    * вообще без имени: в списке агентов это и был «агент без названия». */
   sessionTitle: string | null;
   /** Первый запрос пользователя — имя для сессии, которой omp ещё не дал заголовок. */
   sessionPreview: string | null;
+  /** Сводка туду-борда сессии (null — туду в ней не трогали). */
+  todo: TodoProgress | null;
 }
 
 export interface OmpHostsOutput {
@@ -67,12 +70,16 @@ function isProcessAlive(pid: number): boolean {
 }
 
 // omp CLI output is a verified stable JSON shape; assert at the process boundary.
-export async function runOmp(args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
+export async function runOmp(args: string[], timeoutMs: number, ompPath?: string): Promise<{ code: number; stdout: string; stderr: string }> {
   let ompBin: string;
-  try {
-    ompBin = await resolveBin("omp");
-  } catch (err) {
-    throw new Error(`omp недоступен: ${err instanceof Error ? err.message : String(err)}`);
+  if (ompPath !== undefined && ompPath !== "") {
+    ompBin = ompPath;
+  } else {
+    try {
+      ompBin = await resolveBin("omp");
+    } catch (err) {
+      throw new Error(`omp недоступен: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
   try {
@@ -91,8 +98,8 @@ export async function runOmp(args: string[], timeoutMs: number): Promise<{ code:
   return promise;
 }
 
-export async function listHosts(): Promise<OmpHostsOutput> {
-  const res = await runOmp(["collab", "list", "--json"], 5000);
+export async function listHosts(ompPath?: string): Promise<OmpHostsOutput> {
+  const res = await runOmp(["collab", "list", "--json"], 5000, ompPath);
   if (res.code !== 0) throw new Error(`omp collab list failed: ${res.stderr.trim() || `exit ${res.code}`}`);
   const parsed = JSON.parse(res.stdout) as Partial<OmpHostsOutput>;
   const hosts = Array.isArray(parsed.hosts) ? parsed.hosts : [];
@@ -106,6 +113,8 @@ export async function listHosts(): Promise<OmpHostsOutput> {
         sessionFile,
         sessionTitle: identity.title,
         sessionPreview: identity.preview,
+        // Прогресс туду-борда — для полоски в карточке агента на главной.
+        todo: todoProgressOf(sessionFile),
       };
     }),
   };

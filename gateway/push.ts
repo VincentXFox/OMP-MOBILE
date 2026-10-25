@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from "node:fs";
 import webpush from "web-push";
 import type { PushSubscription } from "web-push";
 import type { OmpHost } from "./hosts.ts";
@@ -112,7 +112,14 @@ export class PushManager {
   }
 
   #persist(): void {
-    writeFileSync(this.#subscriptionsPath, JSON.stringify(this.#subscriptions, null, 2) + "\n");
+    // Атомарно: рестарт шлюза посреди записи не должен стереть все подписки.
+    try {
+      const tmp = `${this.#subscriptionsPath}.tmp`;
+      writeFileSync(tmp, JSON.stringify(this.#subscriptions, null, 2) + "\n");
+      renameSync(tmp, this.#subscriptionsPath);
+    } catch {
+      // best-effort: подписки живут до следующей удачной записи
+    }
   }
 
   async #send(sub: PushSubscription, payload: PushPayload): Promise<void> {
@@ -127,9 +134,18 @@ export class PushManager {
     }
   }
 
-  /** Public broadcast; reused by the update center for its own notifications. */
-  async broadcast(payload: PushPayload): Promise<void> {
-    await Promise.all(this.#subscriptions.map((s) => this.#send(s, payload)));
+  /** Public broadcast; reused by the update center for its own notifications.
+   *  Возвращает число подписок, которым ушёл пуш: UI показывает реальный
+   *  результат, а не «нет подписок» на любой ответ. */
+  async broadcast(payload: PushPayload): Promise<number> {
+    const targets = this.#subscriptions;
+    await Promise.all(targets.map((s) => this.#send(s, payload)));
+    return targets.length;
+  }
+
+  /** Закрытая сессия уже не в реестре: имя берём из кэша, иначе id. */
+  static #closedLabel(instanceId: string): string {
+    return this.#titleCache.get(instanceId) ?? instanceId;
   }
 
   static #label(host: OmpHost): string {
@@ -156,6 +172,12 @@ export class PushManager {
 
 
   async poll(hosts: OmpHost[]): Promise<void> {
+    // Пустой/частичный снимок реестра (omp обновляется, реестр ещё не поднялся)
+    // неотличим от «все агенты закрылись» — на нём пушей не шлём.
+    if (hosts.length === 0) {
+      this.#firstRun = false;
+      return;
+    }
     const seen = new Set<string>();
     for (const host of hosts) {
       seen.add(host.instanceId);
@@ -190,7 +212,7 @@ export class PushManager {
     for (const [id] of this.#edges) {
       if (seen.has(id)) continue;
       this.#edges.delete(id);
-      if (!this.#firstRun) await this.broadcast({ title: "Сессия закрыта", body: id, url: "/" });
+      if (!this.#firstRun) await this.broadcast({ title: "Сессия закрыта", body: PushManager.#closedLabel(id), url: "/" });
     }
     this.#firstRun = false;
   }

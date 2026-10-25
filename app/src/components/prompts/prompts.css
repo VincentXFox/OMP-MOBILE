@@ -1,0 +1,154 @@
+/* Библиотека системных промптов AI-инструментов. `pr-*` prefix.
+ * Общие примитивы (.pk-card/.pk-sheet/.pk-chip/.pk-btn/.pk-empty/.ag-search) —
+ * в shell/pocket.css и agents.css, здесь только раскладка шита. */
+
+.pk-sheet.prompts-sheet {
+	display: flex;
+	flex-direction: column;
+	gap: var(--sp-2, 8px);
+}
+
+.pr-head {
+	display: flex;
+	align-items: center;
+	gap: var(--sp-2, 8px);
+	flex: 0 0 auto;
+}
+
+.pr-head .pk-sheet-title {
+	margin: 0;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.pr-back {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	border: 1px solid var(--border);
+	background: var(--surface);
+	color: var(--fg);
+}
+
+.pr-sub {
+	flex: 0 0 auto;
+	font-size: 0.75rem;
+	color: var(--fg-tertiary, var(--muted));
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.pr-search {
+	flex: 0 0 auto;
+}
+
+/* Чипы инструментов — одна прокручиваемая строка: их 31, перенос съедает
+ * пол-экрана шита. Специфичность два класса: .pk-chips из pocket.css иначе
+ * задаёт flex-wrap: wrap своим порядком в бандле. */
+.pk-chips.pr-tools {
+	flex: 0 0 auto;
+	flex-wrap: nowrap;
+	overflow-x: auto;
+	overflow-y: hidden;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: none;
+	padding-bottom: 2px;
+}
+
+.pk-chips.pr-tools::-webkit-scrollbar {
+	display: none;
+}
+
+.pk-chips.pr-tools .pk-chip {
+	flex: 0 0 auto;
+	white-space: nowrap;
+}
+
+.pr-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--sp-2, 8px);
+}
+
+.pk-card.pr-card {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: var(--sp-3, 12px);
+	text-align: left;
+}
+
+.pr-name {
+	display: block;
+	font-size: 0.9375rem;
+	font-weight: 600;
+	color: var(--fg);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.pr-meta {
+	display: block;
+	font-size: 0.75rem;
+	color: var(--fg-tertiary, var(--muted));
+}
+
+.pr-preview {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	font-size: 0.8125rem;
+	line-height: 1.4;
+	color: var(--fg-secondary, var(--muted));
+}
+
+.pr-text {
+	margin: 0;
+	max-height: 46vh;
+	overflow-y: auto;
+	padding: var(--sp-3, 12px);
+	border-radius: 12px;
+	background: var(--bg-inset);
+	border: 1px solid var(--border);
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 0.75rem;
+	line-height: 1.45;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: var(--fg-secondary, var(--muted));
+}
+
+.pr-actions {
+	display: flex;
+	gap: var(--sp-2, 8px);
+	flex: 0 0 auto;
+}
+
+.pr-start {
+	flex: 1;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+}
+
+.pr-copy {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.pr-empty {
+	padding: var(--sp-4, 16px);
+}

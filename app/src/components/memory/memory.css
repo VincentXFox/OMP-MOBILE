@@ -19,7 +19,7 @@
 	width: 100%;
 	box-sizing: border-box;
 	margin: 0 auto;
-	padding: 0 12px;
+	padding: 0;
 }
 
 /* Липнет под шапкой приложения: раздел и поиск нужны с любой глубины списка.
@@ -35,7 +35,7 @@
 	width: 100%;
 	box-sizing: border-box;
 	margin: 0 auto;
-	padding: 10px 12px 8px;
+	padding: 10px 0 8px;
 	background: var(--bg);
 	border-bottom: 1px solid var(--hairline, var(--border));
 }
@@ -89,6 +89,10 @@
 .mem-count {
 	font-size: 0.6875rem;
 	color: var(--fg-tertiary, var(--muted));
+}
+
+.pk-chip--on .mem-count {
+	color: var(--accent-fg);
 }
 
 .mem-summary {
@@ -158,7 +162,7 @@
 	width: 100%;
 	box-sizing: border-box;
 	margin: 0 auto;
-	padding: 12px 12px 0;
+	padding: 12px 0 0;
 }
 
 .mem-hint {

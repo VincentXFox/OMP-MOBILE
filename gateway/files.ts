@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { listHosts } from "./hosts.ts";
 import type { OmpHost } from "./hosts.ts";
-import { runHerdr, unwrapHerdr } from "./agents.ts";
+import { bindPane, paneOfHost, readPane, renamePane, sendPaneKeys, sendPaneText } from "./panes.ts";
 import { resolveBin } from "./bins.ts";
 
 const SPAWN_TIMEOUT_MS = 10_000;
@@ -29,13 +29,13 @@ const KNOWN_KEY_NAMES: Record<string, true> = {
   _: true,
 };
 
-// Символ → именованная клавиша herdr («/» должен открывать slash-меню omp).
+// Символ → именованная клавиша панели («/» должен открывать slash-меню omp).
 const CHAR_KEY_ALIASES: Record<string, string> = {
   "/": "slash",
   " ": "space",
 };
 
-/** Печатаемые ASCII → клавиши herdr; не-ASCII/управляющие — null. */
+/** Печатаемые ASCII → клавиши панели; не-ASCII/управляющие — null. */
 function textToKeys(text: string): string[] | null {
   const keys: string[] = [];
   for (const ch of text) {
@@ -65,66 +65,12 @@ export function truncateError(stderr: string): string {
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
-interface HerdrAgentRecord {
-  agent: string;
-  cwd: string;
-  paneId: string;
-}
-
-function parseHerdrAgents(result: unknown): HerdrAgentRecord[] {
-  if (result === null || typeof result !== "object") return [];
-  const parsed = result as { agents?: unknown }; // herdr CLI envelope, shape asserted here
-  const agents = parsed.agents;
-  if (!Array.isArray(agents)) return [];
-  const out: HerdrAgentRecord[] = [];
-  for (const entry of agents) {
-    if (entry === null || typeof entry !== "object") continue;
-    const rec = entry as { agent?: unknown; cwd?: unknown; pane_id?: unknown };
-    if (typeof rec.agent !== "string" || typeof rec.cwd !== "string" || typeof rec.pane_id !== "string") continue;
-    out.push({ agent: rec.agent, cwd: rec.cwd, paneId: rec.pane_id });
-  }
-  return out;
-}
-
-// Pids of processes currently running in the pane (foreground group id + foreground processes).
-function parsePanePids(result: unknown): number[] {
-  if (result === null || typeof result !== "object") return [];
-  const wrapper = result as { process_info?: unknown }; // herdr CLI envelope, shape asserted here
-  const info = wrapper.process_info;
-  if (info === null || typeof info !== "object") return [];
-  const parsed = info as { foreground_process_group_id?: unknown; foreground_processes?: unknown };
-  const pids: number[] = [];
-  if (typeof parsed.foreground_process_group_id === "number") pids.push(parsed.foreground_process_group_id);
-  if (Array.isArray(parsed.foreground_processes)) {
-    for (const entry of parsed.foreground_processes) {
-      if (entry === null || typeof entry !== "object") continue;
-      const proc = entry as { pid?: unknown };
-      if (typeof proc.pid === "number") pids.push(proc.pid);
-    }
-  }
-  return pids;
-}
-
-// Map a collab-registry host to its herdr pane. `herdr agent list` has no pid field,
-// so candidates are matched by cwd; when several omp agents share a cwd the instance's
-// pid disambiguates via the pane's foreground process info.
-async function findHerdrPane(host: OmpHost): Promise<string | null> {
-  const listed = unwrapHerdr(await runHerdr(["agent", "list"], SPAWN_TIMEOUT_MS));
-  if (!listed.ok) throw new Error(`herdr agent list failed: ${listed.error}`);
-  const candidates = parseHerdrAgents(listed.result).filter((a) => a.agent === "omp" && a.cwd === host.cwd);
-  if (candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0].paneId;
-  for (const candidate of candidates) {
-    const info = unwrapHerdr(await runHerdr(["pane", "process-info", "--pane", candidate.paneId], SPAWN_TIMEOUT_MS));
-    if (info.ok && parsePanePids(info.result).includes(host.pid)) return candidate.paneId;
-  }
-  return candidates[0].paneId;
-}
-
 type PaneResolution =
   | { kind: "ok"; paneId: string }
   | { kind: "not_found"; error: string }
-  | { kind: "not_herdr" }
+  /** Агент есть в реестре, но панелью шлюза не управляется: приложение
+   * показывает это отдельно от «такого агента нет». */
+  | { kind: "not_managed"; error: string }
   | { kind: "failed"; error: string };
 
 async function resolvePane(instanceId: string): Promise<PaneResolution> {
@@ -136,34 +82,43 @@ async function resolvePane(instanceId: string): Promise<PaneResolution> {
   }
   if (!host) return { kind: "not_found", error: "host not found" };
   try {
-    const paneId = await findHerdrPane(host);
-    if (paneId === null) return { kind: "not_herdr" };
-    return { kind: "ok", paneId };
+    // paneOfHost при неоднозначности (несколько панелей в каталоге) бросает
+    // исключение — это сбой, а не «панели нет»: угадывать чужую нельзя.
+    const pane = await paneOfHost(host);
+    if (pane === null) return { kind: "not_managed", error: "агент не управляется панелью шлюза" };
+    return { kind: "ok", paneId: pane.paneId };
   } catch (err) {
     return { kind: "failed", error: err instanceof Error ? err.message : String(err) };
   }
 }
 
+/** Ошибка панели в текст результата: без обёрток CLI, только причина. */
+function paneFailure(err: unknown): string {
+  return truncateError(err instanceof Error ? err.message : String(err));
+}
+
 export type TerminalRead =
-  | { kind: "ok"; paneId: string; text: string }
+  | { kind: "ok"; paneId: string; text: string; format?: "ansi" }
   | { kind: "not_found"; error: string }
-  | { kind: "not_herdr" }
+  | { kind: "not_managed"; error: string }
   | { kind: "failed"; error: string };
 
-export async function readTerminal(instanceId: string): Promise<TerminalRead> {
+export async function readTerminal(instanceId: string, format: "plain" | "ansi" = "plain"): Promise<TerminalRead> {
   const pane = await resolvePane(instanceId);
   if (pane.kind !== "ok") return pane;
-  const read = unwrapHerdr(await runHerdr(["pane", "read", pane.paneId], SPAWN_TIMEOUT_MS));
-  if (!read.ok) return { kind: "failed", error: `herdr pane read failed: ${truncateError(read.error)}` };
-  const text = typeof read.result === "string" ? read.result : read.result === null || read.result === undefined ? "" : JSON.stringify(read.result);
-  return { kind: "ok", paneId: pane.paneId, text };
+  try {
+    const text = await readPane(pane.paneId, format === "ansi" ? "ansi" : "text");
+    return format === "ansi" ? { kind: "ok", paneId: pane.paneId, text, format: "ansi" } : { kind: "ok", paneId: pane.paneId, text };
+  } catch (err) {
+    return { kind: "failed", error: `чтение панели не удалось: ${paneFailure(err)}` };
+  }
 }
 
 export type TerminalSend =
   | { kind: "ok" }
   | { kind: "bad_key"; error: string }
   | { kind: "not_found"; error: string }
-  | { kind: "not_herdr" }
+  | { kind: "not_managed"; error: string }
   | { kind: "failed"; error: string };
 
 export async function sendTerminalKeys(instanceId: string, keys: string[]): Promise<TerminalSend> {
@@ -171,17 +126,23 @@ export async function sendTerminalKeys(instanceId: string, keys: string[]): Prom
   if (bad !== undefined) return { kind: "bad_key", error: `unsupported key: ${bad}` };
   const pane = await resolvePane(instanceId);
   if (pane.kind !== "ok") return pane;
-  const sent = unwrapHerdr(await runHerdr(["pane", "send-keys", pane.paneId, ...keys], SPAWN_TIMEOUT_MS));
-  if (!sent.ok) return { kind: "failed", error: `herdr pane send-keys failed: ${truncateError(sent.error)}` };
-  return { kind: "ok" };
+  try {
+    await sendPaneKeys(pane.paneId, keys);
+    return { kind: "ok" };
+  } catch (err) {
+    return { kind: "failed", error: `ввод в панель не удался: ${paneFailure(err)}` };
+  }
 }
 
 export async function sendTerminalText(instanceId: string, text: string): Promise<TerminalSend> {
   const pane = await resolvePane(instanceId);
   if (pane.kind !== "ok") return pane;
-  const sent = unwrapHerdr(await runHerdr(["pane", "send-text", pane.paneId, text], SPAWN_TIMEOUT_MS));
-  if (!sent.ok) return { kind: "failed", error: `herdr pane send-text failed: ${truncateError(sent.error)}` };
-  return { kind: "ok" };
+  try {
+    await sendPaneText(pane.paneId, text);
+    return { kind: "ok" };
+  } catch (err) {
+    return { kind: "failed", error: `ввод в панель не удался: ${paneFailure(err)}` };
+  }
 }
 
 // Посимвольный набор: печатаемые ASCII — как клавиши, «/» и пробел — именованные.
@@ -190,18 +151,62 @@ export async function sendTerminalChars(instanceId: string, text: string): Promi
   if (keys === null) return { kind: "bad_key", error: "empty text or unsupported char" };
   const pane = await resolvePane(instanceId);
   if (pane.kind !== "ok") return pane;
-  const sent = unwrapHerdr(await runHerdr(["pane", "send-keys", pane.paneId, ...keys], SPAWN_TIMEOUT_MS));
-  if (!sent.ok) return { kind: "failed", error: `herdr pane send-keys failed: ${truncateError(sent.error)}` };
-  return { kind: "ok" };
+  try {
+    await sendPaneKeys(pane.paneId, keys);
+    return { kind: "ok" };
+  } catch (err) {
+    return { kind: "failed", error: `ввод в панель не удался: ${paneFailure(err)}` };
+  }
 }
 
 // ---- настройки чата (модель + уровень усилия) ----
+
+export interface AgentModelCost {
+  /** USD за 1M входных токенов. */
+  input: number;
+  /** USD за 1M выходных токенов. */
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
 
 export interface AgentModelOption {
   selector: string;
   name: string;
   thinking: string[];
   contextWindow: number;
+  /** Цена из каталога omp; null — провайдер её не сообщает. */
+  cost?: AgentModelCost | null;
+  /** "fixed" — цена известна, "free"/"unknown" — см. cost. */
+  pricingStatus?: string;
+}
+
+/** Провайдеры, чьи модели крутятся на этой машине: токены не тарифицируются. */
+function isLocalProvider(selector: string): boolean {
+  return /^(big-pc|helper|llama\.cpp)\//.test(selector);
+}
+
+/**
+ * Вес для сортировки «дешёвые сверху», USD за 1M токенов: вход + выход.
+ * Локальные модели бесплатны (0), у остальных без цены вес бесконечный —
+ * показывать неизвестную цену как «дешевле всех» было бы враньём.
+ */
+export function usagePriceWeight(option: Pick<AgentModelOption, "selector" | "cost" | "pricingStatus">): number {
+  if (isLocalProvider(option.selector) || option.pricingStatus === "free") return 0;
+  const cost = option.cost;
+  if (!cost || !Number.isFinite(cost.input) || !Number.isFinite(cost.output)) return Number.POSITIVE_INFINITY;
+  const total = cost.input + cost.output;
+  return total > 0 ? total : Number.POSITIVE_INFINITY;
+}
+
+/** Каталог пикеров: по цене использования (дешёвые сверху), затем по имени. */
+export function orderByUsagePrice<T extends Pick<AgentModelOption, "selector" | "name" | "cost" | "pricingStatus">>(options: readonly T[]): T[] {
+  return [...options].sort((a, b) => {
+    const wa = usagePriceWeight(a);
+    const wb = usagePriceWeight(b);
+    if (wa !== wb) return wa < wb ? -1 : 1;
+    return a.name.localeCompare(b.name) || a.selector.localeCompare(b.selector);
+  });
 }
 
 export interface AgentChatSettings {
@@ -213,7 +218,7 @@ export interface AgentChatSettings {
 export type AgentSettingsOutcome =
   | { kind: "ok"; settings: AgentChatSettings }
   | { kind: "not_found"; error: string }
-  | { kind: "not_herdr" }
+  | { kind: "not_managed"; error: string }
   | { kind: "bad_request"; error: string }
   | { kind: "failed"; error: string };
 
@@ -248,14 +253,29 @@ async function runOmpModels(): Promise<AgentModelOption[]> {
   if (res.code !== 0) throw new Error(`omp models ls failed: ${truncateError(res.stderr)}`);
   const parsed = JSON.parse(res.stdout) as { models?: Array<Record<string, unknown>> };
   const models = Array.isArray(parsed.models) ? parsed.models : [];
-  return models
+  const options = models
     .filter((m) => typeof m.selector === "string" && typeof m.name === "string")
-    .map((m) => ({
-      selector: m.selector as string,
-      name: m.name as string,
-      thinking: Array.isArray(m.thinking) ? m.thinking.filter((l): l is string => typeof l === "string") : [],
-      contextWindow: typeof m.contextWindow === "number" ? m.contextWindow : 0,
-    }));
+    .map((m) => {
+      const rawCost = m.cost !== null && typeof m.cost === "object" ? (m.cost as Record<string, unknown>) : null;
+      const num = (k: string): number | undefined => (typeof rawCost?.[k] === "number" ? (rawCost[k] as number) : undefined);
+      const input = num("input");
+      const output = num("output");
+      const cost: AgentModelCost | null =
+        input !== undefined && output !== undefined
+          ? { input, output, cacheRead: num("cacheRead"), cacheWrite: num("cacheWrite") }
+          : null;
+      return {
+        selector: m.selector as string,
+        name: m.name as string,
+        thinking: Array.isArray(m.thinking) ? m.thinking.filter((l): l is string => typeof l === "string") : [],
+        contextWindow: typeof m.contextWindow === "number" ? m.contextWindow : 0,
+        cost,
+        pricingStatus: typeof m.pricingStatus === "string" ? m.pricingStatus : undefined,
+      } satisfies AgentModelOption;
+    });
+  // Пикер показывает модели от дешёвых к дорогим: так выбор экономичной модели
+  // не требует помнить тарифы наизусть.
+  return orderByUsagePrice(options);
 }
 
 /** Каталог моделей omp для пикеров; при сбое отдаём прошлый снимок, если он есть. */
@@ -287,19 +307,14 @@ function parseThinkingGlyph(text: string): string | null {
   return match === null ? null : (THINKING_GLYPHS[match[1]] ?? null);
 }
 
-function settingsError(resolution: PaneResolution): AgentSettingsRead | null {
-  if (resolution.kind === "ok") return null;
-  if (resolution.kind === "not_found") return { kind: "not_found", error: resolution.error };
-  if (resolution.kind === "not_herdr") return { kind: "not_herdr" };
-  return { kind: "failed", error: resolution.error };
-}
-
 // Расширенное чтение панели: подтверждения («Model set to …») могут уехать
 // за видимый экран, берём последние N строк снимка.
 async function readPanelTail(paneId: string, lines: number): Promise<string | null> {
-  const read = unwrapHerdr(await runHerdr(["pane", "read", paneId, "--lines", String(lines)], SPAWN_TIMEOUT_MS));
-  if (!read.ok) return null;
-  return typeof read.result === "string" ? read.result : null;
+  try {
+    return await readPane(paneId, "text", lines);
+  } catch {
+    return null;
+  }
 }
 
 async function currentSettings(instanceId: string, catalog: AgentModelOption[], paneId?: string): Promise<AgentChatSettings> {
@@ -322,10 +337,9 @@ async function currentSettings(instanceId: string, catalog: AgentModelOption[], 
 
 export async function getAgentSettings(instanceId: string): Promise<AgentSettingsRead> {
   const pane = await resolvePane(instanceId);
-  const blocked = settingsError(pane);
-  if (blocked) return blocked;
+  if (pane.kind !== "ok") return pane;
   try {
-    return { kind: "ok", settings: await currentSettings(instanceId, await listModelOptions(), pane.kind === "ok" ? pane.paneId : undefined) };
+    return { kind: "ok", settings: await currentSettings(instanceId, await listModelOptions(), pane.paneId) };
   } catch (err) {
     return { kind: "failed", error: err instanceof Error ? err.message : String(err) };
   }
@@ -335,6 +349,14 @@ export async function getAgentSettings(instanceId: string): Promise<AgentSetting
 const SETTLE_MS = 350;
 /** Пауза на открытие модального пикера. */
 const MODAL_MS = 900;
+/** Опрос экрана панели: TUI перерисовывается не мгновенно (каталог моделей
+ *  большой, кадр приходит позже фиксированной паузы — из-за этого смена
+ *  модели падала с «пикер моделей не открылся» на ровном месте). */
+const PANE_POLL_MS = 120;
+/** Максимум ожидания открытия пикера/меню на экране панели. */
+const PICKER_WAIT_MS = 8000;
+/** Максимум ожидания результата поиска в пикере. */
+const RESULT_WAIT_MS = 5000;
 /** Позиции меню усилия (/effort) в порядке отрисовки. */
 const EFFORT_LEVELS = ["off", "auto", "low", "high", "max"];
 
@@ -348,8 +370,11 @@ type PaneKeys = { ok: true } | { ok: false; error: string };
 
 /** Партия клавиш в панель с паузой на перерисовку TUI. */
 async function pressKeys(paneId: string, keys: string[], settleMs = SETTLE_MS): Promise<PaneKeys> {
-  const sent = unwrapHerdr(await runHerdr(["pane", "send-keys", paneId, ...keys], SPAWN_TIMEOUT_MS));
-  if (!sent.ok) return { ok: false, error: `herdr pane send-keys failed: ${truncateError(sent.error)}` };
+  try {
+    await sendPaneKeys(paneId, keys);
+  } catch (err) {
+    return { ok: false, error: `ввод в панель не удался: ${paneFailure(err)}` };
+  }
   await delay(settleMs);
   return { ok: true };
 }
@@ -359,6 +384,12 @@ async function typeIntoPane(paneId: string, text: string): Promise<PaneKeys> {
   if (keys === null) return { ok: false, error: `в панель не набрать: ${JSON.stringify(text)}` };
   return pressKeys(paneId, keys);
 }
+
+/** Открытая палитра команд рисует состояние команд («Plan: off», «Collab: …»).
+ *  По этой строке отличаем «палитра открыта» от «slash ушёл в композер». */
+const PALETTE_MARKERS = /(?:^|\s)(?:Plan|Plan review|Vibe|Loop|Collab|Thinking):/m;
+/** Сколько ждать палитру после ввода «/» прежде чем считать ввод провалившимся. */
+const PALETTE_WAIT_MS = 3000;
 
 /** Маркеры открытого меню/пикера в панели: их закрывает esc. */
 const MENU_MARKERS = /assign roles|type to search|Thinking Level|↑\/↓ (?:models|providers)|⏎\/→ models/;
@@ -373,6 +404,21 @@ function composerText(tail: string): string {
   return "";
 }
 
+/** Набирает команду палитры («/model»), проверяя, что палитра открылась.
+ *  Если палитра не открылась, набранное стирается: иначе Enter отправил бы
+ *  «model» агенту как обычное сообщение (сжигание токенов и чужой ход). */
+async function openPaletteCommand(paneId: string, command: string): Promise<PaneKeys> {
+  const cleared = await clearComposer(paneId);
+  if (!cleared.ok) return cleared;
+  const typed = await typeIntoPane(paneId, command);
+  if (!typed.ok) return typed;
+  if ((await waitForPaneText(paneId, PALETTE_MARKERS, PALETTE_WAIT_MS)) === null) {
+    await clearComposer(paneId);
+    return { ok: false, error: "палитра команд не открылась — ввод отменён" };
+  }
+  return { ok: true };
+}
+
 /**
  * Привести панель к чистому композеру. Esc в чистом композере omp — это
  * rewind сессии, поэтому esc шлём только пока на экране открытое меню/пикер,
@@ -383,6 +429,7 @@ async function clearComposer(paneId: string): Promise<PaneKeys> {
     if (!MENU_MARKERS.test(await paneTail(paneId))) break;
     const esc = await pressKeys(paneId, ["esc"]);
     if (!esc.ok) return esc;
+    await waitForPaneText(paneId, (text) => !MENU_MARKERS.test(text), 1200);
   }
   if (MENU_MARKERS.test(await paneTail(paneId))) return { ok: false, error: "меню в панели не закрывается" };
   const typed = composerText(await paneTail(paneId));
@@ -392,6 +439,23 @@ async function clearComposer(paneId: string): Promise<PaneKeys> {
 
 async function paneTail(paneId: string): Promise<string> {
   return (await readPanelTail(paneId, 40)) ?? "";
+}
+
+/** Ждёт появления маркера на экране панели и отдаёт последний снимок.
+ *  null — маркер так и не появился за отведённое время. */
+async function waitForPaneText(
+  paneId: string,
+  match: RegExp | ((text: string) => boolean),
+  timeoutMs: number,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const tail = await paneTail(paneId);
+    const hit = typeof match === "function" ? match(tail) : match.test(tail);
+    if (hit) return tail;
+    if (Date.now() >= deadline) return null;
+    await delay(PANE_POLL_MS);
+  }
 }
 
 /** Текущий уровень усилия — подсветка «❯ level» в открытом меню /effort. */
@@ -407,28 +471,24 @@ function highlightedLevel(text: string): string | null {
  * а не молчаливо отправленное в чат сообщение (так ломался прежний вариант).
  */
 async function switchModelInPane(paneId: string, selector: string): Promise<PaneKeys> {
-  const cleared = await clearComposer(paneId);
-  if (!cleared.ok) return cleared;
-  const palette = await pressKeys(paneId, ["slash"], 600);
-  if (!palette.ok) return palette;
-  const command = await typeIntoPane(paneId, "model");
-  if (!command.ok) return command;
+  const opened = await openPaletteCommand(paneId, "/model");
+  if (!opened.ok) return opened;
   await pressKeys(paneId, ["enter"], MODAL_MS);
   // Свежеоткрытый пикер: «⏎/→ models · ↑/↓ providers · type to search».
-  if (!/type to search/.test(await paneTail(paneId))) return { ok: false, error: "пикер моделей не открылся" };
+  if ((await waitForPaneText(paneId, /type to search/, PICKER_WAIT_MS)) === null) return { ok: false, error: "пикер моделей не открылся" };
 
   const search = await typeIntoPane(paneId, selector);
   if (!search.ok) return search;
-  if (!/assign roles/.test(await paneTail(paneId))) return { ok: false, error: "поиск в пикере моделей не сработал" };
+  if ((await waitForPaneText(paneId, /assign roles/, RESULT_WAIT_MS)) === null) return { ok: false, error: "поиск в пикере моделей не сработал" };
 
   await pressKeys(paneId, ["enter"], MODAL_MS);
-  if (!/→\s*\[/.test(await paneTail(paneId))) return { ok: false, error: `модель ${selector} не нашлась в пикере` };
+  if ((await waitForPaneText(paneId, /→\s*\[/, RESULT_WAIT_MS)) === null) return { ok: false, error: `модель ${selector} не нашлась в пикере` };
   await pressKeys(paneId, ["enter"], MODAL_MS);
-  if (/inherit/.test(await paneTail(paneId))) await pressKeys(paneId, ["enter"], MODAL_MS);
+  if ((await waitForPaneText(paneId, /inherit/, 700)) !== null) await pressKeys(paneId, ["enter"], MODAL_MS);
   // Закрываем по состоянию экрана: первый esc чистит поиск, второй закрывает
   // пикер; лишний esc в чистом композере — rewind сессии.
   for (let i = 0; i < 3; i++) {
-    if (!/type to search/.test(await paneTail(paneId))) break;
+    if ((await waitForPaneText(paneId, /type to search/, 300)) === null) break;
     const esc = await pressKeys(paneId, ["esc"]);
     if (!esc.ok) return esc;
   }
@@ -438,14 +498,10 @@ async function switchModelInPane(paneId: string, selector: string): Promise<Pane
 
 /** Смена уровня усилия: «/effort» → стрелками до нужного уровня → enter. */
 async function switchThinkingInPane(paneId: string, level: string): Promise<PaneKeys> {
-  const cleared = await clearComposer(paneId);
-  if (!cleared.ok) return cleared;
-  const palette = await pressKeys(paneId, ["slash"], 600);
-  if (!palette.ok) return palette;
-  const command = await typeIntoPane(paneId, "effort");
-  if (!command.ok) return command;
+  const opened = await openPaletteCommand(paneId, "/effort");
+  if (!opened.ok) return opened;
   await pressKeys(paneId, ["enter"], MODAL_MS);
-  if (!(await paneTail(paneId)).includes("Thinking Level")) return { ok: false, error: "меню усилия не открылось" };
+  if ((await waitForPaneText(paneId, /Thinking Level/, PICKER_WAIT_MS)) === null) return { ok: false, error: "меню усилия не открылось" };
 
   let tail = await paneTail(paneId);
   for (let step = 0; step <= EFFORT_LEVELS.length; step++) {
@@ -454,13 +510,14 @@ async function switchThinkingInPane(paneId: string, level: string): Promise<Pane
     if (current === level) break;
     const moved = await pressKeys(paneId, [EFFORT_LEVELS.indexOf(level) < EFFORT_LEVELS.indexOf(current) ? "up" : "down"]);
     if (!moved.ok) return moved;
-    tail = await paneTail(paneId);
+    // Подсветка переезжает следующим кадром — ждём смены, а не читаем сразу.
+    tail = (await waitForPaneText(paneId, (text) => highlightedLevel(text) !== current, 2000)) ?? (await paneTail(paneId));
   }
   if (highlightedLevel(tail) !== level) return { ok: false, error: `уровень ${level} не выбрался` };
   const applied = await pressKeys(paneId, ["enter"], 600);
   if (!applied.ok) return applied;
   for (let i = 0; i < 3; i++) {
-    if (!(await paneTail(paneId)).includes("Thinking Level")) break;
+    if ((await waitForPaneText(paneId, /Thinking Level/, 400)) === null) break;
     const esc = await pressKeys(paneId, ["esc"]);
     if (!esc.ok) return esc;
   }
@@ -473,9 +530,7 @@ export async function setAgentSettings(
   change: { model?: unknown; thinking?: unknown },
 ): Promise<AgentSettingsOutcome> {
   const pane = await resolvePane(instanceId);
-  const blocked = settingsError(pane);
-  if (blocked) return blocked;
-  if (pane.kind !== "ok") return { kind: "failed", error: "pane" };
+  if (pane.kind !== "ok") return pane;
 
   let catalog: AgentModelOption[];
   try {
@@ -532,6 +587,15 @@ export async function setAgentSettings(
     settings = await currentSettings(instanceId, catalog, pane.paneId);
     if (settings.thinking !== thinkingLevel) {
       return { kind: "failed", error: `уровень усилия не подтвердился (сейчас ${settings.thinking ?? "неизвестен"})` };
+    }
+  }
+  // Persist the registry-confirmed model before acknowledging the settings API:
+  // a restart before the next poll must not restore the old launch model.
+  if (settings.model !== null) {
+    try {
+      await bindPane(pane.paneId, { model: `${settings.model.provider}/${settings.model.id}` });
+    } catch (error) {
+      return { kind: "failed", error: `Модель применена, но не сохранена для восстановления: ${error instanceof Error ? error.message : String(error)}` };
     }
   }
   return { kind: "ok", settings };
@@ -625,41 +689,23 @@ export async function projectGit(dir: string, mode: "status" | "diff"): Promise<
   return { kind: "ok", text };
 }
 
-/** herdr принимает имена [a-z0-9_-]{1,32}; пользовательские имена — любые.
- *  Для herdr делаем читаемый слаг (транслит), для отображения — оригинал. */
-const RU_TRANSLIT: Record<string, string> = {
-	а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
-	й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t",
-	у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "",
-	э: "e", ю: "yu", я: "ya",
-};
-
-function herdrSlug(name: string): string {
-	const lowered = name.toLowerCase().replace(/[а-яё]/g, (ch) => RU_TRANSLIT[ch] ?? "-");
-	const slug = lowered
-		.replace(/[^a-z0-9_-]+/g, "-")
-		.replace(/-{2,}/g, "-")
-		.replace(/^[-_]+/, "")
-		.slice(0, 32)
-		.replace(/[-_]+$/, "");
-	if (slug.length === 0 || !/^[a-z]/.test(slug)) return `agent-${slug.replace(/^[^a-z0-9]+/, "") || "unnamed"}`.slice(0, 32);
-	return slug;
-}
-
 export type AgentRename =
   | { kind: "ok"; paneId: string; slug: string }
   | { kind: "not_found"; error: string }
-  | { kind: "not_herdr" }
+  | { kind: "not_managed"; error: string }
   | { kind: "failed"; error: string };
 
-/** Переименовать herdr-агента (имя видно в списках приложения). */
+/** Переименовать агента: имя панели видно в списках приложения,
+ * поэтому слаг = пользовательское имя без транслита. */
 export async function renameAgent(instanceId: string, name: string): Promise<AgentRename> {
   const pane = await resolvePane(instanceId);
   if (pane.kind !== "ok") return pane;
-  const slug = herdrSlug(name);
-  const out = unwrapHerdr(await runHerdr(["agent", "rename", pane.paneId, slug], SPAWN_TIMEOUT_MS));
-  if (!out.ok) return { kind: "failed", error: out.error };
-  return { kind: "ok", paneId: pane.paneId, slug };
+  try {
+    await renamePane(pane.paneId, name);
+  } catch (err) {
+    return { kind: "failed", error: paneFailure(err) };
+  }
+  return { kind: "ok", paneId: pane.paneId, slug: name };
 }
 
 export type ProjectFileRead =

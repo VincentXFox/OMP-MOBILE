@@ -1,0 +1,26 @@
+[Unit]
+Description=Reverse tunnel: de5:8088 -> OMP Pocket gateway (self-healing)
+After=network-online.target
+Wants=network-online.target
+# Никакого start-limit: при обрыве сети (переключение роутера/Wi-Fi, пропадание
+# интернета) туннель обязан восстановиться сам, когда сеть вернётся. С лимитом
+# 5/120s юнит уходил в start-limit-hit и умирал окончательно — приложение
+# теряло связь до ручного reset-failed.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# ConnectTimeout=8: без него ssh висит до двух минут на недоступном хосте.
+# ServerAliveInterval=5/CountMax=2: молчаливый обрыв TCP (смена сети, чихнувший
+# NAT) детектится за ~10 с и Restart=always поднимает туннель сразу.
+ExecStart=/usr/bin/ssh -N -o ProxyCommand="/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -W 127.0.0.1:2222 srv78" -i /home/vincentfox/.ssh/id_ed25519_qwins -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o TCPKeepAlive=yes -o ExitOnForwardFailure=yes -o BatchMode=yes -R 127.0.0.1:8088:127.0.0.1:8088 -R 127.0.0.1:8788:127.0.0.1:8787 root@127.0.0.1
+# После ребута ПК sshd на de5 держит старые listener-порты — новые форвардинги
+# падают ("remote port forwarding failed"), поэтому перед подключением
+# сбрасываем их; таймаут 8с, чтобы проба не висела вечно.
+ExecStartPre=-/usr/bin/timeout 8 /usr/bin/ssh -o ProxyCommand="/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -W 127.0.0.1:2222 srv78" -i /home/vincentfox/.ssh/id_ed25519_qwins -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes root@127.0.0.1 fuser -k 8088/tcp
+ExecStartPre=-/usr/bin/timeout 8 /usr/bin/ssh -o ProxyCommand="/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -W 127.0.0.1:2222 srv78" -i /home/vincentfox/.ssh/id_ed25519_qwins -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes root@127.0.0.1 fuser -k 8788/tcp
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

@@ -1,4 +1,4 @@
-/* Terminal — iOS console. `ts-*` prefix; design tokens only.
+/* Terminal workspace. `ts-*` prefix; design tokens only.
  * Press/focus/tap-target primitives come from base.css (button rules). */
 
 .ts-root {
@@ -11,41 +11,55 @@
 	color: var(--fg);
 }
 
-/* ── Glass header, large title ────────────────────────────────────── */
+/* ── Compact pane header ─────────────────────────────────────────── */
 
 .ts-header {
 	flex: none;
-	padding: env(safe-area-inset-top, 0px) 8px 10px;
-	background: var(--glass);
-	backdrop-filter: var(--blur-surface);
-	-webkit-backdrop-filter: var(--blur-surface);
-	box-shadow: inset 0 -0.5px 0 var(--hairline);
+	display: grid;
+	grid-template-columns: var(--tap) minmax(0, 1fr) var(--tap);
+	align-items: center;
+	gap: 2px 8px;
+	padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
+	background: var(--bg);
+	border-bottom: 1px solid var(--border);
 }
 
 .ts-nav {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	min-height: var(--tap);
+	display: contents;
+}
+
+.ts-nav > .ts-icon-btn:first-child {
+	grid-column: 1;
+	grid-row: 1 / span 2;
+}
+
+.ts-nav > .ts-icon-btn:last-child {
+	grid-column: 3;
+	grid-row: 1 / span 2;
 }
 
 .ts-title {
+	grid-column: 2;
+	grid-row: 1;
+	min-width: 0;
 	overflow: hidden;
-	padding: 2px 8px 0;
-	font-size: var(--text-large-title);
-	font-weight: 700;
+	font-size: 1rem;
+	font-weight: var(--weight-semibold);
 	letter-spacing: var(--tracking-tight);
-	line-height: 1.15;
+	line-height: 1.3;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
 .ts-label {
+	grid-column: 2;
+	grid-row: 2;
+	min-width: 0;
 	overflow: hidden;
-	padding: 0 8px;
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
-	font-size: var(--text-subhead);
+	font-size: var(--text-footnote);
+	line-height: 1.4;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -57,7 +71,7 @@
 	flex: none;
 	width: var(--tap);
 	height: var(--tap);
-	border-radius: var(--radius-pill);
+	border-radius: 8px;
 	color: var(--fg-muted);
 }
 
@@ -76,13 +90,14 @@
 	overflow-wrap: anywhere;
 }
 
-/* ── Elevated output surface ──────────────────────────────────────── */
+/* ── Output pane ─────────────────────────────────────────────────── */
 
 .ts-screen-wrap {
 	flex: 1;
 	display: flex;
 	min-height: 0;
-	margin: 12px 16px;
+	min-width: 0;
+	margin: 8px 12px;
 	position: relative;
 }
 
@@ -93,8 +108,8 @@
 	right: 0;
 	bottom: 0;
 	width: 26px;
-	border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
-	background: linear-gradient(to right, transparent, var(--bg-raised));
+	border-radius: 0 8px 8px 0;
+	background: linear-gradient(to right, transparent, var(--terminal-bg));
 	opacity: 0;
 	transition: opacity var(--speed-fast) var(--ease-out);
 	pointer-events: none;
@@ -109,13 +124,13 @@
 	min-width: 0;
 	overflow: auto;
 	padding: 12px 14px;
-	border-radius: var(--radius-lg);
-	background: var(--bg-raised);
-	box-shadow:
-		inset 0 0 0 0.5px var(--hairline),
-		var(--shadow-card);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--terminal-bg);
+	color: var(--terminal-fg);
+	color-scheme: dark;
 	font-family: var(--font-mono);
-	font-size: 11.5px;
+	font-size: 14px;
 	font-variant-ligatures: none;
 	line-height: 1.45;
 }
@@ -137,8 +152,17 @@
 	overflow-wrap: normal;
 }
 
+.ts-line--ansi {
+	position: static;
+	white-space: pre;
+	width: max-content;
+	min-width: 100%;
+	overflow-wrap: normal;
+}
+
 .ts-line--cut {
-	color: var(--fg-muted);
+	color: var(--terminal-fg);
+	opacity: 0.7;
 	font-size: var(--text-caption);
 	padding: 2px 0 8px;
 }
@@ -148,16 +172,14 @@
 .ts-keys-zone {
 	flex: none;
 	padding-bottom: env(safe-area-inset-bottom, 0px);
-	background: var(--glass);
-	backdrop-filter: var(--blur-strong);
-	-webkit-backdrop-filter: var(--blur-strong);
-	box-shadow: inset 0 0.5px 0 var(--hairline);
+	background: var(--bg);
+	border-top: 1px solid var(--border);
 }
 
 .ts-key-row {
 	display: flex;
 	gap: 8px;
-	padding: 10px 12px 4px;
+	padding: 6px 12px 0;
 	overflow-x: auto;
 	/* намёк, что колода скроллится: правый край растворяется */
 	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
@@ -169,7 +191,8 @@
 	height: var(--tap);
 	min-width: var(--tap);
 	padding: 0 14px;
-	border-radius: var(--radius);
+	border: 1px solid var(--border);
+	border-radius: 8px;
 	background: var(--surface-strong);
 	color: var(--fg);
 	font-family: var(--font-mono);
@@ -184,7 +207,7 @@
 .ts-key--interrupt {
 	display: flex;
 	align-items: center;
-	width: 100%;
+	width: auto;
 	justify-content: center;
 	font-family: var(--font-ui);
 	font-weight: 600;
@@ -214,7 +237,7 @@
 	height: var(--tap);
 	padding: 0 14px;
 	border: 1px solid var(--border);
-	border-radius: var(--radius);
+	border-radius: 8px;
 	background: var(--bg-inset);
 	color: var(--fg);
 	font-family: var(--font-mono);
@@ -241,9 +264,76 @@
 	flex: none;
 	width: var(--tap);
 	height: var(--tap);
-	border-radius: var(--radius-pill);
+	border-radius: 8px;
 	background: var(--accent);
 	color: var(--accent-fg);
+}
+
+@media (min-width: 1024px) {
+	.ss-root .ts-root {
+		position: absolute;
+		height: 100%;
+	}
+
+	.ts-header {
+		padding: 8px 24px;
+	}
+
+	.ts-screen-wrap {
+		margin: 12px 24px;
+	}
+
+	.ts-screen {
+		font-size: 15px;
+	}
+
+	.ts-keys-zone {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 8px;
+		padding: 12px 24px calc(12px + env(safe-area-inset-bottom, 0px));
+	}
+
+	.ts-key-row,
+	.ts-input-row {
+		min-width: 0;
+		padding: 0;
+	}
+
+	.ts-key-row {
+		-webkit-mask-image: none;
+		mask-image: none;
+	}
+
+	.ts-key-row:first-child {
+		grid-column: 2;
+		grid-row: 1;
+	}
+
+	.ts-key-row:nth-child(2) {
+		grid-column: 1;
+		grid-row: 1;
+	}
+
+	.ts-input-row {
+		grid-column: 1 / -1;
+		grid-row: 2;
+	}
+}
+
+@media (min-width: 1400px) {
+	.ts-keys-zone {
+		grid-template-columns: auto minmax(0, 1fr) auto;
+	}
+
+	.ts-key-row:first-child {
+		grid-column: 3;
+	}
+
+	.ts-input-row {
+		grid-column: 2;
+		grid-row: 1;
+	}
 }
 
 @media (any-pointer: coarse) {

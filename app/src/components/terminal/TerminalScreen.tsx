@@ -2,6 +2,7 @@ import { ArrowLeft, CornerDownLeft, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getTerminal, sendTerminalKeys, sendTerminalText } from "../../lib/gateway";
+import { parseTerminalAnsi, type TerminalAnsiSpan } from "../../lib/terminal-ansi";
 import "./terminal.css";
 
 const POLL_MS = 2500;
@@ -21,14 +22,21 @@ const NAV_KEYS = [
 	{ key: "space", label: "Space" },
 ] as const;
 
+export function TerminalAnsiLine({ spans }: { spans: TerminalAnsiSpan[] }): ReactNode {
+	return <>{spans.map((span, i) => <span key={i} style={span.style}>{span.text}</span>)}</>;
+}
+
 export function TerminalScreen(props: { instanceId: string; label: string; onBack: () => void }): ReactNode {
 	const { instanceId, label, onBack } = props;
-	const [text, setText] = useState<string | null>(null);
+	const [snapshot, setSnapshot] = useState<{ text: string; format?: "ansi" } | null>(null);
+	const text = snapshot?.text ?? null;
+	const ansi = snapshot?.format === "ansi";
 	const { lines, cut } = useMemo(() => {
+		if (ansi) return parseTerminalAnsi(text ?? "");
 		const all = (text ?? "").split("\n");
 		const hidden = Math.max(0, all.length - MAX_LINES);
-		return { lines: hidden > 0 ? all.slice(-MAX_LINES) : all, cut: hidden };
-	}, [text]);
+		return { lines: (hidden > 0 ? all.slice(-MAX_LINES) : all).map(text => [{ text, style: {} }]), cut: hidden };
+	}, [text, ansi]);
 	const [error, setError] = useState<string | null>(null);
 	const [draft, setDraft] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -37,11 +45,11 @@ export function TerminalScreen(props: { instanceId: string; label: string; onBac
 
 	const refresh = useCallback(async () => {
 		try {
-			const result = await getTerminal(instanceId);
+			const result = await getTerminal(instanceId, "ansi");
 			if (result === null) setError("Хост недоступен");
 			else if ("error" in result) setError("Терминал недоступен");
 			else {
-				setText(result.text);
+				setSnapshot(result);
 				setError(null);
 			}
 		} catch (err) {
@@ -62,7 +70,7 @@ export function TerminalScreen(props: { instanceId: string; label: string; onBac
 		const el = preRef.current;
 		if (!el || !tailLock.current) return;
 		el.scrollTop = el.scrollHeight;
-	}, [text]);
+	}, [text, ansi]);
 
 	const [hScroll, setHScroll] = useState(false);
 	const syncHScroll = useCallback((el: HTMLElement) => {
@@ -80,7 +88,7 @@ export function TerminalScreen(props: { instanceId: string; label: string; onBac
 	useLayoutEffect(() => {
 		const el = preRef.current;
 		if (el) syncHScroll(el);
-	}, [text, syncHScroll]);
+	}, [text, ansi, syncHScroll]);
 
 	const tapKey = useCallback(
 		async (key: string) => {
@@ -101,10 +109,12 @@ export function TerminalScreen(props: { instanceId: string; label: string; onBac
 		const value = draft;
 		if (value.length === 0 || busy) return;
 		setBusy(true);
-		setDraft("");
 		try {
 			await sendTerminalText(instanceId, value);
 			await sendTerminalKeys(instanceId, ["enter"]);
+			// Строка стирается только после успешной отправки: при обрыве
+			// набранное остаётся в поле и не набирается заново.
+			setDraft("");
 			await refresh();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -135,11 +145,14 @@ export function TerminalScreen(props: { instanceId: string; label: string; onBac
 					{cut > 0 && (
 						<div className="ts-line ts-line--cut">… выше скрыто {cut.toLocaleString("ru-RU")} строк</div>
 					)}
-					{lines.map((ln, i) => (
-						<div key={i} className={`ts-line${BOX_RE.test(ln) ? " ts-line--grid" : ""}`}>
-							{ln}
-						</div>
-					))}
+					{lines.map((spans, i) => {
+						const plain = spans.map(span => span.text).join("");
+						return (
+							<div key={i} className={`ts-line${ansi ? " ts-line--ansi" : BOX_RE.test(plain) ? " ts-line--grid" : ""}`}>
+								{ansi ? <TerminalAnsiLine spans={spans} /> : plain}
+							</div>
+						);
+					})}
 				</div>
 			</div>
 

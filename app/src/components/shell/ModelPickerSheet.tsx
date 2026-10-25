@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Search, X } from "lucide-react";
 import type { ModelOption } from "../../lib/gateway";
+import { modelPriceLabel } from "../../lib/model-price";
 import "./model-picker.css";
 
 export interface ModelPickerSheetProps {
@@ -15,7 +16,7 @@ export interface ModelPickerSheetProps {
 	/** Идёт применение — выбор заблокирован, но лист видно. */
 	busy?: boolean;
 	error?: string | null;
-	/** Смена модели невозможна (агент занят / не herdr) — причина на экране. */
+	/** Смена модели невозможна (агент занят / вне панели шлюза) — причина на экране. */
 	note?: string | null;
 	/** Дополнительный блок над списком (например, чипы уровня усилия). */
 	header?: ReactNode;
@@ -45,6 +46,11 @@ export function ModelPickerSheet(props: ModelPickerSheetProps): ReactNode {
 	const sheetRef = useRef<HTMLDivElement | null>(null);
 	const searchRef = useRef<HTMLInputElement | null>(null);
 	const restoreRef = useRef<HTMLElement | null>(null);
+	// onClose приходит инлайновой стрелкой и меняет идентичность на каждый рендер
+	// родителя (а он перерисовывается на каждом кадре снапшота): эффект открытия
+	// не должен от этого перезапускаться, иначе поиск стирается и фокус уезжает.
+	const closeRef = useRef(onClose);
+	closeRef.current = onClose;
 
 	useEffect(() => {
 		if (!open) return;
@@ -52,29 +58,25 @@ export function ModelPickerSheet(props: ModelPickerSheetProps): ReactNode {
 		restoreRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		sheetRef.current?.focus();
 		const onKey = (e: KeyboardEvent): void => {
-			if (e.key === "Escape") onClose();
+			if (e.key === "Escape") closeRef.current();
 		};
 		window.addEventListener("keydown", onKey);
 		return () => {
 			window.removeEventListener("keydown", onKey);
 			restoreRef.current?.focus?.();
 		};
-	}, [open, onClose]);
+	}, [open]);
 
+	// Порядок задаёт шлюз: от дешёвых к дорогим (/api/models сортирует по цене
+	// использования). Здесь только фильтр — сортировка по провайдеру его ломала.
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLowerCase();
-		const list = needle.length === 0 ? [...models] : models.filter(m => m.selector.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle));
-		list.sort((a, b) => {
-			const pa = providerOf(a.selector);
-			const pb = providerOf(b.selector);
-			return pa === pb ? a.name.localeCompare(b.name) : pa.localeCompare(pb);
-		});
-		return list;
+		if (needle.length === 0) return [...models];
+		return models.filter(m => m.selector.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle));
 	}, [models, query]);
 
 	if (!open) return null;
 
-	let lastProvider: string | null = null;
 	return (
 		<>
 			<div className="pk-sheet-backdrop" onClick={onClose} />
@@ -126,13 +128,17 @@ export function ModelPickerSheet(props: ModelPickerSheetProps): ReactNode {
 					)}
 					{filtered.map(model => {
 						const provider = providerOf(model.selector);
-						const header = provider === lastProvider ? null : <div className="mp-provider">{provider}</div>;
-						lastProvider = provider;
 						const on = model.selector === current;
-						const meta = [contextLabel(model.contextWindow), model.thinking.length > 0 ? `усилие: ${model.thinking.join("/")}` : ""].filter(Boolean).join(" · ");
+						const meta = [
+							provider,
+							modelPriceLabel(model.selector, model.cost),
+							contextLabel(model.contextWindow),
+							model.thinking.length > 0 ? `усилие: ${model.thinking.join("/")}` : "",
+						]
+							.filter(Boolean)
+							.join(" · ");
 						return (
 							<div key={model.selector}>
-								{header}
 								<button
 									type="button"
 									role="option"

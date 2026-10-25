@@ -36,10 +36,27 @@ function boardFromPhases(raw: readonly unknown[]): TodoBoard {
 		if (phaseRaw === null || typeof phaseRaw !== "object") continue;
 		const phaseName = "name" in phaseRaw && typeof phaseRaw.name === "string" ? phaseRaw.name : "";
 		const tasks: TodoTask[] = [];
-		if ("tasks" in phaseRaw && Array.isArray(phaseRaw.tasks)) {
-			for (const taskRaw of phaseRaw.tasks) {
+		// Форма борда менялась между версиями инструмента: `tasks` и `items`.
+		// Читаем обе, иначе борд в чате молча пустеет, пока счётчик на карточке
+		// (шлюз, gateway/todo-progress.ts) продолжает считать.
+		const tasksField = (phaseRaw as Record<string, unknown>).tasks;
+		const itemsField = (phaseRaw as Record<string, unknown>).items;
+		// Пустой `tasks` не должен прятать непустой `items`: версии инструмента
+		// кладут задачи то в одно поле, то в другое.
+		const rawTasks =
+			Array.isArray(tasksField) && tasksField.length > 0
+				? (tasksField as unknown[])
+				: Array.isArray(itemsField) && itemsField.length > 0
+					? (itemsField as unknown[])
+					: Array.isArray(tasksField)
+						? (tasksField as unknown[])
+						: Array.isArray(itemsField)
+							? (itemsField as unknown[])
+							: null;
+		if (rawTasks !== null) {
+			for (const taskRaw of rawTasks) {
 				if (taskRaw === null || typeof taskRaw !== "object") continue;
-				const content = "content" in taskRaw && typeof taskRaw.content === "string" ? taskRaw.content : "";
+				const content = "content" in taskRaw && typeof taskRaw.content === "string" ? taskRaw.content : "text" in taskRaw && typeof taskRaw.text === "string" ? taskRaw.text : "";
 				if (content.length === 0) continue;
 				const status = taskStatusOf("status" in taskRaw ? taskRaw.status : undefined);
 				tasks.push({ content, status });

@@ -1,0 +1,11 @@
+[Unit]
+Description=OMP Pocket tunnel watchdog every 30s
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=omp-pocket-tunnel-watchdog.service
+
+[Install]
+WantedBy=timers.target

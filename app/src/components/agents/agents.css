@@ -43,6 +43,61 @@
 	flex-shrink: 0;
 }
 
+/* Туду-прогресс в карточке: полоска вместо простыни пунктов — с главной
+   нужно «сколько осталось», а список открывается в самом чате. */
+.ag-todo {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 7px;
+	min-width: 0;
+	font-size: 0.75rem;
+	color: var(--muted);
+}
+
+.ag-todo-label {
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+
+.ag-todo-count {
+	color: var(--fg);
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+}
+
+.ag-todo-bar {
+	flex: 0 1 220px;
+	min-width: 40px;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--border);
+	overflow: hidden;
+}
+
+.ag-todo-fill {
+	display: block;
+	height: 100%;
+	border-radius: 2px;
+	background: var(--accent);
+	transition: width 200ms ease-out;
+}
+
+.ag-todo--done {
+	gap: 4px;
+	color: var(--muted);
+	opacity: 0.75;
+}
+
+.ag-todo-phase {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--accent-text, var(--muted));
+}
+
 /* ⏱ живое время работы — только для «Работает»; не кнопка */
 .ag-elapsed {
 	display: inline-flex;
@@ -52,7 +107,7 @@
 	border: 1px solid var(--line, color-mix(in srgb, var(--muted) 35%, transparent));
 	border-radius: 999px;
 	font-size: 0.6875rem;
-	color: var(--accent);
+	color: var(--accent-text);
 	flex-shrink: 0;
 }
 
@@ -190,7 +245,7 @@
 	flex-shrink: 0;
 	font-size: 0.8125rem;
 	font-weight: var(--weight-semibold, 600);
-	color: var(--accent);
+	color: var(--accent-text);
 	background: var(--bg-inset);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-lg);
@@ -248,7 +303,7 @@
 	padding: 6px 8px;
 	min-height: 32px;
 	font-size: 0.8125rem;
-	color: var(--accent);
+	color: var(--accent-text);
 	background: none;
 	border: none;
 	border-radius: var(--radius-sm, 8px);
@@ -301,7 +356,7 @@
 	color: var(--fg-tertiary, var(--muted));
 }
 .ag-picker-icon--dir {
-	color: var(--accent);
+	color: var(--accent-text);
 }
 .ag-picker-icon--up {
 	color: var(--fg-tertiary, var(--muted));
@@ -320,7 +375,7 @@
 	border: 1px solid var(--border);
 	border-radius: 999px;
 	font-size: 0.6875rem;
-	color: var(--accent);
+	color: var(--accent-text);
 }
 .ag-picker-state {
 	display: flex;
@@ -585,6 +640,17 @@
 	opacity: 0.7;
 }
 
+.ag-card-main .ag-role {
+	display: block;
+	align-self: flex-start;
+	min-width: 0;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--accent-text);
+}
+
 .ag-pin {
 	flex: 0 0 auto;
 	width: var(--tap, 44px);
@@ -598,7 +664,7 @@
 }
 
 .ag-pin--on {
-	color: var(--accent);
+	color: var(--accent-text);
 }
 
 .ag-pin:active {
@@ -616,7 +682,7 @@
 }
 
 .ag-badge--live {
-	color: var(--accent);
+	color: var(--accent-text);
 	background: var(--accent-muted);
 	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
@@ -661,7 +727,7 @@
 	padding: 1px 8px;
 	font-size: 0.75rem;
 	font-weight: var(--weight-semibold, 600);
-	color: var(--accent);
+	color: var(--accent-text);
 	background: var(--accent-muted);
 	border-radius: var(--radius-pill);
 }
@@ -692,7 +758,7 @@
 }
 
 .ag-hit-role--user {
-	color: var(--accent);
+	color: var(--accent-text);
 	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
@@ -711,4 +777,19 @@
 	color: inherit;
 	background: color-mix(in srgb, var(--accent) 32%, transparent);
 	border-radius: 3px;
+}
+
+/* ── Штат: роль и поле «за что отвечает» ──────────────────────────── */
+
+.ag-hint {
+	margin-top: 6px;
+	font-size: 0.75rem;
+	line-height: 1.45;
+	color: var(--fg-tertiary, var(--muted));
+}
+
+.ag-crew-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
 }

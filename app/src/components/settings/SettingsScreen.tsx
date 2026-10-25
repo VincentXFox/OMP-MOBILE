@@ -1,15 +1,17 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, ChevronRight, Copy } from "lucide-react";
 import {
-	fetchHosts,
 	fetchUpdateStatus,
+	getActiveBase,
 	getGatewayBase,
+	getGatewayBases,
 	getToken,
-	setGatewayBase,
+	pingBase,
+	setActiveBase,
+	setGatewayBases,
 	setToken,
-	GatewayError,
 } from "../../lib/gateway";
-import { APP_VERSION, pluralRu } from "../../lib/format";
+import { APP_VERSION } from "../../lib/format";
 import { pushState, subscribePush, unsubscribePush, type PushState } from "../../lib/push";
 import { useThemePreference } from "../../lib/theme";
 import {
@@ -36,35 +38,36 @@ const THEME_LABEL: Record<"system" | "dark" | "light", string> = {
 };
 
 function ConnectionSection(props: { onToast: (text: string) => void }): ReactNode {
-	const [base, setBase] = useState<string>(() => getGatewayBase() || window.location.origin);
+	const [draft, setDraft] = useState<string>(() => getGatewayBases().join("\n"));
 	const [token, setTok] = useState(getToken());
 	const [check, setCheck] = useState<{ ok: boolean; message: string } | null>(null);
 	const [checking, setChecking] = useState(false);
+	const [probes, setProbes] = useState<{ base: string; alive: boolean }[] | null>(null);
+	const active = getActiveBase();
 
 	const save = async (): Promise<void> => {
-		const nextBase = base.trim();
-		const nextToken = token.trim();
-		// рабочие значения — чтобы откатить при неудачной проверке
-		const prevBase = getGatewayBase();
-		const prevToken = getToken();
+		const bases = draft
+			.split("\n")
+			.map(line => line.trim())
+			.filter(Boolean);
+		// пустой список = приложение ходит на собственный origin
+		const targets = bases.length > 0 ? bases : [""];
 		setChecking(true);
 		setCheck(null);
-		// проверяем черновик: подменяем, тестируем, при ошибке возвращаем
-		setGatewayBase(nextBase);
-		setToken(nextToken);
+		setProbes(null);
 		try {
-			const hosts = await fetchHosts();
-			setCheck({ ok: true, message: `ОК: ${hosts.length} ${pluralRu(hosts.length, "агент", "агента", "агентов")}` });
+			const results = await Promise.all(targets.map(async base => ({ base, alive: await pingBase(base) })));
+			setProbes(results);
+			const winner = results.find(r => r.alive);
+			if (!winner) {
+				setCheck({ ok: false, message: "Ни один адрес не отвечает — сохранены прежние значения" });
+				return;
+			}
+			setGatewayBases(bases);
+			setActiveBase(winner.base);
+			setToken(token.trim());
+			setCheck({ ok: true, message: `Активный адрес: ${winner.base || window.location.origin}` });
 			props.onToast("Сохранено");
-		} catch (err) {
-			setGatewayBase(prevBase);
-			setToken(prevToken);
-			const status = err instanceof GatewayError ? err.status : 0;
-			const mixed =
-				location.protocol === "https:" && nextBase.startsWith("http://")
-					? "Браузер блокирует http-адрес внутри https-страницы (mixed content) — используй https-адрес или оставь поле пустым (same-origin). "
-					: "";
-			setCheck({ ok: false, message: `${mixed}Ошибка: ${err instanceof Error ? err.message : String(err)} — сохранены прежние значения` });
 		} finally {
 			setChecking(false);
 		}
@@ -75,15 +78,19 @@ function ConnectionSection(props: { onToast: (text: string) => void }): ReactNod
 			<h2 className="pk-section-title">Подключение</h2>
 			<div className="pk-section-body">
 				<label className="pk-field">
-					<span>Адрес шлюза</span>
-					<input
-						className="pk-input"
-						type="url"
+					<span>Адреса шлюза</span>
+					<textarea
+						className="pk-input set-bases"
+						rows={3}
 						placeholder="пусто = как этот сайт"
-						value={base}
-						onInput={e => setBase(e.currentTarget.value)}
+						value={draft}
+						onInput={e => setDraft(e.currentTarget.value)}
 					/>
 				</label>
+				<div className="pk-fieldrow">
+					<span>Текущий рабочий</span>
+					<span className="set-row-end pk-muted set-base-active">{active || window.location.origin}</span>
+				</div>
 				<label className="pk-field">
 					<span>Токен</span>
 					<input
@@ -97,7 +104,21 @@ function ConnectionSection(props: { onToast: (text: string) => void }): ReactNod
 				<button className="pk-btn" disabled={checking} onClick={() => void save()}>
 					{checking ? "Проверяю…" : "Проверить"}
 				</button>
+				{probes && (
+					<ul className="set-probe-list">
+						{probes.map(p => (
+							<li key={p.base || "origin"} className={p.alive ? "set-probe set-probe--ok" : "set-probe set-probe--bad"}>
+								<span className="set-probe-base">{p.base || window.location.origin}</span>
+								<span className="set-probe-state">{p.alive ? "жив" : "нет"}</span>
+							</li>
+						))}
+					</ul>
+				)}
 				{check && <div className={check.ok ? "pk-check pk-check--ok" : "pk-check pk-check--err"}>{check.message}</div>}
+				<p className="set-hint">
+					Пусто = приложение использует собственный адрес. Примеры: LAN <code>https://192.168.1.18:8443</code>, публичный{" "}
+					<code>https://pocket.31-77-109-219.sslip.io</code>.
+				</p>
 			</div>
 		</section>
 	);
@@ -114,7 +135,12 @@ function PushSection(): ReactNode {
 
 	const toggle = async (): Promise<void> => {
 		setTestResult(null);
-		setState(await (state === "subscribed" ? unsubscribePush() : subscribePush()));
+		try {
+			setState(await (state === "subscribed" ? unsubscribePush() : subscribePush()));
+		} catch (err) {
+			// Без рабочего шлюза/разрешения браузера тумблер молча не двигался.
+			setTestResult(`Не удалось переключить уведомления: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	};
 
 	const sendTest = async (): Promise<void> => {

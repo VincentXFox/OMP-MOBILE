@@ -358,10 +358,12 @@
 }
 
 .ss-phase-banner {
-	position: absolute;
-	top: 10px;
-	left: 50%;
-	transform: translateX(-50%);
+	position: static;
+	transform: none;
+	order: -1;
+	flex: none;
+	align-self: center;
+	margin: 8px 12px;
 	display: inline-flex;
 	align-items: center;
 	gap: 8px;
@@ -371,7 +373,6 @@
 	border: 1px solid var(--border-strong);
 	color: var(--warn);
 	font-size: 0.8125rem;
-	z-index: 6;
 	max-width: calc(100% - 24px);
 	overflow-wrap: anywhere;
 }
@@ -465,14 +466,23 @@
 	display: flex;
 	align-items: center;
 	gap: 5px;
+	min-width: 0;
 	color: var(--success);
 	font-size: 0.8125rem;
+	line-height: 1.4;
+	overflow-wrap: anywhere;
+}
+
+.ss-todo-bar-done svg {
+	flex: none;
 }
 
 .ss-todo-bar-progress {
 	flex: 1;
 	height: 4px;
 	min-width: 40px;
+	max-width: 320px;
+	margin-right: auto;
 	border-radius: 2px;
 	background: var(--hairline);
 	overflow: hidden;
@@ -494,6 +504,38 @@
 
 .ss-todo-bar-chevron--open {
 	transform: rotate(180deg);
+}
+
+@media (max-width: 480px) {
+	.ss-todo-bar {
+		display: grid;
+		grid-template-columns: auto minmax(40px, 1fr) auto;
+		gap: 8px;
+	}
+
+	.ss-todo-bar-label {
+		grid-column: 1;
+		grid-row: 1;
+	}
+
+	.ss-todo-bar-progress {
+		grid-column: 2;
+		grid-row: 1;
+		width: 100%;
+		margin-right: 0;
+	}
+
+	.ss-todo-bar-chevron {
+		grid-column: 3;
+		grid-row: 1;
+	}
+
+	.ss-todo-bar-done {
+		grid-column: 1 / -1;
+		grid-row: 2;
+		justify-self: end;
+		max-width: 100%;
+	}
 }
 
 .ss-todo-board {
@@ -587,7 +629,9 @@
 	height: var(--tap);
 }
 .ss-input {
-	flex: 1;
+	/* flex-basis: 0 в колонке отменял заданную из JS высоту: поле всегда
+	   оставалось в одну строку, и верх написанного текста обрезался. */
+	flex: 0 0 auto;
 	width: 100%;
 	min-width: 0;
 	resize: none;
@@ -1345,4 +1389,19 @@
 
 .sa-item.ss-proj-busy {
 	color: var(--fg-muted);
+}
+
+/* Превью транскрипта из шлюза: показываем сразу, пока едет полный снапшот. */
+.ss-preview-note {
+	flex: none;
+	max-width: 100%;
+	margin: 0;
+	padding: 8px 16px;
+	border-bottom: 1px solid var(--hairline);
+	border-radius: 0;
+	background: var(--surface2);
+	color: var(--fg-secondary);
+	font-size: 0.75rem;
+	text-align: center;
+	overflow-wrap: anywhere;
 }

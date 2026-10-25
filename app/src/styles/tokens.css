@@ -15,6 +15,7 @@
 	--fg: #E8E9EC;
 	--muted: #9A9DA6;
 	--accent: #5267E8;
+	--accent-text: #9BAAFF;
 	--success: #34C77B;
 	--warning: #E8A33D;
 	--error: #E5544B;
@@ -25,6 +26,8 @@
 	--bg-inset: #0C0D10;
 	--bg-overlay: #202329;
 	--surface-strong: #202329;
+	--terminal-bg: #262B33;
+	--terminal-fg: #D8DEE9;
 
 	/* glass: translucent bar material (pair with --blur-surface) */
 	--glass: rgba(16, 17, 20, 0.72);
@@ -94,7 +97,7 @@
 	--z-toast: 90;
 
 	/* ---- type — system stack ---- */
-	--font-ui: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+	--font-ui: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
 	--font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
 	/* type scale */
@@ -105,6 +108,10 @@
 	--text-subhead: 0.8125rem;
 	--text-footnote: 0.75rem;
 	--text-caption: 0.6875rem;
+	--text-xs: var(--text-footnote);
+	--text-sm: var(--text-subhead);
+	--text-base: var(--text-body);
+	--text-md: var(--text-headline);
 	--tracking-tight: -0.02em;
 	--tracking-caps: 0.06em;
 
@@ -149,6 +156,7 @@
 	--fg: #14161A;
 	--muted: #6E7280;
 	--accent: #5267E8;
+	--accent-text: #3D50C4;
 	--success: #1E9E5A;
 	--warning: #B26B00;
 	--error: #D64541;
@@ -194,6 +202,7 @@
 		--fg: #14161A;
 		--muted: #6E7280;
 		--accent: #5267E8;
+		--accent-text: #3D50C4;
 		--success: #1E9E5A;
 		--warning: #B26B00;
 		--error: #D64541;

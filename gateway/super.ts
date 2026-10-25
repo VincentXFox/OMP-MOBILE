@@ -1,14 +1,19 @@
 import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { runHerdr, unwrapHerdr } from "./agents.ts";
+import { basename, join } from "node:path";
 import { listHosts, type OmpHost } from "./hosts.ts";
+import { getPane, isPaneGone, listPanes, panePids, readPane, sendPaneKeys, sendPaneText, type ManagedPane } from "./panes.ts";
+import type { PaneStatus } from "./runtime/protocol.ts";
 
-const SPAWN_TIMEOUT_MS = 15_000;
 const PROMPT_TIMEOUT_MS = 12_000;
+// Пока ждём подтверждения старта, хвост панели перечитываем часто (сокет
+// рантайма), а collab-реестр — редко: `omp collab list` это отдельный процесс.
+const CONFIRM_POLL_MS = 250;
+const CONFIRM_HOST_POLL_MS = 2_000;
+const PROMPT_TAIL_LINES = 30;
 const MAX_DISPATCH_ITEMS = 12;
-// Kernel caps a single argv element at 128KB (MAX_ARG_STRLEN); herdr prompt passes
-// the text as one argument, so 64KB leaves a 2x margin.
+// Задача уходит в панель одним куском текста: 64 КБ хватает любой разумной
+// формулировке и держит запрос к рантайму небольшим.
 const MAX_DISPATCH_TEXT_BYTES = 64 * 1024;
 const MAX_SUBAGENTS = 24;
 const SUBAGENT_TAIL_BYTES = 8 * 1024;
@@ -16,7 +21,8 @@ const SUBAGENT_TAIL_WIDE_BYTES = 256 * 1024;
 const SUBAGENT_ACTIVE_MS = 90_000;
 const ACTIVITY_TAIL_LINES = 48;
 
-export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
+export type KnownAgentStatus = "idle" | "working" | "blocked" | "done";
+export type AgentStatus = KnownAgentStatus | "unknown";
 
 /** A subagent transcript found next to the host session (`<Name>.jsonl`). */
 export interface SuperSubagent {
@@ -41,14 +47,15 @@ export interface SuperHostInfo {
 }
 
 export interface SuperAgent {
-  /** herdr pane id — the dispatch target ("w1:p1"). */
+  /** paneId панели — цель раздачи задач. */
   target: string;
-  /** herdr agent name ("demo-omp"). */
+  /** Имя панели; для служебной или безымянной — заголовок сессии либо каталог. */
   name: string;
   agentStatus: AgentStatus;
   cwd: string;
-  /** Stripped terminal title — what the agent is doing right now. */
+  /** Заголовок панели — что агент делает прямо сейчас. */
   title: string;
+  /** В панели живёт живой агент и он не ждёт подтверждения — туда можно вводить задачу. */
   interactiveReady: boolean;
   host: SuperHostInfo | null;
   subagents: SuperSubagent[];
@@ -56,63 +63,21 @@ export interface SuperAgent {
 
 export interface SuperBoard {
   agents: SuperAgent[];
-  /** Collab hosts with no herdr pane (started outside herdr). */
+  /** Collab-хосты без панели шлюза — запущены вне панелей шлюза. */
   orphans: { instanceId: string; cwd: string; sessionName: string | null; busy: boolean }[];
 }
 
-interface HerdrAgentRecord {
-  agent: string;
-  name: string;
-  agentStatus: AgentStatus;
-  cwd: string;
-  paneId: string;
-  title: string;
-  interactiveReady: boolean;
-}
+const SESSION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HANDOVER_NAME = /^handover:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function parseAgentList(result: unknown): HerdrAgentRecord[] {
-  if (result === null || typeof result !== "object") return [];
-  const parsed = result as { agents?: unknown }; // herdr CLI envelope, shape asserted here
-  const agents = parsed.agents;
-  if (!Array.isArray(agents)) return [];
-  const out: HerdrAgentRecord[] = [];
-  for (const entry of agents) {
-    if (entry === null || typeof entry !== "object") continue;
-    const rec = entry as Record<string, unknown>;
-    if (typeof rec.agent !== "string" || typeof rec.name !== "string" || typeof rec.cwd !== "string") continue;
-    if (typeof rec.pane_id !== "string") continue;
-    const status = typeof rec.agent_status === "string" ? rec.agent_status : "unknown";
-    out.push({
-      agent: rec.agent,
-      name: rec.name,
-      agentStatus: (["idle", "working", "blocked", "done"] as const).includes(status as AgentStatus)
-        ? (status as AgentStatus)
-        : "unknown",
-      cwd: rec.cwd,
-      paneId: rec.pane_id,
-      title: typeof rec.terminal_title_stripped === "string" ? rec.terminal_title_stripped : "",
-      interactiveReady: rec.interactive_ready === true,
-    });
+/** Runtime handover names remain stable for retries; only their displayed label changes. */
+export function superAgentName(pane: Pick<ManagedPane, "name" | "cwd">, host: Pick<OmpHost, "sessionTitle" | "sessionName"> | null): string {
+  if (pane.name.trim() !== "" && !HANDOVER_NAME.test(pane.name)) return pane.name;
+  for (const value of [host?.sessionTitle, host?.sessionName]) {
+    const label = value?.trim() ?? "";
+    if (label !== "" && !SESSION_UUID.test(label) && !HANDOVER_NAME.test(label)) return label;
   }
-  return out;
-}
-
-function panePids(result: unknown): number[] {
-  if (result === null || typeof result !== "object") return [];
-  const info = (result as { process_info?: unknown }).process_info;
-  if (info === null || typeof info !== "object") return [];
-  const parsed = info as { foreground_process_group_id?: unknown; foreground_processes?: unknown };
-  const pids: number[] = [];
-  if (typeof parsed.foreground_process_group_id === "number") pids.push(parsed.foreground_process_group_id);
-  if (Array.isArray(parsed.foreground_processes)) {
-    for (const entry of parsed.foreground_processes) {
-      if (entry !== null && typeof entry === "object") {
-        const pid = (entry as { pid?: unknown }).pid;
-        if (typeof pid === "number") pids.push(pid);
-      }
-    }
-  }
-  return pids;
+  return basename(pane.cwd) || pane.cwd;
 }
 
 function toHostInfo(host: OmpHost): SuperHostInfo {
@@ -244,50 +209,72 @@ function listSubagents(cwd: string, sessionId: string): SuperSubagent[] {
   return out.slice(0, MAX_SUBAGENTS);
 }
 
-// herdr agent list has no pid; agents sharing a cwd are disambiguated by the pane's
-// foreground pids vs the collab host pid (same trick as files.findHerdrPane).
-async function matchHosts(records: HerdrAgentRecord[], hosts: OmpHost[]): Promise<Map<string, OmpHost>> {
+// Панель ↔ collab-хост: точная привязка по `instanceId` (её ставит шлюз, когда
+// поднимает агента), а без неё — по pid процесса в дереве панели. Каталог для
+// сопоставления не годится: два агента в одном cwd — обычное дело.
+async function matchHosts(panes: ManagedPane[], hosts: OmpHost[]): Promise<Map<string, OmpHost>> {
   const matched = new Map<string, OmpHost>();
   const taken = new Set<string>();
-  for (const rec of records) {
-    if (rec.agent !== "omp") continue;
-    const candidates = hosts.filter((h) => h.cwd === rec.cwd && !taken.has(h.instanceId));
-    let host = candidates.length === 1 ? candidates[0] : undefined;
-    if (!host && candidates.length > 1) {
-      const info = unwrapHerdr(await runHerdr(["pane", "process-info", "--pane", rec.paneId], SPAWN_TIMEOUT_MS));
-      if (info.ok) {
-        const pids = new Set(panePids(info.result));
-        host = candidates.find((h) => pids.has(h.pid));
-      }
+  for (const pane of panes) {
+    const bound = pane.instanceId === null ? undefined : hosts.find((h) => h.instanceId === pane.instanceId && !taken.has(h.instanceId));
+    if (bound !== undefined) {
+      matched.set(pane.paneId, bound);
+      taken.add(bound.instanceId);
+      continue;
     }
-    if (host) {
-      matched.set(rec.paneId, host);
-      taken.add(host.instanceId);
+    const free = hosts.filter((h) => !taken.has(h.instanceId));
+    if (free.length === 0) continue;
+    let pids: number[];
+    try {
+      pids = await panePids(pane.paneId);
+    } catch (error) {
+      if (isPaneGone(error)) continue;
+      throw error;
+    }
+    const byPid = free.find((h) => pids.includes(h.pid));
+    if (byPid !== undefined) {
+      matched.set(pane.paneId, byPid);
+      taken.add(byPid.instanceId);
     }
   }
   return matched;
 }
 
+async function hostOfPane(pane: ManagedPane, hosts: OmpHost[]): Promise<OmpHost | null> {
+  return (await matchHosts([pane], hosts)).get(pane.paneId) ?? null;
+}
+
+// Состояние агента живёт в collab-реестре: рантайм про collab ничего не знает,
+// а статус панели описывает лишь её собственную оболочку. Хоста нет, а в панели
+// `shell` — агент отработал и вернул оболочку: это «завершено», а не «неизвестно».
+// `unknown` остаётся панели, которая ещё поднимается (`starting`) или зависла.
+function agentStatusOf(host: OmpHost | null, paneStatus: PaneStatus): AgentStatus {
+  if (host === null) return paneStatus === "shell" ? "done" : "unknown";
+  if (host.busy) return "working";
+  if (host.inputRequired) return "blocked";
+  return "idle";
+}
+
 export async function superBoard(): Promise<SuperBoard> {
-  const [listed, collab] = await Promise.all([
-    runHerdr(["agent", "list"], SPAWN_TIMEOUT_MS).then(unwrapHerdr),
+  const [panes, collab] = await Promise.all([
+    listPanes(),
     listHosts().catch(() => ({ hosts: [] as OmpHost[] })),
   ]);
-  if (!listed.ok) throw new Error(`herdr agent list failed: ${listed.error}`);
-  const records = parseAgentList(listed.result).filter((r) => r.agent === "omp");
-  const matched = await matchHosts(records, collab.hosts);
+  const matched = await matchHosts(panes, collab.hosts);
 
-  const agents: SuperAgent[] = records.map((rec) => {
-    const host = matched.get(rec.paneId);
+  const agents: SuperAgent[] = panes.map((pane) => {
+    const host = matched.get(pane.paneId) ?? null;
     return {
-      target: rec.paneId,
-      name: rec.name,
-      agentStatus: rec.agentStatus,
-      cwd: rec.cwd,
-      title: rec.title,
-      interactiveReady: rec.interactiveReady,
-      host: host ? toHostInfo(host) : null,
-      subagents: host ? listSubagents(rec.cwd, host.sessionId) : [],
+      target: pane.paneId,
+      name: superAgentName(pane, host),
+      agentStatus: agentStatusOf(host, pane.status),
+      cwd: pane.cwd,
+      title: pane.title ?? "",
+      // «Готов принимать ввод» — в панели живёт живой агент и он не ждёт
+      // подтверждения: свободная оболочка означает, что агент завершился.
+      interactiveReady: host !== null && host.alive && !host.inputRequired,
+      host: host === null ? null : toHostInfo(host),
+      subagents: host === null ? [] : listSubagents(pane.cwd, host.sessionId),
     };
   });
 
@@ -305,35 +292,78 @@ export interface DispatchAssignment {
 
 export type DispatchOutcome = { target: string; ok: true } | { target: string; ok: false; error: string };
 
-// herdr agent prompt guards submission: blocked agents are rejected (agent_blocked)
-// before any keystrokes reach the pane; --wait confirms the agent actually started.
-// Ultra-fast turns finish before herdr observes "working" (agent_prompt_stalled);
-// then the terminal tail decides whether the prompt actually landed.
-async function dispatchOne(item: DispatchAssignment): Promise<DispatchOutcome> {
-  const out = await runHerdr(
-    ["agent", "prompt", item.target, item.text, "--wait", "--until", "working", "--timeout", String(PROMPT_TIMEOUT_MS)],
-    SPAWN_TIMEOUT_MS,
-  );
-  const unwrapped = unwrapHerdr(out);
-  if (unwrapped.ok) return { target: item.target, ok: true };
-  const err = unwrapped.error;
-  if (err.includes("agent_prompt_stalled")) {
-    if (await promptVisibleInTail(item.target, item.text)) return { target: item.target, ok: true };
-    return { target: item.target, ok: false, error: "агент не подтвердил старт задачи — возможно ещё инициализируется, повтори" };
+// Гейт перед вводом в панель: без живого агента на переднем плане работает
+// `bash -i`, и текст задания исполнился бы как shell-команда (вплоть до `rm -rf`).
+// Поэтому любой ввод требует живого collab-хоста у панели.
+function liveAgentError(pane: ManagedPane, host: OmpHost | null): string | null {
+  if (host !== null && host.alive) return null;
+  if (pane.status === "shell") {
+    return "агент в панели не запущен — запустите или продолжите сессию; задача не отправлена";
   }
-  if (err.includes("agent_blocked")) return { target: item.target, ok: false, error: "агент ждёт ввода (blocked) — задача не отправлена" };
-  if (/not found|no such|unknown/i.test(err)) return { target: item.target, ok: false, error: "агент не найден" };
-  if (err.includes("timeout")) return { target: item.target, ok: false, error: "таймаут подтверждения — задача возможно принята, проверь доску" };
-  return { target: item.target, ok: false, error: err.slice(0, 300) };
+  if (host !== null) return "агент завершил работу — запустите или продолжите сессию; задача не отправлена";
+  return "агент не зарегистрирован в реестре; задача не отправлена";
 }
 
-// Whitespace-insensitive search: the TUI may wrap the prompt across lines.
-async function promptVisibleInTail(target: string, text: string): Promise<boolean> {
-  const read = unwrapHerdr(await runHerdr(["agent", "read", target, "--lines", "30", "--format", "text"], SPAWN_TIMEOUT_MS));
-  if (!read.ok || typeof read.result !== "string") return false;
+// Отправка задачи в панель: состояние агента берём из collab-реестра, текст
+// вводим в панель, затем подтверждаем старт — либо агент стал busy, либо текст
+// виден в хвосте панели. Сверхбыстрый турн завершается раньше, чем шлюз успевает
+// увидеть busy, и тогда факт доставки решает хвост.
+async function dispatchOne(item: DispatchAssignment): Promise<DispatchOutcome> {
+  const pane = await getPane(item.target);
+  if (pane === null) return { target: item.target, ok: false, error: "агент не найден" };
+  const hosts = await listHosts().catch(() => ({ hosts: [] as OmpHost[] }));
+  const host = await hostOfPane(pane, hosts.hosts);
+  const noAgent = liveAgentError(pane, host);
+  if (noAgent !== null) return { target: item.target, ok: false, error: noAgent };
+  if (pane.awaitingApproval === true || host?.inputRequired === true) {
+    return { target: item.target, ok: false, error: "агент ждёт ввода (blocked) — задача не отправлена" };
+  }
+  const busyBefore = host?.busy === true;
+  try {
+    await sendPaneText(item.target, item.text);
+    await sendPaneKeys(item.target, ["enter"]);
+  } catch (error) {
+    return { target: item.target, ok: false, error: (error instanceof Error ? error.message : String(error)).slice(0, 300) };
+  }
+  // Агент уже в работе: новый турн стартует лишь после текущего, и ждать
+  // подтверждения нечего — текст принят панелью.
+  if (busyBefore) return { target: item.target, ok: true };
+  return confirmDispatch(pane, item);
+}
+
+// Подтверждение, что промпт принят: busy в collab-реестре (опрос редкий —
+// `omp collab list` это отдельный процесс) или текст в хвосте панели.
+async function confirmDispatch(pane: ManagedPane, item: DispatchAssignment): Promise<DispatchOutcome> {
+  const deadline = Date.now() + PROMPT_TIMEOUT_MS;
+  let nextHostCheck = 0;
+  let tailReadable = true;
+  for (;;) {
+    if (Date.now() >= nextHostCheck) {
+      nextHostCheck = Date.now() + CONFIRM_HOST_POLL_MS;
+      const hosts = await listHosts().catch(() => ({ hosts: [] as OmpHost[] }));
+      if ((await hostOfPane(pane, hosts.hosts))?.busy === true) return { target: item.target, ok: true };
+    }
+    const visible = await promptVisibleInTail(item.target, item.text);
+    if (visible === true) return { target: item.target, ok: true };
+    if (visible === null) tailReadable = false;
+    if (Date.now() >= deadline) break;
+    await Bun.sleep(CONFIRM_POLL_MS);
+  }
+  if (!tailReadable) return { target: item.target, ok: false, error: "таймаут подтверждения — задача возможно принята, проверь доску" };
+  return { target: item.target, ok: false, error: "агент не подтвердил старт задачи — возможно ещё инициализируется, повтори" };
+}
+
+// Поиск без учёта пробелов: TUI переносит промпт по строкам. `null` — хвост
+// прочитать не удалось, и судить о доставке не по чему.
+async function promptVisibleInTail(target: string, text: string): Promise<boolean | null> {
   const needle = text.replaceAll(/\s+/g, " ").trim().slice(0, 80);
   if (needle === "") return false;
-  return read.result.replaceAll(/\s+/g, " ").includes(needle);
+  try {
+    const tail = await readPane(target, "text", PROMPT_TAIL_LINES);
+    return tail.replaceAll(/\s+/g, " ").includes(needle);
+  } catch {
+    return null;
+  }
 }
 
 export function dispatchTasks(items: DispatchAssignment[]): Promise<DispatchOutcome[]> {
@@ -341,6 +371,7 @@ export function dispatchTasks(items: DispatchAssignment[]): Promise<DispatchOutc
 }
 
 export interface SuperActivity {
+  /** paneId панели — то же значение, что `target` на доске. */
   target: string;
   agentStatus: AgentStatus;
   title: string;
@@ -351,36 +382,25 @@ export interface SuperActivity {
 }
 
 export async function superActivity(target: string): Promise<SuperActivity | null> {
-  const got = unwrapHerdr(await runHerdr(["agent", "get", target], SPAWN_TIMEOUT_MS));
-  if (!got.ok) {
-    if (/not found|no such|unknown/i.test(got.error)) return null;
-    throw new Error(got.error);
-  }
-  // agent get prints {agent: {...record}} while agent list prints bare records.
-  const result = got.result;
-  const inner =
-    result !== null && typeof result === "object" && (result as Record<string, unknown>).agent !== undefined
-      ? (result as Record<string, unknown>).agent
-      : result;
-  const parsed = parseAgentList({ agents: [inner] });
-  const rec = parsed[0];
-  if (!rec) return null;
-
-  const read = unwrapHerdr(await runHerdr(["agent", "read", target, "--lines", String(ACTIVITY_TAIL_LINES), "--format", "text"], SPAWN_TIMEOUT_MS));
-  const tail = read.ok ? (typeof read.result === "string" ? read.result : JSON.stringify(read.result)) : `не удалось прочитать терминал: ${read.error}`;
-
+  const pane = await getPane(target);
+  if (pane === null) return null;
   const collab = await listHosts().catch(() => ({ hosts: [] as OmpHost[] }));
-  const matched = await matchHosts([rec], collab.hosts);
-  const host = matched.get(rec.paneId);
+  const host = await hostOfPane(pane, collab.hosts);
+  let tail: string;
+  try {
+    tail = await readPane(target, "text", ACTIVITY_TAIL_LINES);
+  } catch (error) {
+    tail = `не удалось прочитать терминал: ${error instanceof Error ? error.message : String(error)}`;
+  }
 
   return {
-    target: rec.paneId,
-    agentStatus: rec.agentStatus,
-    title: rec.title,
-    cwd: rec.cwd,
-    name: rec.name,
+    target: pane.paneId,
+    agentStatus: agentStatusOf(host, pane.status),
+    title: pane.title ?? "",
+    cwd: pane.cwd,
+    name: superAgentName(pane, host),
     tail: tail.slice(-16 * 1024),
-    subagents: host ? listSubagents(rec.cwd, host.sessionId) : [],
+    subagents: host === null ? [] : listSubagents(pane.cwd, host.sessionId),
   };
 }
 

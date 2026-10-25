@@ -121,8 +121,8 @@ export function VoiceRecorder({ instanceId, onTranscript, onActiveChange, disabl
 		if (!startVoice(instanceId)) showLocalNote("Запись уже идёт в другой сессии");
 	};
 
-	const showPermBanner = !recording && !processing && micPerm === "denied";
-	const showPermHint = !recording && !processing && micPerm === "prompt" && micTouched;
+	const showPermBanner = !disabled && !recording && !processing && micPerm === "denied" && micTouched;
+	const showPermHint = !disabled && !recording && !processing && micPerm === "prompt" && micTouched;
 
 	return (
 		<span className={`vc-root${recording ? " vc-root-rec" : processing ? " vc-root-proc" : ""}`}>

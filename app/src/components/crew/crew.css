@@ -1,0 +1,162 @@
+/* «Штат»: столы (папки) и ответственности. `crew-*` prefix.
+ * Общие примитивы (.pk-card/.pk-sheet/.pk-btn/.pk-empty/.pk-spinner) — в
+ * shell/pocket.css, здесь только раскладка шита и строки столов. */
+
+/* .pk-sheet уже flex-колонка со скроллом: второй скроллер внутри ломает
+ * порядок (контент уезжает под шапку). Специфичность 2 класса — иначе
+ * .pk-card/.pk-sheet из pocket.css перебивают эти правила порядком. */
+.pk-sheet.crew-sheet {
+	display: flex;
+	flex-direction: column;
+	gap: var(--sp-2, 8px);
+}
+
+.crew-sub {
+	flex: 0 0 auto;
+	margin-top: 2px;
+	font-size: 0.8125rem;
+	color: var(--fg-tertiary, var(--muted));
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.crew-status {
+	flex: 0 0 auto;
+	margin-top: var(--sp-2, 8px);
+	padding: var(--sp-3, 12px);
+	border-radius: 14px;
+	background: var(--bg-inset);
+	border: 1px solid var(--border);
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.crew-status-line {
+	font-size: 0.875rem;
+	font-weight: 500;
+	color: var(--fg);
+}
+
+.crew-status-next {
+	font-size: 0.8125rem;
+	color: var(--fg-secondary, var(--muted));
+}
+
+.crew-status-summary {
+	font-size: 0.8125rem;
+	color: var(--fg-tertiary, var(--muted));
+}
+
+.crew-status-error {
+	font-size: 0.8125rem;
+	color: var(--error);
+}
+
+.crew-run {
+	flex: 0 0 auto;
+	margin-top: var(--sp-2, 8px);
+	width: 100%;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+}
+
+.crew-loose {
+	margin-top: var(--sp-2, 8px);
+	font-size: 0.8125rem;
+	line-height: 1.45;
+	color: var(--warning);
+}
+
+.crew-list {
+	margin-top: var(--sp-2, 8px);
+	display: flex;
+	flex-direction: column;
+	gap: var(--sp-2, 8px);
+}
+
+.pk-card.crew-desk {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: var(--sp-3, 12px);
+	/* Карточка стола — не кнопка: без press-анимации выглядит статичной. */
+	transition: border-color var(--speed-fast) var(--ease-ios);
+}
+
+.crew-role {
+	display: block;
+	font-size: 0.9375rem;
+	font-weight: 600;
+	color: var(--fg);
+}
+
+.crew-brief {
+	display: block;
+	font-size: 0.8125rem;
+	line-height: 1.4;
+	color: var(--fg-secondary, var(--muted));
+}
+
+.crew-path,
+.crew-members {
+	display: flex;
+	width: 100%;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+	font-size: 0.75rem;
+	color: var(--fg-tertiary, var(--muted));
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Участники — до двух строк: имена важнее, чем «красиво в одну строку». */
+.crew-members {
+	align-items: flex-start;
+	white-space: normal;
+}
+
+.crew-members-names {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	min-width: 0;
+	line-height: 1.35;
+}
+
+.crew-path {
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.crew-empty {
+	padding: var(--sp-4, 16px);
+}
+
+/* ── Чип роли на карточке агента ──────────────────────────────────── */
+
+.ag-role {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 100%;
+	padding: 1px 8px;
+	border-radius: 999px;
+	background: var(--accent-muted);
+	color: var(--accent-a, var(--accent));
+	font-size: 0.75rem;
+	font-weight: 500;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ag-role--none {
+	background: var(--warning-muted);
+	color: var(--warning);
+}

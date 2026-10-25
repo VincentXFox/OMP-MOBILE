@@ -6,7 +6,7 @@
 	flex-direction: column;
 	gap: var(--sp-4);
 	width: 100%;
-	padding: var(--sp-2) var(--sp-3) var(--sp-5);
+	padding: var(--sp-2) 0 var(--sp-5);
 	box-sizing: border-box;
 }
 
@@ -23,7 +23,7 @@
 
 .pj-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
 	gap: var(--sp-3);
 	width: 100%;
 	max-width: 640px;

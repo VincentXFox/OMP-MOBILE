@@ -1,0 +1,20 @@
+[Unit]
+Description=OMP Pocket runtime — панели терминалов (PTY и эмуляция экрана)
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/vincentfox/omp-mobile/gateway
+ExecStart=/home/vincentfox/.bun/bin/bun /home/vincentfox/omp-mobile/gateway/runtime/main.ts
+# Демон держит панели агентов: рестарт шлюза его не трогает, а сам он поднимается сам.
+Restart=always
+RestartSec=2
+# omp живёт в ~/.local/bin (панели запускают его голым именем), bun — в ~/.bun/bin
+Environment=HOME=/home/vincentfox
+Environment=PATH=/home/vincentfox/.local/bin:/home/vincentfox/.bun/bin:/usr/local/bin:/usr/bin:/bin
+# Сокет — в XDG_RUNTIME_DIR (оттуда же его берёт шлюз), состояние панелей — в XDG_STATE_HOME.
+Environment=OMP_RUNTIME_SOCKET=%t/omp-pocket-runtime.sock
+Environment=OMP_RUNTIME_STATE_DIR=%h/.local/state/omp-pocket/runtime
+
+[Install]
+WantedBy=default.target

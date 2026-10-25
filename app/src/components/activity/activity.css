@@ -125,3 +125,57 @@
 	padding: 0 var(--sp-3);
 	font-size: var(--text-sm);
 }
+
+/* ---- global feed row: сессия + текст реплики, вся строка — кнопка ---- */
+
+.ac-row--global {
+	display: flex;
+	align-items: flex-start;
+	width: 100%;
+	gap: var(--sp-3);
+	padding: var(--sp-3) var(--sp-4);
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	font: inherit;
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.ac-row--global:active {
+	background: var(--surface2);
+}
+
+.ac-row--global .ac-row-icon {
+	margin-top: 2px;
+}
+
+.ac-row-body {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.ac-row-session {
+	overflow: hidden;
+	color: var(--fg-tertiary);
+	font-size: var(--text-xs);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ac-row-text {
+	display: -webkit-box;
+	overflow: hidden;
+	color: var(--fg-primary);
+	font-size: var(--text-sm);
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+}
+
+.ac-row--global .ac-row-time {
+	margin-top: 2px;
+}

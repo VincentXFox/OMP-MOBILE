@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "dependencies": {
+    "@xterm/addon-serialize": "0.13.0",
+    "@xterm/headless": "5.5.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {

@@ -4,6 +4,22 @@ import { join } from "node:path";
 
 /** Session store layout: ~/.omp/agent/sessions/<cwd-slug>/<ISO-ts>_<uuid>.jsonl */
 const SESSIONS_DIR = join(homedir(), ".omp", "agent", "sessions");
+
+/** Внешние хранилища того же формата, но вне корня omp.
+ * Мост Telegram (`~/.tgbot/tg2omp.py`) запускает omp с `--session-dir
+ * ~/.tgbot/sessions` и пишет плоские `*.jsonl` — без этого списка переписка с
+ * ботом видна только в Telegram. */
+const EXTRA_SESSION_DIRS: readonly string[] = [join(homedir(), ".tgbot", "sessions")];
+
+/** Внешние каталоги сессий для индекса поиска — тот же список, что читает листинг. */
+export function extraSessionDirs(): readonly string[] {
+  return EXTRA_SESSION_DIRS;
+}
+
+/** Slug для внешнего каталога: в списке сессий он виден рядом с cwd. */
+function slugOfExternalDir(dir: string): string {
+  return `external:${dir.split("/").filter(Boolean).pop() ?? dir}`;
+}
 /** Title slot is bytes 0–255; the first user message can sit past 8 KB in
  * sessions that open with big injected records — 64 KB covers real files. */
 const HEAD_BYTES = 65_536;
@@ -172,17 +188,21 @@ function statusFromTail(tail: string, whole: boolean): SessionStatus {
 }
 
 export function listSessions(liveIds: ReadonlySet<string>): SessionSummary[] {
-  let slugs: string[];
+  // (каталог, slug) — корень omp по подпапкам плюс внешние хранилища плоским списком.
+  const roots: { dir: string; slug: string }[] = [];
   try {
-    slugs = readdirSync(SESSIONS_DIR, { withFileTypes: true })
+    for (const slug of readdirSync(SESSIONS_DIR, { withFileTypes: true })
       .filter((e) => e.isDirectory())
-      .map((e) => e.name);
+      .map((e) => e.name)) {
+      roots.push({ dir: join(SESSIONS_DIR, slug), slug });
+    }
   } catch {
-    return [];
+    // недоступный корень omp не мешает читать внешние хранилища
   }
+  for (const dir of EXTRA_SESSION_DIRS) roots.push({ dir, slug: slugOfExternalDir(dir) });
+
   const out: SessionSummary[] = [];
-  for (const slug of slugs) {
-    const dir = join(SESSIONS_DIR, slug);
+  for (const { dir, slug } of roots) {
     let files: string[];
     try {
       files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
@@ -249,6 +269,49 @@ export function parseSessionHead(path: string): {
   }
 }
 
+/** Хвост транскрипта для мгновенной отрисовки в приложении.
+ *
+ * Зачем: коллаб-гость получает ВСЮ историю сессии (у больших она 5–10 МБ) и до
+ * конца снапшота ничего не видит — открытие чата занимает секунды. Хвост читается
+ * локально (шлюз на той же машине, что и omp) и рисуется сразу, пока снапшот едет.
+ *
+ * Безопасность: путь принимается только внутри корня сессий и только .jsonl —
+ * иначе эндпоинт стал бы чтением произвольных файлов.
+ */
+export function tailEntries(path: string, limit = 80): unknown[] | null {
+  const roots = [SESSIONS_DIR, ...EXTRA_SESSION_DIRS].map((d) => (d.endsWith("/") ? d : `${d}/`));
+  if (typeof path !== "string" || !path.endsWith(".jsonl") || !roots.some((r) => path.startsWith(r))) return null;
+  let size: number;
+  try {
+    const stat = statSync(path);
+    if (!stat.isFile()) return null;
+    size = stat.size;
+  } catch {
+    return null;
+  }
+  if (size <= 0) return [];
+  // Хвост в 4 МБ покрывает сотни записей; больше читать незачем — нам нужен экран.
+  const window = Math.min(size, 4 * 1024 * 1024);
+  const slice = readSlice(path, size - window, window).text;
+  const lines = slice.split("\n");
+  const out: unknown[] = [];
+  // Первая строка обрезана окном — пропускаем её, если окно не с начала файла.
+  for (let i = window < size ? 1 : 0; i < lines.length; i++) {
+    const line = lines[i]?.trim();
+    if (line === undefined || line.length === 0 || line.length > 200_000) continue;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (parsed === null || typeof parsed !== "object") continue;
+      if (!("type" in parsed) || typeof parsed.type !== "string") continue;
+      if (!("id" in parsed) || typeof parsed.id !== "string") continue;
+      out.push(parsed);
+    } catch {
+      continue;
+    }
+  }
+  return out.slice(-Math.min(Math.max(limit, 1), 200));
+}
+
 /** Locate a session jsonl by omp session id — the uuid is embedded in the filename. */
 export function findSessionFile(sessionId: string): string | null {
   let slugs: string[];
@@ -269,6 +332,14 @@ export function findSessionFile(sessionId: string): string | null {
     }
     const hit = files.find((f) => f.endsWith(`_${sessionId}.jsonl`));
     if (hit !== undefined) return join(dir, hit);
+  }
+  for (const dir of EXTRA_SESSION_DIRS) {
+    try {
+      const hit = readdirSync(dir).find((f) => f.endsWith(`_${sessionId}.jsonl`));
+      if (hit !== undefined) return join(dir, hit);
+    } catch {
+      continue;
+    }
   }
   return null;
 }
@@ -341,4 +412,90 @@ export function renameSession(path: string, rawTitle: string): RenameOutcome {
   } finally {
     closeSync(fd);
   }
+}
+
+/** Одна запись ленты «Активность»: реплика или вызов инструмента из лога сессии. */
+export interface ActivityRow {
+  id: string;
+  sessionId: string;
+  sessionPath: string;
+  sessionTitle: string | null;
+  cwd: string | null;
+  kind: "message" | "tool" | "error";
+  role: string | null;
+  text: string;
+  ts: string;
+}
+
+/** Хвост лога сессии для ленты: последние ходы целиком. */
+const ACTIVITY_TAIL_BYTES = 48 * 1024;
+/** Сколько сессий смотреть: лента — «что было недавно», а не архив. */
+const ACTIVITY_SESSIONS = 12;
+/** Сколько записей брать из одной сессии. */
+const ACTIVITY_PER_SESSION = 6;
+/** Длина текста записи в ленте. */
+const ACTIVITY_TEXT_CHARS = 240;
+
+function activityText(message: unknown): string {
+  if (message === null || typeof message !== "object") return "";
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const part of content) {
+    if (part === null || typeof part !== "object") continue;
+    if (!("type" in part) || part.type !== "text") continue;
+    if ("text" in part && typeof part.text === "string") parts.push(part.text);
+  }
+  return parts.join(" ");
+}
+
+function activityRowsOf(session: SessionSummary): ActivityRow[] {
+  if (session.size <= 0) return [];
+  const offset = Math.max(0, session.size - ACTIVITY_TAIL_BYTES);
+  const tail = readSlice(session.path, offset, ACTIVITY_TAIL_BYTES).text;
+  const lines = tail.split("\n");
+  if (offset > 0) lines.shift(); // первая строка среза может быть обрезана
+  const rows: ActivityRow[] = [];
+  for (const line of lines) {
+    if (!line.startsWith("{")) continue;
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (record === null || typeof record !== "object") continue;
+    const rec = record as { type?: unknown; id?: unknown; timestamp?: unknown; message?: unknown };
+    if (rec.type !== "message" || typeof rec.timestamp !== "string") continue;
+    const message = rec.message !== null && typeof rec.message === "object" ? (rec.message as { role?: unknown }) : null;
+    const role = message !== null && typeof message.role === "string" ? message.role : null;
+    if (role === null || !["user", "assistant", "toolCall", "toolResult"].includes(role)) continue;
+    const text = activityText(message).replace(/\s+/g, " ").trim();
+    if (text.length === 0) continue;
+    const tool = role === "toolCall" || role === "toolResult";
+    const kind: ActivityRow["kind"] = tool ? "tool" : role === "assistant" && /error|failed|panic/i.test(text) ? "error" : "message";
+    rows.push({
+      id: typeof rec.id === "string" ? rec.id : `${session.id}:${rec.timestamp}`,
+      sessionId: session.id,
+      sessionPath: session.path,
+      sessionTitle: session.title,
+      cwd: session.cwd,
+      kind,
+      role,
+      text: text.slice(0, ACTIVITY_TEXT_CHARS),
+      ts: rec.timestamp,
+    });
+  }
+  return rows.slice(-ACTIVITY_PER_SESSION);
+}
+
+/** Лента активности по недавним сессиям: у вкладки «Активность» без открытого
+ *  чата не было источника событий, и она всегда показывала пустоту. */
+export function recentActivity(limit: number, liveIds: ReadonlySet<string>): ActivityRow[] {
+  return listSessions(liveIds)
+    .slice(0, ACTIVITY_SESSIONS)
+    .flatMap(activityRowsOf)
+    .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))
+    .slice(0, limit);
 }

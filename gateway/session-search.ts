@@ -1,8 +1,8 @@
 import { Glob } from "bun";
-import { statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { createdFromFilename, parseSessionHead, stripInjectedNoise } from "./sessions.ts";
+import { createdFromFilename, extraSessionDirs, parseSessionHead, stripInjectedNoise } from "./sessions.ts";
 
 /**
  * Полнотекстовый поиск по содержимому сессий.
@@ -165,6 +165,14 @@ export function refreshIndex(budgetMs: number): Promise<void> {
     pendingFiles = 0;
     const paths: string[] = [];
     for (const rel of new Glob(SESSION_GLOB).scanSync({ cwd: SESSIONS_DIR })) paths.push(join(SESSIONS_DIR, rel));
+    // Внешние хранилища (мост Telegram) лежат плоским списком файлов.
+    for (const dir of extraSessionDirs()) {
+      try {
+        for (const file of readdirSync(dir)) if (file.endsWith(".jsonl")) paths.push(join(dir, file));
+      } catch {
+        // каталога нет — поиск по нему просто пуст
+      }
+    }
     for (const path of paths) {
       let stat: { mtimeMs: number; size: number };
       try {

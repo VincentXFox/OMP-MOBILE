@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# NetworkManager dispatcher: при появлении/смене сети мгновенно перезапускаем
+# выходной SSH-туннель OMP Pocket.
+#
+# Без хука связь восстанавливают ServerAliveInterval=5/CountMax=2 и
+# Restart=always (единицы секунд), но при переключении Wi-Fi <-> Ethernet или
+# смене роутера окно недоступности всё равно заметно. Хук сокращает его до
+# одного реконнекта ssh.
+#
+# Ставится как /etc/NetworkManager/dispatcher.d/50-omp-pocket-tunnel (root:root 0755).
+set -u
+
+IFACE="${1:-}"
+ACTION="${2:-}"
+TARGET_UID=1000
+STAMP="/run/omp-pocket-tunnel-dispatch.stamp"
+MIN_INTERVAL=10
+
+case "${ACTION}" in
+  up|connectivity-change|dhcp4-change|dhcp6-change|vpn-up) ;;
+  *) exit 0 ;;
+esac
+[ "${IFACE}" = "lo" ] && exit 0
+
+# Антидребезг: лавина событий при flapping Wi-Fi не должна превращаться
+# в шторм рестартов sshd на de5.
+now=$(date +%s)
+if [ -f "${STAMP}" ]; then
+  last=$(cat "${STAMP}" 2>/dev/null || echo 0)
+  [ $((now - last)) -lt "${MIN_INTERVAL}" ] && exit 0
+fi
+echo "${now}" > "${STAMP}"
+
+# try-restart: не поднимаем туннель, если его отключили осознанно.
+runuser -u vincentfox -- env \
+  XDG_RUNTIME_DIR="/run/user/${TARGET_UID}" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${TARGET_UID}/bus" \
+  systemctl --user try-restart omp-pocket-tunnel.service >/dev/null 2>&1 &
+exit 0

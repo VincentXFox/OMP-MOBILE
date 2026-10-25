@@ -35,6 +35,10 @@
 	font-size: var(--text-body);
 }
 
+.set-screen .pk-fieldrow > span:first-child {
+	min-width: 0;
+}
+
 .set-screen .pk-fieldrow > .pk-muted,
 .set-screen .set-row-end .pk-muted {
 	font-variant-numeric: tabular-nums;
@@ -75,9 +79,10 @@
 
 /* status line under the action */
 .set-screen .pk-section-body > .pk-check {
-	margin: 0 16px 10px;
-	padding: 0;
+	margin: 0;
+	padding: 10px 16px 12px;
 	max-width: 100%;
+	overflow-wrap: anywhere;
 }
 
 /* секции настроек тянутся на всю ширину списка, а не по контенту
@@ -106,7 +111,7 @@
 		background var(--speed-fast) var(--ease-ios),
 		border-color var(--speed-fast) var(--ease-ios);
 }
-.set-switch::after {
+.set-switch::before {
 	/* невидимый тач-слоп: тап-таргет ≥44px при визуальных 31px */
 	content: "";
 	position: absolute;
@@ -200,4 +205,78 @@
 .set-about-value svg {
 	flex-shrink: 0;
 	color: var(--fg-tertiary, var(--fg-faint));
+}
+
+/* ---- подключение: список адресов + результаты проверки ---- */
+.set-screen .set-bases {
+	width: 100%;
+	min-height: calc(var(--tap) * 2);
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 0.8125rem;
+	line-height: 1.5;
+	resize: vertical;
+}
+
+.set-screen .set-base-active {
+	display: block;
+	flex: 0 1 58%;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: right;
+	font-size: var(--text-subhead);
+}
+
+.set-screen .set-probe-list {
+	list-style: none;
+	margin: 0;
+	padding: 0 16px 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.set-screen .set-probe {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	font-size: 0.8125rem;
+}
+
+.set-screen .set-probe-base {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--muted);
+}
+
+.set-screen .set-probe-state {
+	flex: none;
+	font-weight: 600;
+}
+
+.set-probe--ok .set-probe-state {
+	color: var(--success);
+}
+
+.set-probe--bad .set-probe-state {
+	color: var(--error);
+}
+
+.set-screen .set-hint {
+	margin: 0;
+	padding: 0 16px 14px;
+	font-size: 0.75rem;
+	line-height: 1.5;
+	color: var(--muted);
+	overflow-wrap: anywhere;
+}
+
+.set-screen .set-hint code {
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 0.95em;
+	color: var(--fg-secondary, var(--fg));
 }

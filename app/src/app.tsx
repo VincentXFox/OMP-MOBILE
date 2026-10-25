@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bot, Folder, Settings, Activity, Brain, UsersRound } from "lucide-react";
+import { Bot, Folder, Settings, Activity, Brain, Send, UsersRound } from "lucide-react";
 import { AgentsScreen } from "./components/agents/AgentsScreen";
 import { ActivityScreen } from "./components/activity/ActivityScreen";
 import { MemoryScreen } from "./components/memory/MemoryScreen";
@@ -8,19 +8,23 @@ import { SessionsScreen } from "./components/sessions/SessionsScreen";
 import { SettingsScreen } from "./components/settings/SettingsScreen";
 import { SessionScreen } from "./components/session/SessionScreen";
 import { SuperScreen } from "./components/super/SuperScreen";
+import { TelegramScreen } from "./components/telegram/TelegramScreen";
 import { UpdatesScreen } from "./components/updates/UpdatesScreen";
-import type { HostInfo } from "./lib/gateway";
-import { fetchHosts, GatewayError, mintLink, remapSession, setToken } from "./lib/gateway";
+import type { ActivityRow, HostInfo } from "./lib/gateway";
+import { fetchHosts, GatewayError, getActiveBase, mintLink, remapSession, resumeSession, setToken } from "./lib/gateway";
 import { markOpened } from "./lib/agent-prefs";
 import { GuestClient } from "./lib/client";
+import { rebaseCollabLink } from "./lib/link";
 import "./components/shell/pocket.css";
+import "./styles/desktop.css";
 
-type Screen = "agents" | "super" | "projects" | "sessions" | "memory" | "activity" | "updates" | "settings" | "session";
+type Screen = "agents" | "telegram" | "super" | "projects" | "sessions" | "memory" | "activity" | "updates" | "settings" | "session";
 
 /* 5 fixed tabs (HIG ≤5, M3 3-5). super/sessions/updates are reachable from
  * screen-level entry points (header «Рой», Projects segment, Settings row). */
 const TABS: readonly { id: Screen; label: string }[] = [
 	{ id: "agents", label: "Агенты" },
+	{ id: "telegram", label: "Телеграм" },
 	{ id: "projects", label: "Проекты" },
 	{ id: "activity", label: "Активность" },
 	{ id: "memory", label: "Память" },
@@ -29,6 +33,7 @@ const TABS: readonly { id: Screen; label: string }[] = [
 
 const SCREEN_TITLE: Record<Screen, string> = {
 	agents: "Агенты",
+	telegram: "Телеграм",
 	super: "Супер-агент",
 	projects: "Проекты",
 	sessions: "Сессии",
@@ -64,7 +69,7 @@ function screenFromHash(): { screen: Screen; instanceId: string | null } {
 	const hash = window.location.hash.replace(/^#\/?/, "");
 	const sessionMatch = /^session\/([A-Za-z0-9_-]+)$/.exec(hash);
 	if (sessionMatch) return { screen: "session", instanceId: sessionMatch[1] ?? null };
-	if (hash === "super" || hash === "projects" || hash === "sessions" || hash === "memory" || hash === "activity" || hash === "updates" || hash === "settings") {
+	if (hash === "telegram" || hash === "super" || hash === "projects" || hash === "sessions" || hash === "memory" || hash === "activity" || hash === "updates" || hash === "settings") {
 		return { screen: hash, instanceId: null };
 	}
 	return { screen: "agents", instanceId: null };
@@ -82,10 +87,26 @@ export function App(): ReactNode {
 	const [activeInstanceId, setActiveInstanceId] = useState<string | null>(initial.current.instanceId);
 	const [opening, setOpening] = useState(false);
 	const [openingId, setOpeningId] = useState<string | null>(null);
+	// Состояние связи: online = последний /api/hosts успешен, degraded = идут
+	// неудачи при живом соединении, offline = браузер сообщил об отсутствии сети.
+	const [netState, setNetState] = useState<"online" | "degraded" | "offline">(() =>
+		typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "online",
+	);
+	// Немедленный опрос реестра из UI (кнопка «Повторить») — без ожидания 5 с.
+	const pollRef = useRef<() => void>(() => {});
 	// Screens that must survive tab switches stay mounted (hidden) once visited.
 	const [keepAliveVisited, setKeepAliveVisited] = useState<Set<string>>(
 		() => new Set(screen === "settings" || screen === "memory" ? [screen] : []),
 	);
+
+	// Само-починка индикатора «thinking…»: реестр шлюза (опрос /api/hosts) — источник
+	// истины о живости. Два «не работает» подряд гасят локальный индикатор, если
+	// событие окончания хода потерялось (сон телефона, обрыв релея).
+	useEffect(() => {
+		if (client === null) return;
+		const host = hosts?.find(h => h.instanceId === activeInstanceId);
+		client.syncHostBusy(host === undefined ? null : host.busy === true || host.inputRequired === true);
+	}, [client, hosts, activeInstanceId]);
 
 	// hash ⇄ screen sync; back-gesture out of a session closes it.
 	useEffect(() => {
@@ -115,8 +136,17 @@ export function App(): ReactNode {
 	// F5 inside a session: re-open it from the hash once the registry loads.
 	useEffect(() => {
 		if (screen !== "session" || pendingInstanceId == null || client != null || opening) return;
+		const instanceId = pendingInstanceId;
 		setPendingInstanceId(null);
-		void openInstance(pendingInstanceId);
+		void (async () => {
+			await openInstance(instanceId);
+			// Сессия не поднялась (агент исчез, stale generation, сеть): экран
+			// сессии без шапки и таб-бара — тупик. Возвращаемся к списку агентов.
+			if (clientRef.current === null) {
+				setScreen("agents");
+				window.location.hash = "#/agents";
+			}
+		})();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [screen, pendingInstanceId, client, opening]);
 
@@ -147,15 +177,30 @@ export function App(): ReactNode {
 
 	// poll hosts every 5s; скрытая вкладка не поллит (телефон в фоне экономит
 	// батарею и трафик), возврат в приложение обновляет список сразу.
+	// Сеть пропала — бесполезные запросы не шлём; вернулась — опрос сразу.
 	useEffect(() => {
 		let alive = true;
 		let timer: number | null = null;
+		let lastActive = getActiveBase();
 		const poll = async (): Promise<void> => {
+			if (typeof navigator !== "undefined" && navigator.onLine === false) {
+				setNetState("offline");
+				return;
+			}
 			try {
 				const list = await fetchHosts();
 				if (!alive) return;
 				setHosts(list);
 				setHostsError(null);
+				setNetState("online");
+				// победил другой кандидат — перечитываем реестр немедленно, не ждём 5 с
+				const active = getActiveBase();
+				if (active !== lastActive) {
+					lastActive = active;
+					window.setTimeout(() => {
+						if (alive) void poll();
+					}, 0);
+				}
 			} catch (err) {
 				if (!alive) return;
 				const status = err instanceof GatewayError ? err.status : 0;
@@ -164,8 +209,10 @@ export function App(): ReactNode {
 						? "Шлюз вернул 401 — открой Настройки и введи токен."
 						: `Шлюз недоступен: ${err instanceof Error ? err.message : String(err)}`,
 				);
+				setNetState(typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "degraded");
 			}
 		};
+		pollRef.current = (): void => void poll();
 		const stop = (): void => {
 			if (timer !== null) {
 				window.clearInterval(timer);
@@ -184,12 +231,25 @@ export function App(): ReactNode {
 				stop();
 			}
 		};
+		const onOffline = (): void => {
+			setNetState("offline");
+		};
+		const onOnline = (): void => {
+			setNetState("online");
+			void poll();
+			clientRef.current?.reconnectNow();
+		};
 		sync();
 		document.addEventListener("visibilitychange", sync);
+		window.addEventListener("offline", onOffline);
+		window.addEventListener("online", onOnline);
 		return () => {
 			alive = false;
+			pollRef.current = (): void => {};
 			stop();
 			document.removeEventListener("visibilitychange", sync);
+			window.removeEventListener("offline", onOffline);
+			window.removeEventListener("online", onOnline);
 		};
 	}, []);
 
@@ -219,7 +279,7 @@ export function App(): ReactNode {
 			setOpening(true);
 			setOpeningId(host.instanceId);
 			try {
-				const link = await mintLink(host.instanceId, false);
+				const link = rebaseCollabLink(await mintLink(host.instanceId, false), window.location.origin);
 				const next = new GuestClient(link, storedName());
 				next.connect();
 				clientRef.current?.close();
@@ -272,8 +332,9 @@ export function App(): ReactNode {
 			try {
 				setHosts(await fetchHosts());
 				setHostsError(null);
-			} catch {
-				// polling effect reports errors; silent here
+			} catch (err) {
+				// «Повторить» и создание агента не должны молча ничего не делать.
+				setHostsError(err instanceof Error ? err.message : String(err));
 			}
 		})();
 	}, []);
@@ -311,6 +372,29 @@ export function App(): ReactNode {
 		[openHost],
 	);
 
+	// Строка ленты активности: живой агент открывается сразу, архивная сессия
+	// сначала поднимается через resume — иначе тап по истории ничего не делает.
+	const openActivityRow = useCallback(
+		async (row: ActivityRow): Promise<void> => {
+			const live = hosts?.find(h => h.sessionId === row.sessionId);
+			if (live !== undefined) {
+				await openHost(live);
+				return;
+			}
+			if (row.cwd === null) {
+				setHostsError("У сессии нет рабочего каталога — открыть нельзя.");
+				return;
+			}
+			const resumed = await resumeSession(row.cwd, row.sessionPath, { mode: "resume" });
+			if (!resumed.ok || resumed.instanceId === undefined) {
+				setHostsError(resumed.error ?? "не удалось возобновить сессию");
+				return;
+			}
+			await openInstance(resumed.instanceId);
+		},
+		[hosts, openHost, openInstance],
+	);
+
 	const activeHost = useMemo(
 		() => hosts?.find(h => h.instanceId === activeInstanceId),
 		[hosts, activeInstanceId],
@@ -342,6 +426,8 @@ export function App(): ReactNode {
 			case "session":
 				if (client) return <SessionScreen client={client} onLeave={leaveSession} host={activeHost} onReopen={id => void openInstance(id)} />;
 				return agentsScreen("agents-fallback");
+			case "telegram":
+				return <TelegramScreen />;
 			case "super":
 				return <SuperScreen onOpenSession={openSuperSession} />;
 			case "sessions":
@@ -362,7 +448,12 @@ export function App(): ReactNode {
 				return (
 					<ActivityScreen
 						client={client}
-						onOpenSession={() => goto("session")}
+						onOpenSession={() => {
+							// Маршрут обязан смениться: иначе F5/«назад» уводят из чата.
+							if (activeInstanceId !== null) window.location.hash = `#/session/${activeInstanceId}`;
+							else goto("session");
+						}}
+						onOpenRow={row => void openActivityRow(row)}
 						hosts={hosts}
 						error={hostsError}
 						onRetry={refreshHosts}
@@ -381,8 +472,22 @@ export function App(): ReactNode {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [screen, client, hosts, hostsError, filterCwd, openHost, openInstance, leaveSession, goto, activeHost, refreshHosts, keepAliveVisited]);
 
+	// «Повторить»: немедленный опрос реестра + переподключение чата.
+	const retryNow = useCallback((): void => {
+		pollRef.current();
+		clientRef.current?.reconnectNow();
+	}, []);
+
+	const netHint =
+		netState === "offline"
+			? "Нет сети — проверь подключение к интернету"
+			: netState === "degraded"
+				? "Нет связи со шлюзом — идёт переподключение"
+				: "Связь со шлюзом в порядке";
+
 	const navIcon: Record<Screen, ReactNode> = {
 		agents: <Bot size={22} />,
+		telegram: <Send size={22} />,
 		projects: <Folder size={22} />,
 		activity: <Activity size={22} />,
 		memory: <Brain size={22} />,
@@ -394,7 +499,7 @@ export function App(): ReactNode {
 	};
 
 	return (
-		<div className="pk-app">
+		<div className={`pk-app${screen === "session" ? " pk-app--session" : ""}`}>
 			{typeof window !== "undefined" && !window.isSecureContext && (
 				<div className="pk-insecure-banner" role="alert">
 					⚠ Открыто по http — браузер отключил шифрование: чаты и вложения работать не будут. Открой приложение по https-адресу (см. актуальную ссылку).
@@ -403,6 +508,19 @@ export function App(): ReactNode {
 			{screen !== "session" && (
 				<header className="pk-header">
 					<span className="pk-header-title">{SCREEN_TITLE[screen]}</span>
+					<span className={`pk-net pk-net--${netState}`} title={netHint}>
+						<span className="pk-net-dot" aria-hidden="true" />
+						{netState !== "online" && (
+							<span className="pk-net-label">
+								{netState === "offline" ? "Нет сети" : "Нет связи со шлюзом — переподключение…"}
+							</span>
+						)}
+					</span>
+					{netState !== "online" && (
+						<button type="button" className="pk-net-retry" onClick={retryNow}>
+							Повторить
+						</button>
+					)}
 					{screen === "agents" && (
 						<button type="button" className="pk-icon-btn" aria-label="Рой" title="Рой" onClick={() => goto("super")}>
 							{navIcon.super}
@@ -411,26 +529,30 @@ export function App(): ReactNode {
 				</header>
 			)}
 			<main className="pk-main">
-				{body}
-				{keepAlive("memory", <MemoryScreen />)}
-				{keepAlive("settings", <SettingsScreen onOpenUpdates={() => goto("updates")} />)}
+				<div className="pk-content">
+					{body}
+					{keepAlive("memory", <MemoryScreen />)}
+					{keepAlive("settings", <SettingsScreen onOpenUpdates={() => goto("updates")} />)}
+				</div>
 			</main>
-			{screen !== "session" && (
-				<nav className="pk-nav" aria-label="Основная навигация">
-					{TABS.map(s => (
-						<button
-							key={s.id}
-							type="button"
-							className={`pk-nav-item${screen === s.id ? " pk-nav-item--on" : ""}`}
-							aria-current={screen === s.id ? "page" : undefined}
-							onClick={() => goto(s.id)}
-						>
-							{navIcon[s.id]}
-							<span className="pk-nav-label">{s.label}</span>
-						</button>
-					))}
-				</nav>
-			)}
+			<nav
+				className={`pk-nav${screen === "session" ? " pk-nav--hidden-mobile" : ""}`}
+				aria-label="Основная навигация"
+			>
+				{TABS.map(s => (
+					<button
+						key={s.id}
+						type="button"
+						className={`pk-nav-item${screen === s.id ? " pk-nav-item--on" : ""}`}
+						aria-current={screen === s.id ? "page" : undefined}
+						onClick={() => goto(s.id)}
+					>
+						{navIcon[s.id]}
+						<span className="pk-nav-label">{s.label}</span>
+					</button>
+				))}
+			</nav>
+
 		</div>
 	);
 }

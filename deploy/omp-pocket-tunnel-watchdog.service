@@ -1,0 +1,6 @@
+[Unit]
+Description=OMP Pocket tunnel watchdog (probes gateway through the de5 tunnel)
+
+[Service]
+Type=oneshot
+ExecStart=/home/vincentfox/omp-mobile/deploy/tunnel-watchdog.sh

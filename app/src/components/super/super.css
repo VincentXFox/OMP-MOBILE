@@ -7,13 +7,18 @@
 	width: 100%;
 	box-sizing: border-box;
 	margin: 0 auto;
-	padding: 12px 12px 16px;
+	padding: 12px 0 16px;
 }
 
-.su-composer {
+.pk-card.su-composer {
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
+}
+
+.pk-card.su-composer:active {
+	transform: none;
+	opacity: 1;
 }
 
 .su-task {
@@ -26,26 +31,46 @@
 
 .su-pick {
 	display: flex;
-	align-items: flex-start;
+	flex-direction: column;
+	align-items: stretch;
 	gap: 8px;
 }
 
 .su-pick .pk-chips {
-	flex: 1;
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+	width: 100%;
+	min-width: 0;
 	margin-top: 0;
 }
 
-.su-pick-chip {
+.pk-chip.su-pick-chip {
+	display: block;
 	cursor: pointer;
 	/* Тап-цель: выбор агента — основное действие, ≥48px. */
 	min-height: 48px;
-	padding: 0 16px;
+	min-width: 0;
+	max-width: 100%;
+	padding: 0 12px;
+	border-radius: var(--radius-sm);
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.su-pick-chip .su-dot {
+	display: inline-block;
+	margin-right: 6px;
+	vertical-align: middle;
 }
 
 .su-all {
+	align-self: flex-end;
 	flex-shrink: 0;
 	font-size: var(--text-subhead);
-	color: var(--accent);
+	color: var(--accent-text);
 	background: none;
 	border: none;
 	padding: 0 8px;
@@ -175,7 +200,7 @@
 .su-name {
 	font-size: var(--text-body);
 	font-weight: var(--weight-semibold);
-	color: var(--accent);
+	color: var(--accent-text);
 }
 
 .su-status {
@@ -215,7 +240,7 @@
 }
 
 .su-flag--live {
-	color: var(--accent);
+	color: var(--accent-text);
 }
 
 .su-subs {
@@ -339,4 +364,232 @@
 	text-align: center;
 	padding: 4px 0 0;
 	word-break: break-word;
+}
+
+/* ---- автономные задачи ---- */
+.su-tasks {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.su-tasks-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 0 4px;
+	min-height: 44px;
+}
+
+.su-tasks-title {
+	font-size: var(--text-subhead);
+	font-weight: var(--weight-semibold);
+	color: var(--fg);
+}
+
+.su-tasks-count {
+	font-size: var(--text-footnote);
+	color: var(--muted);
+}
+
+/* Тап-цель 44px: раскрытие формы — частое действие, но не primary. */
+.su-tasks-new {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: auto;
+	min-height: 44px;
+	padding: 0 8px;
+	background: none;
+	border: none;
+	color: var(--accent-text);
+	font-size: var(--text-subhead);
+	cursor: pointer;
+}
+
+.su-task {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	cursor: default;
+}
+
+/* Закрытая задача: не тянет внимание, но остаётся на экране как история. */
+.su-task--closed {
+	opacity: 0.75;
+}
+
+.su-task-top {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.su-task-when {
+	margin-left: auto;
+	font-size: var(--text-footnote);
+	color: var(--muted);
+}
+
+/* Чип статуса: цвет несёт смысл, текст дублирует его — без цвета статус читаем. */
+.su-tst {
+	font-size: var(--text-footnote);
+	font-weight: var(--weight-semibold);
+	border-radius: var(--radius-pill);
+	padding: 2px 10px;
+	border: 1px solid var(--border);
+	color: var(--muted);
+	background: var(--surface2);
+}
+
+.su-tst--live {
+	color: var(--accent-text);
+	border-color: var(--accent);
+	background: var(--accent-muted);
+}
+
+.su-tst--warn {
+	color: var(--warning);
+	border-color: var(--warning);
+	background: var(--warning-muted);
+}
+
+.su-tst--err {
+	color: var(--error);
+	border-color: var(--error);
+	background: var(--error-muted);
+}
+
+.su-tst--ok {
+	color: var(--success);
+	border-color: var(--success);
+	background: var(--success-muted);
+}
+
+.su-tst--idle {
+	color: var(--muted);
+	border-color: var(--border-strong);
+	background: var(--surface2);
+}
+
+.su-tst--off {
+	color: var(--muted);
+	border-color: var(--border);
+	background: none;
+	text-decoration: line-through;
+}
+
+.su-task-goal {
+	font-size: var(--text-body);
+	color: var(--fg);
+	word-break: break-word;
+	/* Цель — одна-две строки: полный текст в полной задаче, не в карточке. */
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.su-task-line {
+	font-size: var(--text-footnote);
+	color: var(--muted);
+	word-break: break-word;
+}
+
+.su-task-verified {
+	color: var(--fg);
+}
+
+.su-task-stop {
+	color: var(--warning);
+}
+
+.su-task-approval {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-top: 4px;
+	padding: 10px;
+	border: 1px solid var(--warning);
+	border-radius: 12px;
+	background: var(--warning-muted);
+}
+
+.su-task-approval-title {
+	font-size: var(--text-subhead);
+	font-weight: var(--weight-semibold);
+	color: var(--fg);
+	word-break: break-word;
+}
+
+.su-task-approval-detail {
+	font-size: var(--text-footnote);
+	color: var(--fg);
+	word-break: break-word;
+	white-space: pre-wrap;
+}
+
+.su-task-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 4px;
+}
+
+.su-task-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	font-size: var(--text-subhead);
+	padding: 0 16px;
+	min-height: 44px;
+}
+
+.su-task-btn--cancel {
+	color: var(--error);
+	border-color: var(--error);
+}
+
+.su-task-form {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.su-task-goal-input {
+	min-height: 60px;
+	resize: none;
+}
+
+.su-task-criteria {
+	min-height: 84px;
+	resize: vertical;
+	font-family: var(--font-mono);
+	font-size: var(--text-subhead);
+}
+
+.su-task-budget-row {
+	display: flex;
+	gap: 8px;
+}
+
+.su-task-budget {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	flex: 1;
+	min-width: 0;
+	font-size: var(--text-footnote);
+	color: var(--muted);
+}
+
+.su-hint--err {
+	color: var(--error);
+}
+
+.su-tasks-empty {
+	text-align: left;
+	align-self: stretch;
+	padding: 0 4px;
 }

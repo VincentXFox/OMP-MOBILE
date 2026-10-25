@@ -67,6 +67,32 @@ function Row({
 	);
 }
 
+/** Текст из одних точек/пробелов (модель ставит «.» между вызовами) — не текст. */
+function isDotOnlyText(text: string): boolean {
+	return /^[.·…\s]*$/.test(text.trim()) || text.trim() === "";
+}
+
+/** Реплика ассистента из одних точек/пробелов без toolCall — строка-шум. */
+function isNoiseOnlyEntry(entry: unknown): boolean {
+	if (entry === null || typeof entry !== "object") return false;
+	if (!("type" in entry) || entry.type !== "message") return false;
+	if (!("message" in entry)) return false;
+	const message = entry.message;
+	if (message === null || typeof message !== "object") return false;
+	if (!("role" in message) || message.role !== "assistant") return false;
+	if (!("content" in message)) return false;
+	const content = message.content;
+	if (typeof content === "string") return /^[.·…\s]*$/.test(content.trim());
+	if (!Array.isArray(content)) return false;
+	let text = "";
+	for (const block of content) {
+		if (block === null || typeof block !== "object" || !("type" in block)) continue;
+		if (block.type === "toolCall") return false;
+		if (block.type === "text" && "text" in block && typeof block.text === "string") text += block.text;
+	}
+	return /^[.·…\s]*$/.test(text.trim());
+}
+
 function ThinkingBlock({ text, redacted }: { text: string; redacted?: boolean }): ReactNode {
 	const [open, setOpen] = useState(false);
 	return (
@@ -112,15 +138,26 @@ function MsgImage({ mimeType, data }: { mimeType: string; data: string }): React
 	);
 }
 
+/** Отправка вложения кладёт в текст markdown-ссылку И image-блок: в ленте
+ *  картинка показывалась дважды (высокий пузырь, пустое место). Когда блок
+ *  есть — markdown-дубль вырезаем. */
+function withoutAttachmentPreviews(text: string): string {
+	return text
+		.replace(/!\[[^\]]*\]\(\/api\/attach\/[^)]+\)/g, "")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
 /** Markdown + image thumbnails for user / custom message content. */
 function MsgContent({ content }: { content: string | readonly (TextContent | ImageContent)[] }): ReactNode {
 	if (typeof content === "string") return <Markdown text={content} />;
+	const hasImages = content.some(block => block.type === "image");
 	return (
 		<>
 			{content.map((block, i) => {
 				switch (block.type) {
 					case "text":
-						return <Markdown key={i} text={block.text} />;
+						return <Markdown key={i} text={hasImages ? withoutAttachmentPreviews(block.text) : block.text} />;
 					case "image":
 						return <MsgImage key={i} mimeType={block.mimeType} data={block.data} />;
 					default:
@@ -152,6 +189,9 @@ function AssistantBody({
 			case "redactedThinking":
 				return <ThinkingBlock key={i} text="" redacted />;
 			case "text":
+				// Одиночная точка между вызовами — не сообщение: иначе в ленте висят
+				// строки-точки, которые пользователь читает как «агент тупит».
+				if (isDotOnlyText(block.text)) return null;
 				return pending ? <StreamingMarkdown key={i} text={block.text} /> : <Markdown key={i} text={block.text} />;
 			case "toolCall": {
 				const act = active.get(block.id);
@@ -509,7 +549,14 @@ export function Transcript(props: TranscriptProps): ReactNode {
 	const [pinnedStart, setPinnedStart] = useState<number | null>(null);
 	const tailStart = Math.max(0, entries.length - WINDOW);
 	const start = pinnedStart === null ? tailStart : Math.min(pinnedStart, tailStart);
-	const visible = useMemo(() => entries.slice(start), [entries, start]);
+	// Мусорные реплики: модель нередко ставит одиночную точку между вызовами
+	// инструментов («.»), и в ленте это отдельная строка ни о чём. Такие реплики
+	// не удаляем из данных, но не рисуем: текст из одних точек/пробелов без
+	// toolCall не несёт информации.
+	const visible = useMemo(
+		() => entries.slice(start).filter(e => !isNoiseOnlyEntry(e)),
+		[entries, start],
+	);
 
 	// Ярлык автора в гуттере — только у первой строки подряд одного автора.
 	const groupStarts = useMemo(() => {

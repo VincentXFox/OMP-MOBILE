@@ -1,0 +1,14 @@
+[Unit]
+Description=OMP harness reflect — уроки с доказательствами из сессий за сутки (Harness²-подход)
+After=omp-pocket-gateway.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/vincentfox/.bun/bin/bun /home/vincentfox/omp-mobile/bin/harness-reflect.ts run
+WorkingDirectory=/home/vincentfox/omp-mobile
+# Один разбор на модель — минуты; не рубим по умолчанию.
+TimeoutStartSec=1200
+Environment=HOME=/home/vincentfox
+Environment=PATH=/home/vincentfox/.local/bin:/home/vincentfox/.bun/bin:/usr/local/bin:/usr/bin:/bin
+# Только flash: платные/медленные провайдеры в автоматике не используем.
+Environment=OMP_POCKET_ORGANIZER_MODEL=deepseek/deepseek-v4-flash

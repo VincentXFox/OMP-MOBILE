@@ -7,7 +7,7 @@
 	width: 100%;
 	box-sizing: border-box;
 	margin: 0 auto;
-	padding: 0 var(--sp-3) var(--sp-4);
+	padding: 0 0 var(--sp-4);
 }
 
 .sess-sk {

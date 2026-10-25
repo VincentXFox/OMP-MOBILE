@@ -1,0 +1,11 @@
+[Unit]
+Description=Суточное самообучение скилов autoharness (05:00, после рефлексии уроков)
+
+[Timer]
+OnCalendar=*-*-* 05:00
+# Пропущенный при выключенном ноутбуке прогон выполняется при первом включении.
+Persistent=true
+RandomizedDelaySec=900
+
+[Install]
+WantedBy=timers.target

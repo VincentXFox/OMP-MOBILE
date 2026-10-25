@@ -9,12 +9,12 @@
 		"dev": "bun ./index.html",
 		"mock-host": "bun scripts/mock-host.ts",
 		"relay": "bun scripts/local-relay.ts",
-		"build": "rm -rf dist && bun build ./index.html --outdir=dist --minify --define process.env.NODE_ENV='\"production\"' --entry-naming=[hash].[ext] --chunk-naming=[hash].[ext] --asset-naming=[hash].[ext] && mv dist/*.html dist/index.html && cp -R public/. dist/ && sed -i 's#\\./public/#/#g' dist/index.html",
+		"build": "rm -rf dist && bun build ./index.html --outdir=dist --minify --define process.env.NODE_ENV='\"production\"' --entry-naming=[hash].[ext] --chunk-naming=[hash].[ext] --asset-naming=[hash].[ext] && mv dist/*.html dist/index.html && cp -R public/. dist/ && sed -i 's#\\./public/#/#g' dist/index.html && printf '\\n// build %s\\n' \"$(sha256sum dist/index.html | cut -c1-12)\" >> dist/sw.js",
 		"check": "tsgo -p tsconfig.json --noEmit"
 	},
 	"dependencies": {
 		"@oh-my-pi/pi-utils": "18.10.3",
-		"@oh-my-pi/pi-wire": "18.10.3",
+		"@oh-my-pi/pi-wire": "18.12.6",
 		"katex": "^0.18.4",
 		"lucide-react": "^1.24.0",
 		"react": "19.2.7",

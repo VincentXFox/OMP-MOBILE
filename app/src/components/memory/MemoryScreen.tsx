@@ -299,8 +299,11 @@ export function MemoryScreen(): ReactNode {
 	const table: MemoryScope = showService && scope !== ALL_SCOPE ? service : scope;
 	const info = SCOPE_INFO[table === ALL_SCOPE ? "all" : table];
 
+	const [banksAttempt, setBanksAttempt] = useState(0);
+
 	useEffect(() => {
 		let alive = true;
+		setBanksError(null);
 		void (async () => {
 			try {
 				const list = await fetchMemoryBanks();
@@ -314,7 +317,7 @@ export function MemoryScreen(): ReactNode {
 		return () => {
 			alive = false;
 		};
-	}, []);
+	}, [banksAttempt]);
 
 	// Ввод не должен бить запросом на каждую букву.
 	useEffect(() => {
@@ -425,6 +428,10 @@ export function MemoryScreen(): ReactNode {
 			<div className="pk-empty">
 				<div className="pk-empty-title">Не удалось получить банки памяти</div>
 				<div className="pk-empty-text">{banksError}</div>
+				{/* keepAlive держит экран смонтированным: без повтора он умирал до перезагрузки. */}
+				<button type="button" className="pk-btn pk-btn--ghost" onClick={() => setBanksAttempt(n => n + 1)}>
+					Повторить
+				</button>
 			</div>
 		);
 	}

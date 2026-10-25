@@ -1,11 +1,13 @@
-import { ArrowLeft, ChevronDown, Check, CircleAlert, Folder, Lock, OctagonPause, Play, Plus, Search, Star, Timer, X } from "lucide-react";
+import { ArrowLeft, BookOpen, ChevronDown, Check, CircleAlert, Folder, Lock, OctagonPause, Play, Plus, Search, Star, Timer, UsersRound, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { basename, dayTimeLabel, pluralRu, shortenPath } from "../../lib/format";
 import { agentName } from "../../lib/agent-name";
 import { openedTimes, pinnedSessions, searchMineOnlyPreference, searchModePreference, sectionCollapsedPrefs, setSearchMineOnlyPreference, setSearchModePreference, setSectionCollapsed, togglePinned } from "../../lib/agent-prefs";
-import type { HostInfo, ModelOption, ProjectFileEntry, SessionSearchHit, SessionSearchResponse, SessionSearchSnippet, SuperAgent, SuperBoard } from "../../lib/gateway";
+import type { DeskRef, HostInfo, ModelOption, ProjectFileEntry, SessionSearchHit, SessionSearchResponse, SessionSearchSnippet, SuperAgent, SuperBoard } from "../../lib/gateway";
 import { fetchModels, fetchSuperBoard, listProjectFiles, resumeAgentHost, searchSessions, startAgent } from "../../lib/gateway";
+import { CrewSheet } from "../crew/CrewSheet";
+import { PromptsSheet } from "../prompts/PromptsSheet";
 import { ModelPickerSheet } from "../shell/ModelPickerSheet";
 import "./agents.css";
 
@@ -128,6 +130,8 @@ type AgentRow = {
 	hue: number;
 	/** Живые субагенты этой сессии (доска «Роя»). */
 	subagents: number;
+	/** Стол штата: за что агент отвечает (null — живёт вне штата). */
+	desk: DeskRef | null;
 	/** Ключ сортировки внутри секции: свежее открытие важнее времени старта. */
 	recency: number;
 	haystack: string;
@@ -142,8 +146,10 @@ function agentRow(host: HostInfo, board: SuperBoard | null, opened: Record<strin
 		scratch: isScratchCwd(host.cwd),
 		hue: hues.get(host.cwd) ?? 265,
 		subagents: matchBoardAgent(host, board)?.subagents.filter(s => s.active).length ?? 0,
+		desk: host.desk ?? null,
 		recency: Math.max(opened[host.sessionId] ?? 0, host.startedAt),
-		haystack: [name, host.cwd, host.model.provider, host.model.id, host.sessionName ?? ""].join(" ").toLowerCase(),
+		// Роль стола в поиске: «кто отвечает за камеры» ищется её словами.
+		haystack: [name, host.cwd, host.model.provider, host.model.id, host.sessionName ?? "", host.desk?.role ?? ""].join(" ").toLowerCase(),
 	};
 }
 
@@ -167,6 +173,7 @@ function AgentCard(props: {
 			<span aria-hidden="true" className="ag-rail" style={{ background: `hsl(${row.hue} 55% 55%)` }} />
 			<button type="button" className="ag-card-main" disabled={opening} onClick={() => props.onOpen(host)}>
 				<span className="ag-name">{row.name}</span>
+				{row.desk !== null && <span className="ag-role">{row.desk.role}</span>}
 				<span className="ag-status">
 					<span className={`pk-dot pk-dot--${status.tone}${status.pulse ? " pk-dot--pulse" : ""}`} />
 					<span className="ag-status-icon">{status.icon}</span>
@@ -190,6 +197,33 @@ function AgentCard(props: {
 						</span>
 					)}
 				</span>
+			{/* Прогресс туду-борда: с главной видно, что агент делает и сколько осталось.
+			    Закрытая доска — тихая «✓ N/N» без полоски, иначе полные бары шумят. */}
+			{host.todo !== null && host.todo !== undefined && host.todo.total > 0 && (
+				host.todo.done >= host.todo.total ? (
+					<span className="ag-todo ag-todo--done" role="img" aria-label={`Все задачи выполнены: ${host.todo.total}`}>
+						<Check size={12} aria-hidden="true" />
+						<span className="ag-todo-count">{host.todo.total}/{host.todo.total}</span>
+					</span>
+				) : (
+					<span
+						className="ag-todo"
+						role="img"
+						aria-label={`Задачи: ${host.todo.done} из ${host.todo.total}${host.todo.activePhase === null ? "" : `, сейчас: ${host.todo.activePhase}`}`}
+					>
+						<span className="ag-todo-label">
+							Задача <span className="ag-todo-count">{host.todo.done}/{host.todo.total}</span>
+						</span>
+						<span className="ag-todo-bar" aria-hidden="true">
+							<span
+								className="ag-todo-fill"
+								style={{ width: `${Math.round((host.todo.done / host.todo.total) * 100)}%` }}
+							/>
+						</span>
+						{host.todo.activePhase !== null && <span className="ag-todo-phase">{host.todo.activePhase}</span>}
+					</span>
+				)
+			)}
 				<span className="ag-meta">
 					<span className="ag-meta-proj">{row.project}</span>
 					<span aria-hidden="true">·</span>
@@ -367,18 +401,23 @@ function FolderPickerSheet(props: {
 	}, [load, initialPath]);
 
 	// .pk-sheet contract: focus moves in, Escape closes, focus returns on close.
+	// Список агентов перерисовывается каждые 5 с (поллинг), onClose приходит
+	// инлайновой стрелкой — от неё эффект не должен перезапускаться, иначе
+	// поле «Папка проекта»/«Имя» теряет фокус посреди набора.
+	const closeRef = useRef(onClose);
+	closeRef.current = onClose;
 	useEffect(() => {
 		const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		sheetRef.current?.focus();
 		const onKey = (e: KeyboardEvent): void => {
-			if (e.key === "Escape") onClose();
+			if (e.key === "Escape") closeRef.current();
 		};
 		window.addEventListener("keydown", onKey);
 		return () => {
 			window.removeEventListener("keydown", onKey);
 			prev?.focus();
 		};
-	}, [onClose]);
+	}, []);
 
 	const join = (name: string): string => `${path === "/" ? "" : path}/${name}`;
 
@@ -459,6 +498,7 @@ function NewAgentSheet(props: {
 	const [model, setModel] = useState(storedModel);
 	const [models, setModels] = useState<readonly ModelOption[] | null>(null);
 	const [label, setLabel] = useState("");
+	const [role, setRole] = useState("");
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [pickerOpen, setPickerOpen] = useState(false);
@@ -498,18 +538,23 @@ function NewAgentSheet(props: {
 	);
 
 	// .pk-sheet contract: focus moves in, Escape closes, focus returns on close.
+	// Список агентов перерисовывается каждые 5 с (поллинг), onClose приходит
+	// инлайновой стрелкой — от неё эффект не должен перезапускаться, иначе
+	// поле «Папка проекта»/«Имя» теряет фокус посреди набора.
+	const closeRef = useRef(onClose);
+	closeRef.current = onClose;
 	useEffect(() => {
 		const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		sheetRef.current?.focus();
 		const onKey = (e: KeyboardEvent): void => {
-			if (e.key === "Escape") onClose();
+			if (e.key === "Escape") closeRef.current();
 		};
 		window.addEventListener("keydown", onKey);
 		return () => {
 			window.removeEventListener("keydown", onKey);
 			prev?.focus();
 		};
-	}, [onClose]);
+	}, []);
 
 	const submit = useCallback(async () => {
 		if (submitting) return;
@@ -520,16 +565,20 @@ function NewAgentSheet(props: {
 		}
 		setSubmitting(true);
 		setError(null);
-		const result = await startAgent(trimmed, model.trim() || undefined, label.trim() || undefined);
+		const result = await startAgent(trimmed, model.trim() || undefined, label.trim() || undefined, {
+			role: role.trim() || undefined,
+		});
 		if (result.ok === true) {
-			onToast("Агент создаётся…");
+			// Шлюз мог выдать агенту свой стол вместо общей папки: показываем,
+			// где он на самом деле оказался, иначе «создаётся…» вводит в заблуждение.
+			onToast(result.desk != null ? `Агент в столе «${result.desk.role}»` : "Агент создаётся…");
 			onCreated();
 			onClose();
 		} else {
-			setError(result.error);
+			setError(result.error ?? "не удалось запустить агента");
 			setSubmitting(false);
 		}
-	}, [cwd, label, model, onClose, onCreated, onToast, submitting]);
+	}, [cwd, label, model, onClose, onCreated, onToast, role, submitting]);
 
 	return (
 		<>
@@ -580,6 +629,22 @@ function NewAgentSheet(props: {
 					>
 						{model === "" ? "По умолчанию (настройки omp)" : model}
 					</button>
+				</div>
+				<div className="pk-field">
+					<label className="pk-field-label" htmlFor="na-role">
+						За что отвечает (необязательно)
+					</label>
+					<input
+						id="na-role"
+						className="pk-field-input"
+						value={role}
+						placeholder="Камеры и видеонаблюдение"
+						onChange={e => setRole(e.target.value)}
+					/>
+					<div className="ag-hint">
+						Если папка выше — дом или /tmp, агент получит свой стол в ~/OMP: отдельную папку с уставом, чтобы не
+						толкаться в общей куче. Роль можно не заполнять — её определит суточный организатор.
+					</div>
 				</div>
 				<div className="pk-field">
 					<label className="pk-field-label" htmlFor="na-label">
@@ -662,7 +727,7 @@ function DeadSessionSheet(props: {
 		if (result.ok) {
 			onResumed();
 		} else {
-			setError(result.error);
+			setError(result.error ?? "Не удалось возобновить сессию");
 			setResuming(false);
 		}
 	}, [host.cwd, host.sessionFile, onResumed, resuming]);
@@ -706,6 +771,8 @@ export function AgentsScreen(props: {
 }): ReactNode {
 	const { hosts, error, filterCwd, openingId = null, onClearFilter, onOpen, onRefresh } = props;
 	const [sheetOpen, setSheetOpen] = useState(false);
+	const [crewOpen, setCrewOpen] = useState(false);
+	const [promptsOpen, setPromptsOpen] = useState(false);
 	const [deadHost, setDeadHost] = useState<HostInfo | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
 	const board = useSuperBoardOnce();
@@ -939,6 +1006,16 @@ export function AgentsScreen(props: {
 						только мои сообщения
 					</button>
 				)}
+				{/* Штат: папки агентов и кто за что отвечает — доступен из обоих режимов. */}
+				<button type="button" className="pk-chip ag-crew-chip" onClick={() => setCrewOpen(true)}>
+					<UsersRound size={13} aria-hidden="true" />
+					Штат
+				</button>
+				{/* Промпты AI-инструментов: готовые уставы для новых столов. */}
+				<button type="button" className="pk-chip ag-crew-chip" onClick={() => setPromptsOpen(true)}>
+					<BookOpen size={13} aria-hidden="true" />
+					Промпты
+				</button>
 			</div>
 		);
 
@@ -1050,6 +1127,10 @@ export function AgentsScreen(props: {
 					onCreated={() => onRefresh?.()}
 					onToast={showToast}
 				/>
+			)}
+			{crewOpen && <CrewSheet onClose={() => setCrewOpen(false)} onToast={showToast} />}
+			{promptsOpen && (
+				<PromptsSheet onClose={() => setPromptsOpen(false)} onToast={showToast} onStarted={() => onRefresh?.()} />
 			)}
 			{deadHost != null && (
 				<DeadSessionSheet
