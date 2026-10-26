@@ -1,6 +1,7 @@
 import { FolderGit2 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { basename, pluralRu } from "../../lib/format";
+import { WorkflowsSection } from "./WorkflowsSection";
 import type { HostInfo } from "../../lib/gateway";
 import { hostStatus } from "../agents/AgentsScreen";
 import { SessionsScreen } from "../sessions/SessionsScreen";
@@ -140,6 +141,7 @@ export function ProjectsScreen(props: {
 	return (
 		<div className="pj-screen">
 			{tabs}
+			<WorkflowsSection />
 			<div className="pj-grid">
 				{groups.map(g => (
 					<ProjectCard key={g.cwd} group={g} onOpen={onOpen} />

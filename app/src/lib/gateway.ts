@@ -672,6 +672,64 @@ export async function graphStats(project?: string | null, signal?: AbortSignal):
 	};
 }
 
+/** Узел карты: то же, что GraphNode, плюс степень для размера кружка. */
+export interface GraphMapNodeView {
+	id: string;
+	kind: GraphNodeKind;
+	name: string;
+	mentions: number;
+	degree: number;
+}
+
+export interface GraphMapEdgeView {
+	src: string;
+	dst: string;
+	kind: GraphFactKind;
+	weight: number;
+	/** Синтетическое ребро «проект ↔ сущность»: рисуется и пружинит слабее. */
+	hub?: boolean;
+}
+
+export interface GraphMapData {
+	nodes: GraphMapNodeView[];
+	edges: GraphMapEdgeView[];
+	totalNodes: number;
+	totalEdges: number;
+	truncated: boolean;
+}
+
+/** Карта графа для визуализации: узлы и рёбра уже обрезаны шлюзом. */
+export async function graphMap(project?: string | null, signal?: AbortSignal): Promise<GraphMapData> {
+	const data = await request<Partial<GraphMapData>>(`/api/graph/map${graphQuery(project)}`, { signal });
+	const nodes: GraphMapNodeView[] = Array.isArray(data.nodes)
+		? data.nodes.map(node => ({
+				id: String(node.id ?? ""),
+				kind: (node.kind ?? "topic") as GraphNodeKind,
+				name: typeof node.name === "string" && node.name !== "" ? node.name : String(node.id ?? ""),
+				mentions: Number(node.mentions ?? 0),
+				degree: Number(node.degree ?? 0),
+			}))
+		: [];
+	const edges: GraphMapEdgeView[] = Array.isArray(data.edges)
+		? data.edges
+				.filter(edge => typeof edge.src === "string" && typeof edge.dst === "string")
+				.map(edge => ({
+					src: String(edge.src),
+					dst: String(edge.dst),
+					kind: (edge.kind ?? "fact") as GraphFactKind,
+					weight: Number(edge.weight ?? 1),
+					hub: edge.hub === true,
+				}))
+		: [];
+	return {
+		nodes,
+		edges,
+		totalNodes: Number(data.totalNodes ?? nodes.length),
+		totalEdges: Number(data.totalEdges ?? edges.length),
+		truncated: data.truncated === true,
+	};
+}
+
 export async function graphSearch(
 	q: string,
 	opts: { project?: string | null; limit?: number; signal?: AbortSignal } = {},
@@ -1477,4 +1535,96 @@ export async function readProjectFile(path: string, name: string): Promise<strin
 		`/api/project/file?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`,
 	);
 	return typeof data.content === "string" ? data.content : "";
+}
+
+// ---- Файловое дерево процессов (Workflow → Task → Subtask) ----
+
+export interface TreeTask {
+	path: string;
+	kind: "task" | "tool" | "template";
+	hasPrompt: boolean;
+	tools: string[];
+	inputs: number;
+	outputs: number;
+	hasSchema: boolean;
+	subtasks: TreeTask[];
+}
+
+export interface TreeWorkflow {
+	name: string;
+	path: string;
+	hasWorkflowMd: boolean;
+	goal: string;
+	tasks: TreeTask[];
+}
+
+export interface TreeLint {
+	ok: boolean;
+	problems: string[];
+	workflows: number;
+	tasks: number;
+}
+
+export interface TreeRoot {
+	path: string;
+	workflows: TreeWorkflow[];
+	lint: TreeLint;
+}
+
+function normalizeTreeTask(value: unknown): TreeTask | null {
+	if (value === null || typeof value !== "object") return null;
+	const raw = value as Record<string, unknown>;
+	if (typeof raw["path"] !== "string") return null;
+	const kind = raw["kind"] === "tool" || raw["kind"] === "template" ? raw["kind"] : "task";
+	const subtasks = Array.isArray(raw["subtasks"]) ? raw["subtasks"].map(normalizeTreeTask).filter((t): t is TreeTask => t !== null) : [];
+	return {
+		path: raw["path"],
+		kind,
+		hasPrompt: raw["hasPrompt"] === true,
+		tools: Array.isArray(raw["tools"]) ? raw["tools"].filter((t): t is string => typeof t === "string") : [],
+		inputs: Number(raw["inputs"] ?? 0) || 0,
+		outputs: Number(raw["outputs"] ?? 0) || 0,
+		hasSchema: raw["hasSchema"] === true,
+		subtasks,
+	};
+}
+
+/** Дерево процессов с шлюза; битые поля нормализуются, а не роняют экран. */
+export async function fetchTree(root?: string | null, signal?: AbortSignal): Promise<TreeRoot[]> {
+	const query = root !== undefined && root !== null && root !== "" ? `?root=${encodeURIComponent(root)}` : "";
+	const data = await request<{ roots?: unknown }>(`/api/tree${query}`, { signal });
+	const roots = Array.isArray(data.roots) ? data.roots : [];
+	return roots
+		.map((entry): TreeRoot | null => {
+			if (entry === null || typeof entry !== "object") return null;
+			const raw = entry as Record<string, unknown>;
+			if (typeof raw["path"] !== "string") return null;
+			const workflows = Array.isArray(raw["workflows"]) ? raw["workflows"] : [];
+			const lintRaw = raw["lint"] !== null && typeof raw["lint"] === "object" ? (raw["lint"] as Record<string, unknown>) : {};
+			return {
+				path: raw["path"],
+				workflows: workflows
+					.map((wf): TreeWorkflow | null => {
+						if (wf === null || typeof wf !== "object") return null;
+						const w = wf as Record<string, unknown>;
+						if (typeof w["name"] !== "string") return null;
+						const tasks = Array.isArray(w["tasks"]) ? w["tasks"].map(normalizeTreeTask).filter((t): t is TreeTask => t !== null) : [];
+						return {
+							name: w["name"],
+							path: typeof w["path"] === "string" ? w["path"] : "",
+							hasWorkflowMd: w["hasWorkflowMd"] === true,
+							goal: typeof w["goal"] === "string" ? w["goal"] : "",
+							tasks,
+						};
+					})
+					.filter((wf): wf is TreeWorkflow => wf !== null),
+				lint: {
+					ok: lintRaw["ok"] === true,
+					problems: Array.isArray(lintRaw["problems"]) ? lintRaw["problems"].filter((p): p is string => typeof p === "string") : [],
+					workflows: Number(lintRaw["workflows"] ?? 0) || 0,
+					tasks: Number(lintRaw["tasks"] ?? 0) || 0,
+				},
+			};
+		})
+		.filter((root): root is TreeRoot => root !== null);
 }
