@@ -1,0 +1,48 @@
+{
+	"slug": "prinyatka",
+	"task": "Автономная доказательная приёмка: движок + сертификат + стоп-гейт",
+	"risk": "high",
+	"criteria": [
+		{
+			"id": "AC-01",
+			"text": "движок проходит свои тесты, включая найденные ревьюером дыры"
+		},
+		{
+			"id": "AC-02",
+			"text": "хук отвергает подложенный и чужой сертификат"
+		},
+		{
+			"id": "AC-03",
+			"text": "регрессия хуков зелёная"
+		}
+	],
+	"checks": [
+		{
+			"name": "тесты движка",
+			"cmd": "bun test bin/quality-gate.test.ts",
+			"blocking": true,
+			"timeoutMs": 600000
+		},
+		{
+			"name": "юнит-контракты хуков",
+			"cmd": "cd /home/vincentfox/.omp/agent && bun test GRANDMASTER_8/tests/gm8.test.ts",
+			"blocking": true,
+			"timeoutMs": 600000
+		},
+		{
+			"name": "регрессия хуков",
+			"cmd": "bash /home/vincentfox/.omp/agent/hooks/tests/gm-regression.sh | tail -1",
+			"blocking": true,
+			"timeoutMs": 600000
+		}
+	],
+	"probes": [],
+	"createdAt": "2026-10-26T23:01:16.557Z",
+	"baseline": null,
+	"secretExemptions": [
+		{
+			"path": "bin/quality-gate.test.ts",
+			"reason": "фикстуры секретов собираются из частей; проверяют детектор, а не содержат реальный ключ"
+		}
+	]
+}

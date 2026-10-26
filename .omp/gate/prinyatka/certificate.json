@@ -1,0 +1,112 @@
+{
+	"slug": "prinyatka",
+	"task": "Автономная доказательная приёмка: движок + сертификат + стоп-гейт",
+	"risk": "high",
+	"certifiedAt": "2026-10-26T23:15:44.905Z",
+	"criteria": [
+		{
+			"id": "AC-01",
+			"text": "движок проходит свои тесты, включая найденные ревьюером дыры"
+		},
+		{
+			"id": "AC-02",
+			"text": "хук отвергает подложенный и чужой сертификат"
+		},
+		{
+			"id": "AC-03",
+			"text": "регрессия хуков зелёная"
+		}
+	],
+	"baseline": {
+		"git HEAD": "200f7da",
+		"git изменений": "20",
+		"снято": "2026-10-26T23:13:22.521Z",
+		"юниты до": "omp-pocket-gateway=active, omp-pocket-runtime=active, omp-local-relay=active"
+	},
+	"checks": [
+		{
+			"name": "тесты движка",
+			"cmd": "bun test bin/quality-gate.test.ts",
+			"blocking": true,
+			"exitCode": 0,
+			"durationMs": 6671,
+			"stdoutTail": "bun test v1.4.3 (c6da4a4d3)",
+			"stderrTail": "\n 21 pass\n 0 fail\n 53 expect() calls\nRan 21 tests across 1 file. [6.62s]",
+			"ok": true,
+			"logFile": ".omp/gate/prinyatka/logs/_-754a076a.log"
+		},
+		{
+			"name": "юнит-контракты хуков",
+			"cmd": "cd /home/vincentfox/.omp/agent && bun test GRANDMASTER_8/tests/gm8.test.ts",
+			"blocking": true,
+			"exitCode": 0,
+			"durationMs": 105,
+			"stdoutTail": "bun test v1.4.3 (c6da4a4d3)",
+			"stderrTail": "\n 29 pass\n 0 fail\n 75 expect() calls\nRan 29 tests across 1 file. [55.00ms]",
+			"ok": true,
+			"logFile": ".omp/gate/prinyatka/logs/_-_-29a8c5c5.log"
+		},
+		{
+			"name": "регрессия хуков",
+			"cmd": "bash /home/vincentfox/.omp/agent/hooks/tests/gm-regression.sh | tail -1",
+			"blocking": true,
+			"exitCode": 0,
+			"durationMs": 135490,
+			"stdoutTail": "=== ИТОГ: PASS=73 FAIL=0 ===",
+			"stderrTail": "",
+			"ok": true,
+			"logFile": ".omp/gate/prinyatka/logs/_-5e0a86f5.log"
+		}
+	],
+	"probes": [],
+	"invariants": [
+		{
+			"name": "секреты не в диффе",
+			"ok": true,
+			"detail": "строк 1284, файлов 8, совпадений 0"
+		},
+		{
+			"name": "в проверках нет необратимых git-команд",
+			"ok": true,
+			"detail": "проверено объявленных команд: 3"
+		}
+	],
+	"after": {
+		"git HEAD": "200f7da",
+		"git изменений": "20",
+		"снято": "2026-10-26T23:15:44.881Z",
+		"юниты после": "omp-pocket-gateway=active, omp-pocket-runtime=active, omp-local-relay=active"
+	},
+	"regression": [
+		{
+			"name": "тесты движка",
+			"ok": true
+		},
+		{
+			"name": "юнит-контракты хуков",
+			"ok": true
+		},
+		{
+			"name": "регрессия хуков",
+			"ok": true
+		}
+	],
+	"review": {
+		"by": "reviewer",
+		"independent": true,
+		"verdict": "PASS",
+		"note": "независимый ревьюer GateReview2, 4 прохода: закрыты обходы через self/автор/subagent:self, подложенный сертификат, удалённые reviews[], мёртвую свежесть, logFile-каталог; тесты 21 и 29 зелёные",
+		"at": "2026-10-26T23:15:55.947Z"
+	},
+	"reviews": [
+		{
+			"by": "reviewer",
+			"independent": true,
+			"verdict": "PASS",
+			"note": "независимый ревьюer GateReview2, 4 прохода: закрыты обходы через self/автор/subagent:self, подложенный сертификат, удалённые reviews[], мёртвую свежесть, logFile-каталог; тесты 21 и 29 зелёные",
+			"at": "2026-10-26T23:15:55.947Z"
+		}
+	],
+	"residual": [],
+	"status": "ГОТОВО"
+}
