@@ -1,9 +1,10 @@
 import { RefreshCw, Search, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MemoryBank, MemoryEntry, MemoryFacets, MemoryScope, MemorySort, MemoryTable } from "../../lib/gateway";
-import { fetchMemoryBanks, fetchMemoryEntries, fetchMemoryFacets } from "../../lib/gateway";
-import { dayTimeLabel, pluralRu, relTime } from "../../lib/format";
+import type { GraphFact, GraphFactKind, GraphStats, MemoryBank, MemoryEntry, MemoryFacets, MemoryScope, MemorySort, MemoryTable } from "../../lib/gateway";
+import { fetchHosts, fetchMemoryBanks, fetchMemoryEntries, fetchMemoryFacets, graphRebuild, graphSearch, graphStats } from "../../lib/gateway";
+import { dayTimeLabel, fmtDuration, pluralRu, relTime } from "../../lib/format";
+import { graphFactMeta, graphKindLabel, highlightSegments, shortProject } from "../../lib/graph-view";
 import "./memory.css";
 
 /**
@@ -274,7 +275,8 @@ function ServiceRow(props: { entry: MemoryEntry; query: string; onOpenParent: (e
 	);
 }
 
-export function MemoryScreen(): ReactNode {
+/** Разделы Mnemopi: банки, таблицы, фасеты. Второй слой памяти — граф — выше, в `MemoryScreen`. */
+function MnemopiView(): ReactNode {
 	const [banks, setBanks] = useState<MemoryBank[] | null>(null);
 	const [banksError, setBanksError] = useState<string | null>(null);
 	const [bank, setBank] = useState<string | null>(null);
@@ -694,6 +696,430 @@ export function MemoryScreen(): ReactNode {
 					</button>
 				)}
 			</div>
+		</div>
+	);
+}
+
+/* ── Граф: второй слой памяти рядом с банками Mnemopi ───────────────── */
+
+/** Пустая строка = «все проекты»: так параметр `project` просто не уходит в API. */
+const ALL_PROJECTS = "";
+
+/** Порядок чипов видов фиксированный: счётчики прыгают, если сортировать по числу. */
+const GRAPH_KINDS: readonly GraphFactKind[] = ["decision", "insight", "fix", "rule", "error", "fact"];
+
+const GRAPH_PAGE = 20;
+const GRAPH_MIN_QUERY = 2;
+
+function errorText(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
+/** Текст факта с подсветкой слов, которые вернул шлюз в `matched`. */
+function GraphText(props: { text: string; terms: readonly string[] }): ReactNode {
+	const parts = highlightSegments(props.text, props.terms);
+	return (
+		<>
+			{parts.map((part, index) =>
+				part.hit ? (
+					<mark className="mem-mark" key={index}>
+						{part.text}
+					</mark>
+				) : (
+					<span key={index}>{part.text}</span>
+				),
+			)}
+		</>
+	);
+}
+
+/** Карточка факта: вид, текст, метаданные; по клику — цитата и id для проверки. */
+function GraphFactCard(props: { fact: GraphFact; open: boolean; onToggle: () => void }): ReactNode {
+	const { fact, open } = props;
+	const quote = fact.quote?.trim() ?? "";
+	return (
+		<button type="button" className="pk-card mem-card graph-card" aria-expanded={open} onClick={props.onToggle}>
+			<div className="mem-top">
+				<span className={`graph-kind graph-kind--${fact.kind}`}>{graphKindLabel(fact.kind)}</span>
+				<span className="mem-grow" />
+				{fact.score > 0 && (
+					<span className="graph-score" title={`релевантность ${Math.round(fact.score * 100)}%`}>
+						{Math.round(fact.score * 100)}
+					</span>
+				)}
+			</div>
+			<div className={`mem-body${open ? " mem-body--open" : ""}`}>
+				<GraphText text={fact.fact} terms={fact.matched} />
+			</div>
+			<div className="graph-meta">{graphFactMeta(fact)}</div>
+			{open && (
+				<div className="graph-detail">
+					{quote !== "" && <div className="graph-quote">{quote}</div>}
+					{(fact.src != null || fact.dst != null) && (
+						<div className="graph-edge">
+							<span>{fact.src ?? "?"}</span>
+							<span className="graph-arrow" aria-hidden="true">
+								→
+							</span>
+							<span>{fact.dst ?? "?"}</span>
+						</div>
+					)}
+					<div className="graph-id" title="идентификатор факта для проверки">
+						{fact.id}
+					</div>
+				</div>
+			)}
+		</button>
+	);
+}
+
+/** Ошибка сети — строкой: раздел не должен падать целиком из-за одного запроса. */
+function GraphError(props: { text: string; onRetry: () => void }): ReactNode {
+	return (
+		<div className="pk-form-error" role="alert">
+			{props.text}
+			<button type="button" className="mem-link" onClick={props.onRetry}>
+				повторить
+			</button>
+		</div>
+	);
+}
+
+function GraphSection(): ReactNode {
+	const [stats, setStats] = useState<GraphStats | null>(null);
+	const [statsLoading, setStatsLoading] = useState(true);
+	const [statsError, setStatsError] = useState<string | null>(null);
+	const [dirs, setDirs] = useState<string[]>([]);
+	const [project, setProject] = useState<string>(ALL_PROJECTS);
+	const [query, setQuery] = useState("");
+	const [needle, setNeedle] = useState("");
+	const [facts, setFacts] = useState<GraphFact[]>([]);
+	const [searching, setSearching] = useState(false);
+	const [searchError, setSearchError] = useState<string | null>(null);
+	const [openId, setOpenId] = useState<string | null>(null);
+	const [confirming, setConfirming] = useState(false);
+	const [rebuilding, setRebuilding] = useState(false);
+	const [rebuildNote, setRebuildNote] = useState<string | null>(null);
+	const [rebuildError, setRebuildError] = useState<string | null>(null);
+	const [attempt, setAttempt] = useState(0);
+	const seq = useRef(0);
+
+	// Каталоги берём из живых хостов: граф хранит факты по cwd, других подсказок
+	// о проектах у клиента нет. Список — удобство, поэтому его сбой молчит.
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const hosts = await fetchHosts();
+				if (!alive) return;
+				const seen = new Set<string>();
+				const list: string[] = [];
+				for (const host of hosts) {
+					const cwd = (host.cwd ?? "").trim();
+					if (cwd === "" || seen.has(cwd)) continue;
+					seen.add(cwd);
+					list.push(cwd);
+				}
+				setDirs(list);
+			} catch {
+				if (alive) setDirs([]);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [attempt]);
+
+	useEffect(() => {
+		let alive = true;
+		setStatsLoading(true);
+		void (async () => {
+			try {
+				const data = await graphStats(project === ALL_PROJECTS ? null : project);
+				if (!alive) return;
+				setStats(data);
+				setStatsError(null);
+			} catch (err) {
+				if (!alive) return;
+				setStatsError(errorText(err));
+			} finally {
+				if (alive) setStatsLoading(false);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [project, attempt]);
+
+	// Ввод не должен бить запросом на каждую букву.
+	useEffect(() => {
+		const timer = setTimeout(() => setNeedle(query.trim()), 250);
+		return () => clearTimeout(timer);
+	}, [query]);
+
+	useEffect(() => {
+		const mine = ++seq.current;
+		if (needle.length < GRAPH_MIN_QUERY) {
+			setFacts([]);
+			setSearchError(null);
+			setSearching(false);
+			return;
+		}
+		setSearching(true);
+		void (async () => {
+			try {
+				const list = await graphSearch(needle, { project: project === ALL_PROJECTS ? null : project, limit: GRAPH_PAGE });
+				if (mine !== seq.current) return;
+				setFacts(list);
+				setSearchError(null);
+			} catch (err) {
+				if (mine !== seq.current) return;
+				setFacts([]);
+				setSearchError(errorText(err));
+			} finally {
+				if (mine === seq.current) setSearching(false);
+			}
+		})();
+	}, [needle, project, attempt]);
+
+	const rebuild = useCallback(async (): Promise<void> => {
+		setConfirming(false);
+		setRebuilding(true);
+		setRebuildError(null);
+		setRebuildNote(null);
+		try {
+			const result = await graphRebuild();
+			setRebuildNote(
+				`Собрано ${result.facts} ${pluralRu(result.facts, "факт", "факта", "фактов")} по ${result.projects} ${pluralRu(result.projects, "проекту", "проектам", "проектам")} · изменено ${result.changed} · ${fmtDuration(result.tookMs)}`,
+			);
+			// Статистика стала другой — перечитываем её и текущий поиск.
+			setAttempt(n => n + 1);
+		} catch (err) {
+			setRebuildError(errorText(err));
+		} finally {
+			setRebuilding(false);
+		}
+	}, []);
+
+	const kinds = GRAPH_KINDS.map(kind => ({ kind, count: stats?.byKind[kind] ?? 0 })).filter(item => item.count > 0);
+	const indexed = stats?.lastIndexedAt != null && stats.lastIndexedAt > 0 ? `индексировано ${relTime(stats.lastIndexedAt)}` : "ещё не индексировалось";
+	const empty = stats !== null && stats.facts === 0 && statsError == null;
+	const searchingNow = needle.length >= GRAPH_MIN_QUERY;
+
+	return (
+		<div className="mem-screen">
+			<div className="mem-banks">
+				<div className="mem-row mem-row--graph-stats">
+					<span className="graph-stat" title="Всего фактов в графе">
+						<b>{stats === null ? "—" : stats.facts}</b> фактов
+					</span>
+					<span className="graph-stat" title="Узлов графа: проекты, хосты, сервисы, пути, инструменты, темы, люди">
+						<b>{stats === null ? "—" : stats.nodes}</b> узлов
+					</span>
+					<span className="graph-stat" title="Проектов, по которым есть факты">
+						<b>{stats === null ? "—" : stats.projects}</b> {pluralRu(stats?.projects ?? 0, "проект", "проекта", "проектов")}
+					</span>
+					<span className="graph-stat graph-stat--muted">{indexed}</span>
+				</div>
+				<div className="mem-summary">
+					{stats !== null && stats.dbBytes > 0 && `${(stats.dbBytes / 1048576).toFixed(1)} МБ · `}
+					{statsLoading && stats !== null ? "обновляю…" : "граф собран из транскриптов сессий"}
+				</div>
+			</div>
+
+			<div className="mem-bar">
+				<div className="mem-row mem-row--projects">
+					<button
+						type="button"
+						className={`pk-chip${project === ALL_PROJECTS ? " pk-chip--on" : ""}`}
+						onClick={() => setProject(ALL_PROJECTS)}
+					>
+						Все проекты
+						<span className="mem-count">{stats?.projects ?? 0}</span>
+					</button>
+					{dirs.map(dir => (
+						<button
+							key={dir}
+							type="button"
+							title={dir}
+							className={`pk-chip${project === dir ? " pk-chip--on" : ""}`}
+							onClick={() => setProject(current => (current === dir ? ALL_PROJECTS : dir))}
+						>
+							{shortProject(dir)}
+						</button>
+					))}
+				</div>
+				<div className="mem-search-row">
+					<Search size={16} className="mem-search-icon" aria-hidden="true" />
+					<input
+						className="mem-search"
+						type="search"
+						value={query}
+						placeholder="Поиск по фактам графа"
+						aria-label="Поиск по графу фактов"
+						spellCheck={false}
+						onChange={e => setQuery(e.target.value)}
+					/>
+					{query !== "" && (
+						<button type="button" className="mem-search-clear" aria-label="Очистить поиск" onClick={() => setQuery("")}>
+							<X size={14} />
+						</button>
+					)}
+				</div>
+				<div className="mem-row mem-row--graph-actions">
+					{confirming ? (
+						<div className="graph-confirm" role="group" aria-label="Подтверждение пересборки">
+							<span className="graph-confirm-text">Пересобрать граф по всем проектам?</span>
+							<button type="button" className="pk-btn pk-btn--sm" disabled={rebuilding} onClick={() => void rebuild()}>
+								Пересобрать
+							</button>
+							<button type="button" className="pk-btn pk-btn--ghost pk-btn--sm" onClick={() => setConfirming(false)}>
+								Отмена
+							</button>
+						</div>
+					) : (
+						<button
+							type="button"
+							className="pk-btn pk-btn--ghost pk-btn--sm graph-rebuild"
+							disabled={rebuilding}
+							onClick={() => setConfirming(true)}
+						>
+							<RefreshCw size={14} className={rebuilding ? "graph-rebuild-icon graph-rebuild-icon--busy" : "graph-rebuild-icon"} />
+							{rebuilding ? "Пересборка…" : "Пересобрать"}
+						</button>
+					)}
+					{!confirming && kinds.length > 0 && (
+						<>
+							<span className="mem-sep" aria-hidden="true" />
+							{kinds.map(item => (
+								<span key={item.kind} className={`graph-kind graph-kind--${item.kind}`} title={`${graphKindLabel(item.kind)}: ${item.count}`}>
+									{graphKindLabel(item.kind)}
+									<span className="mem-count">{item.count}</span>
+								</span>
+							))}
+						</>
+					)}
+				</div>
+			</div>
+
+			<div className="mem-body-wrap">
+				<div className="mem-hint">
+					Граф — второй слой памяти: факты из сессий с цитатами-доказательствами. Статистика и «Пересобрать» относятся ко всему графу,
+					фильтр проекта сужает только поиск. Слова запроса подсвечиваются.
+				</div>
+
+				{statsError != null && <GraphError text={statsError} onRetry={() => setAttempt(n => n + 1)} />}
+				{rebuildError != null && <GraphError text={rebuildError} onRetry={() => void rebuild()} />}
+				{rebuildNote != null && rebuildError == null && <div className="graph-note">{rebuildNote}</div>}
+
+				{empty && (
+					<div className="pk-empty graph-empty">
+						<div className="pk-empty-title">Граф пуст</div>
+						<div className="pk-empty-text">
+							Нажми «Пересобрать»: граф собирается из транскриптов сессий, это занимает несколько секунд.
+						</div>
+					</div>
+				)}
+
+				{!empty && !searchingNow && (
+					<div className="mem-hint">
+						Введи хотя бы {GRAPH_MIN_QUERY} символа — поиск идёт подстрокой по тексту фактов и цитат.
+					</div>
+				)}
+
+				{searchError != null && <GraphError text={searchError} onRetry={() => setAttempt(n => n + 1)} />}
+
+				{searchingNow && searching && facts.length === 0 && (
+					<div className="pk-list" aria-hidden="true">
+						{[0, 1, 2].map(i => (
+							<div key={i} className="pk-card mem-card">
+								<span className="pk-skeleton mem-sk mem-sk--title" />
+								<span className="pk-skeleton mem-sk" />
+								<span className="pk-skeleton mem-sk mem-sk--short" />
+							</div>
+						))}
+					</div>
+				)}
+
+				{searchingNow && !searching && searchError == null && facts.length > 0 && (
+					<div className="mem-filterline">
+						Найдено {facts.length} {pluralRu(facts.length, "факт", "факта", "фактов")}
+						{` по «${needle.length > 40 ? `${needle.slice(0, 40)}…` : needle}»`}
+					</div>
+				)}
+
+				{searchingNow && !searching && searchError == null && facts.length === 0 && !empty && (
+					<div className="pk-empty graph-empty">
+						<div className="pk-empty-title">Ничего не нашлось</div>
+						<div className="pk-empty-text">
+							{project === ALL_PROJECTS
+								? "Попробуй другие слова: сравнение идёт по подстроке без учёта регистра."
+								: "В этом проекте таких фактов нет — переключись на «Все проекты»."}
+						</div>
+					</div>
+				)}
+
+				{facts.length > 0 && (
+					<div className="pk-list">
+						{facts.map(fact => (
+							<GraphFactCard
+								key={fact.id}
+								fact={fact}
+								open={openId === fact.id}
+								onToggle={() => setOpenId(current => (current === fact.id ? null : fact.id))}
+							/>
+						))}
+					</div>
+				)}
+			</div>
+		</div>
+	);
+}
+
+/**
+ * Экран памяти: два слоя рядом. «Mnemopi» — банки, таблицы и фасеты (как было),
+ * «Граф» — поиск по графу фактов. Разделы остаются смонтированными и просто
+ * скрываются: иначе переключение сбрасывало бы фильтры и результаты поиска.
+ */
+export function MemoryScreen(): ReactNode {
+	const [mode, setMode] = useState<"mnemopi" | "graph">("mnemopi");
+	const [graphSeen, setGraphSeen] = useState(false);
+
+	const pick = (next: "mnemopi" | "graph"): void => {
+		setMode(next);
+		if (next === "graph") setGraphSeen(true);
+	};
+
+	return (
+		<div className="mem-tabs">
+			<div className="mem-tabbar" role="tablist" aria-label="Слои памяти">
+				<button
+					type="button"
+					role="tab"
+					aria-selected={mode === "mnemopi"}
+					className={`pk-chip${mode === "mnemopi" ? " pk-chip--on" : ""}`}
+					onClick={() => pick("mnemopi")}
+				>
+					Mnemopi
+				</button>
+				<button
+					type="button"
+					role="tab"
+					aria-selected={mode === "graph"}
+					className={`pk-chip${mode === "graph" ? " pk-chip--on" : ""}`}
+					onClick={() => pick("graph")}
+				>
+					Граф
+				</button>
+			</div>
+			<div className="mem-pane" hidden={mode !== "mnemopi"}>
+				<MnemopiView />
+			</div>
+			{graphSeen && (
+				<div className="mem-pane" hidden={mode !== "graph"}>
+					<GraphSection />
+				</div>
+			)}
 		</div>
 	);
 }

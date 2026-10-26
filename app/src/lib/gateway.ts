@@ -542,6 +542,171 @@ export async function fetchMemoryEntries(
 	return request(`/api/memory/banks/${encodeURIComponent(bank)}/entries?${params}`, { signal: opts.signal });
 }
 
+/* ---- граф фактов памяти (второй слой рядом с банками Mnemopi) ---- */
+
+/** Вид связи в графе: решение, наблюдение, исправление, правило, ошибка, факт. */
+export type GraphFactKind = "decision" | "insight" | "fix" | "rule" | "error" | "fact";
+
+/** Факт графа «источник — утверждение — приёмник» вместе с цитатой-доказательством. */
+export interface GraphFact {
+	id: string;
+	kind: GraphFactKind;
+	fact: string;
+	norm: string;
+	src: string | null;
+	dst: string | null;
+	/** Проект (cwd), в котором факт был извлечён. */
+	project: string;
+	confidence: number;
+	importance: number;
+	validFrom: number;
+	validTo: number | null;
+	mentions: number;
+	firstSeen: number;
+	lastSeen: number;
+	sessionId: string | null;
+	/** Дословная цитата из сессии — доказательство под фактом. */
+	quote: string | null;
+	/** Релевантность запросу (только в результатах поиска). */
+	score: number;
+	/** Слова запроса, совпавшие в тексте (только в результатах поиска). */
+	matched: string[];
+}
+
+export type GraphNodeKind = "project" | "host" | "service" | "path" | "tool" | "topic" | "person";
+
+/** Узел графа: сущность, вокруг которой собираются факты. */
+export interface GraphNode {
+	id: string;
+	kind: GraphNodeKind;
+	name: string;
+	firstSeen: number;
+	lastSeen: number;
+	mentions: number;
+}
+
+export interface GraphStats {
+	facts: number;
+	nodes: number;
+	projects: number;
+	byKind: Partial<Record<GraphFactKind, number>>;
+	/** Момент последней индексации (epoch ms), null — граф ещё не собирался. */
+	lastIndexedAt: number | null;
+	dbBytes: number;
+	nodes_top: GraphNode[];
+}
+
+export interface GraphRebuildResult {
+	ok: boolean;
+	scanned: number;
+	changed: number;
+	facts: number;
+	projects: number;
+	tookMs: number;
+	lastIndexedAt: number | null;
+}
+
+/** Время в ответах графа числовое, но защищаемся и от ISO-строки: карточка без
+ * даты читается лучше, чем карточка с «Invalid Date». */
+function toMs(value: unknown): number | null {
+	if (typeof value === "number") return Number.isFinite(value) ? value : null;
+	if (typeof value === "string" && value.trim() !== "") {
+		const parsed = Date.parse(value);
+		return Number.isFinite(parsed) ? parsed : null;
+	}
+	return null;
+}
+
+/** `?project=…` для запросов графа: без проекта — все проекты. */
+function graphQuery(project?: string | null): string {
+	const params = new URLSearchParams();
+	if (project != null && project !== "") params.set("project", project);
+	const text = params.toString();
+	return text === "" ? "" : `?${text}`;
+}
+
+function normalizeNode(raw: Partial<GraphNode>): GraphNode {
+	return {
+		id: String(raw.id ?? ""),
+		kind: (raw.kind ?? "topic") as GraphNodeKind,
+		name: String(raw.name ?? ""),
+		firstSeen: toMs(raw.firstSeen) ?? 0,
+		lastSeen: toMs(raw.lastSeen) ?? 0,
+		mentions: Number(raw.mentions ?? 0),
+	};
+}
+
+function normalizeFact(raw: Partial<GraphFact>): GraphFact {
+	return {
+		id: String(raw.id ?? ""),
+		kind: (raw.kind ?? "fact") as GraphFactKind,
+		fact: String(raw.fact ?? ""),
+		norm: String(raw.norm ?? ""),
+		src: raw.src ?? null,
+		dst: raw.dst ?? null,
+		project: String(raw.project ?? ""),
+		confidence: Number(raw.confidence ?? 0),
+		importance: Number(raw.importance ?? 0),
+		validFrom: toMs(raw.validFrom) ?? 0,
+		validTo: toMs(raw.validTo),
+		mentions: Number(raw.mentions ?? 0),
+		firstSeen: toMs(raw.firstSeen) ?? 0,
+		lastSeen: toMs(raw.lastSeen) ?? 0,
+		sessionId: raw.sessionId ?? null,
+		quote: raw.quote ?? null,
+		score: Number(raw.score ?? 0),
+		matched: Array.isArray(raw.matched) ? raw.matched.filter(item => typeof item === "string") : [],
+	};
+}
+
+export async function graphStats(project?: string | null, signal?: AbortSignal): Promise<GraphStats> {
+	const data = await request<Partial<GraphStats>>(`/api/graph/stats${graphQuery(project)}`, { signal });
+	return {
+		facts: Number(data.facts ?? 0),
+		nodes: Number(data.nodes ?? 0),
+		projects: Number(data.projects ?? 0),
+		byKind: data.byKind ?? {},
+		lastIndexedAt: toMs(data.lastIndexedAt),
+		dbBytes: Number(data.dbBytes ?? 0),
+		nodes_top: Array.isArray(data.nodes_top) ? data.nodes_top.map(normalizeNode) : [],
+	};
+}
+
+export async function graphSearch(
+	q: string,
+	opts: { project?: string | null; limit?: number; signal?: AbortSignal } = {},
+): Promise<GraphFact[]> {
+	const params = new URLSearchParams({ q });
+	if (opts.project != null && opts.project !== "") params.set("project", opts.project);
+	if (opts.limit != null) params.set("limit", String(opts.limit));
+	const data = await request<{ facts?: Partial<GraphFact>[] }>(`/api/graph/search?${params}`, { signal: opts.signal });
+	return Array.isArray(data.facts) ? data.facts.map(normalizeFact) : [];
+}
+
+export async function graphNodes(project?: string | null, signal?: AbortSignal): Promise<GraphNode[]> {
+	const data = await request<{ nodes?: Partial<GraphNode>[] }>(`/api/graph/nodes${graphQuery(project)}`, { signal });
+	return Array.isArray(data.nodes) ? data.nodes.map(normalizeNode) : [];
+}
+
+/** Полная пересборка графа по файлам памяти: шлюз может думать секунды, поэтому
+ * состояние «идёт пересборка» рисует вызывающий экран, а не таймаут запроса. */
+export async function graphRebuild(): Promise<GraphRebuildResult> {
+	const data = await request<Partial<GraphRebuildResult>>("/api/graph/rebuild", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({}),
+	});
+	return {
+		ok: data.ok === true,
+		scanned: Number(data.scanned ?? 0),
+		changed: Number(data.changed ?? 0),
+		facts: Number(data.facts ?? 0),
+		projects: Number(data.projects ?? 0),
+		tookMs: Number(data.tookMs ?? 0),
+		lastIndexedAt: toMs(data.lastIndexedAt),
+	};
+}
+
 export async function mintLink(id: string, view: boolean): Promise<string> {
 	const data = await request<{ url: string }>(`/api/hosts/${encodeURIComponent(id)}/link`, {
 		method: "POST",

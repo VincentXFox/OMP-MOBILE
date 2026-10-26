@@ -447,3 +447,214 @@
 	background: none;
 	border: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent);
 }
+
+/* ── Два слоя памяти: Mnemopi и граф фактов ─────────────────────────── */
+
+.mem-tabs {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.mem-tabbar {
+	display: flex;
+	gap: 6px;
+	max-width: 640px;
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0 auto;
+	padding: 0;
+}
+
+.mem-tabbar .pk-chip {
+	min-height: 32px;
+	padding: 4px 14px;
+	border: none;
+	cursor: pointer;
+}
+
+/* Раздел скрыт атрибутом: `display:flex` у вложенных блоков перебил бы
+ * встроенный `[hidden]{display:none}`, поэтому правило явное. */
+.mem-pane[hidden] {
+	display: none !important;
+}
+
+/* ── Граф: статистика, проекты, пересборка ──────────────────────────── */
+
+.mem-row--graph-stats {
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	overflow: visible;
+	padding: 0 4px;
+	font-size: 0.75rem;
+	color: var(--fg-secondary, var(--muted));
+}
+
+.graph-stat {
+	white-space: nowrap;
+}
+
+.graph-stat b {
+	font-weight: var(--weight-semibold, 600);
+	color: var(--fg);
+}
+
+.graph-stat--muted {
+	color: var(--fg-tertiary, var(--muted));
+}
+
+.mem-row--graph-actions {
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.graph-rebuild {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+.graph-rebuild-icon--busy {
+	animation: graph-spin 0.9s linear infinite;
+}
+
+@keyframes graph-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.graph-rebuild-icon--busy {
+		animation: none;
+	}
+}
+
+/* Подтверждение пересборки — строка, а не модалка: на телефоне модалка ради
+ * одной кнопки перекрывает и статистику, и поиск. */
+.graph-confirm {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.graph-confirm-text {
+	font-size: 0.75rem;
+	color: var(--fg-secondary, var(--muted));
+}
+
+.graph-confirm .pk-btn {
+	min-height: 32px;
+	padding: 4px 12px;
+	font-size: 0.75rem;
+}
+
+.graph-note {
+	font-size: 0.75rem;
+	line-height: 1.4;
+	color: var(--success);
+}
+
+/* ── Карточка факта графа ───────────────────────────────────────────── */
+
+.graph-card {
+	padding: 11px 13px;
+}
+
+.graph-kind {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 1px 8px;
+	font-size: 0.6875rem;
+	line-height: 1.5;
+	color: var(--fg-secondary, var(--muted));
+	background: var(--surface2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-pill);
+	white-space: nowrap;
+}
+
+/* Вид читается цветом: решение и правило — акцент, исправление — успех,
+ * ошибка — красный, факт и причина — нейтральные. */
+.graph-kind--decision,
+.graph-kind--rule {
+	color: var(--accent-text);
+	border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+	background: var(--accent-muted);
+}
+
+.graph-kind--fix {
+	color: var(--success);
+	border-color: color-mix(in srgb, var(--success) 45%, transparent);
+}
+
+.graph-kind--error {
+	color: var(--error);
+	border-color: color-mix(in srgb, var(--error) 45%, transparent);
+}
+
+.graph-score {
+	font-size: 0.6875rem;
+	font-variant-numeric: tabular-nums;
+	color: var(--fg-tertiary, var(--muted));
+}
+
+.graph-meta {
+	margin-top: 8px;
+	font-size: 0.6875rem;
+	line-height: 1.4;
+	color: var(--fg-tertiary, var(--muted));
+	overflow-wrap: anywhere;
+}
+
+.graph-detail {
+	margin-top: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.graph-quote {
+	padding: 8px 10px;
+	font-size: 0.8125rem;
+	line-height: 1.45;
+	color: var(--fg-secondary, var(--muted));
+	background: var(--surface2);
+	border-left: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+	border-radius: var(--radius-sm, 10px);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.graph-edge {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 6px;
+	font-size: 0.75rem;
+	color: var(--fg-secondary, var(--muted));
+	overflow-wrap: anywhere;
+}
+
+.graph-arrow {
+	color: var(--accent);
+}
+
+.graph-id {
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 0.6875rem;
+	color: var(--fg-tertiary, var(--muted));
+	overflow-wrap: anywhere;
+	user-select: all;
+}
+
+/* Пустое состояние графа живёт в потоке, а не по центру экрана: над ним уже
+ * статистика и поиск, вертикальное центрирование ломало бы прокрутку. */
+.graph-empty {
+	margin: 12px auto 0;
+	max-width: 480px;
+}

@@ -14,6 +14,9 @@ import { getAgentSettings, listModelOptions, listProjectFiles, projectGit, readP
 import { PushManager } from "./push.ts";
 import { readAttachment, saveAttachment } from "./attach.ts";
 import { isMemoryTable, listBanks, listEntries, listFacets, searchAllEntries } from "./memory.ts";
+import { openGraphDb, getMeta } from "./memory-graph/store.ts";
+import { indexSessions, rebuildGraph, stats as graphStatsOf } from "./memory-graph/index.ts";
+import { contextBlock, searchGraph, topNodes } from "./memory-graph/retrieve.ts";
 import { UpdateService, isComponentIdLocal } from "./update/service.ts";
 import { dispatchTasks, superActivity, superBoard, validateDispatchItems } from "./super.ts";
 import { bindSession, crewRoot, crewSnapshot, deskByDir, deskOfSession, ensureDesk, isSharedCwd, pruneEmptyDesk, resolveDeskForStart, setDeskCharter } from "./crew.ts";
@@ -346,6 +349,28 @@ try {
   console.log(`[tasks] возобновление не удалось: ${err instanceof Error ? err.message : String(err)}`);
 }
 
+// ---- Граф памяти ----
+// Второй слой памяти к Mnemopi: проверяемые утверждения проекта с провенансом.
+// Индексатор идёт порциями в фоне: полный проход по 300 МБ транскриптов не
+// должен задерживать ход шлюза.
+const graphDb = openGraphDb();
+const GRAPH_TICK_MS = 5 * 60 * 1000;
+let graphIndexing = false;
+function graphTick(): void {
+  if (graphIndexing) return;
+  graphIndexing = true;
+  try {
+    const result = indexSessions(graphDb, { maxFiles: 25, budgetMs: 4000 });
+    if (result.changed > 0) console.log(`[graph] +${result.facts} фактов из ${result.changed} файлов (${result.tookMs}мс)`);
+  } catch (err) {
+    console.log(`[graph] индексация не удалась: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    graphIndexing = false;
+  }
+}
+setTimeout(graphTick, 5_000);
+setInterval(graphTick, GRAPH_TICK_MS).unref?.();
+
 const poller = setInterval(() => {
   cache
     .get()
@@ -545,6 +570,40 @@ async function route(req: Request, url: URL): Promise<Response> {
     const facets = listFacets(decodeURIComponent(memFacetMatch[1]), type);
     if (!facets) return json(404, { error: "bank not found" });
     return json(200, facets);
+  }
+
+  // ---- Граф памяти (второй слой рядом с Mnemopi) ----
+  if (url.pathname === "/api/graph/stats" && req.method === "GET") {
+    const project = url.searchParams.get("project");
+    const out = graphStatsOf(graphDb);
+    return json(200, { ...out, nodes_top: project === null ? [] : topNodes(graphDb, project, 12) });
+  }
+
+  if (url.pathname === "/api/graph/search" && req.method === "GET") {
+    const q = url.searchParams.get("q") ?? "";
+    const project = url.searchParams.get("project");
+    const limitRaw = Number(url.searchParams.get("limit"));
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(100, Math.floor(limitRaw)) : 20;
+    return json(200, { facts: searchGraph(graphDb, { query: q, project, limit }) });
+  }
+
+  if (url.pathname === "/api/graph/context" && req.method === "GET") {
+    const project = url.searchParams.get("project") ?? "";
+    const q = url.searchParams.get("q");
+    const maxRaw = Number(url.searchParams.get("maxChars"));
+    const maxChars = Number.isFinite(maxRaw) && maxRaw > 0 ? Math.min(6000, Math.floor(maxRaw)) : 1400;
+    return json(200, { context: contextBlock(graphDb, { project, query: q, maxChars }) });
+  }
+
+  if (url.pathname === "/api/graph/nodes" && req.method === "GET") {
+    const project = url.searchParams.get("project") ?? "";
+    if (project === "") return json(400, { error: "нужен project" });
+    return json(200, { nodes: topNodes(graphDb, project, 40) });
+  }
+
+  if (url.pathname === "/api/graph/rebuild" && req.method === "POST") {
+    const result = rebuildGraph(graphDb);
+    return json(200, { ok: true, ...result, lastIndexedAt: Number(getMeta(graphDb, "lastIndexedAt") ?? 0) });
   }
 
   const linkMatch = /^\/api\/hosts\/([^/]+)\/link$/.exec(url.pathname);
