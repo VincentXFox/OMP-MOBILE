@@ -31,6 +31,7 @@ const DEFAULTS: Policy = {
 		"drop\\s+database",
 		"truncate\\s+table",
 		"git\\s+push[^\\n]{0,40}(?:--force|-f)\\b",
+		"git\\s+push[^\\n]{0,60}\\s\\+\\w",  // force-push через refspec: +main
 		":\\(\\)\\s*\\{\\s*:\\|:&\\s*\\}\\s*;:",
 	],
 	allow: [
@@ -52,6 +53,8 @@ const DEFAULTS: Policy = {
 		"\\b(?:docker|podman)\\s+(?:rm|stop|run|prune)\\b",
 		"\\b(?:psql|mysql|sqlite3)\\b.*(?:-c|drop|delete|update)",
 		"\\bkill\\s+-9",
+		// Кириллица: формулировка на русском не должна обходить границу.
+		"удали|удалить|снес|снести|снос|стереть|дропнуть|перезапиш|отключ|выключ|останови|прибей|зачист",
 	],
 };
 
@@ -91,7 +94,9 @@ function matches(patterns: readonly string[], action: string): string | null {
 /** Похоже ли на исполняемую команду: описание шага политикой не ограничивается. */
 function looksLikeCommand(action: string): boolean {
 	if (/[|;&$`><]|\.\.\//u.test(action)) return true;
-	return /^[\w./-]+\s/u.test(action.trim());
+	if (/^[\w./-]+\s/u.test(action.trim())) return true;
+	// Кириллица: глагол действия тоже считается командой, иначе описание обходило бы политику.
+	return /(?:удали|снес|стереть|запис|перезапиш|запусти|останови|отключ|перезагруз|дропн|скопир|перемест)/iu.test(action);
 }
 
 /** Решение по действию: deny важнее confirm, confirm важнее allow. */

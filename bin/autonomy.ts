@@ -447,7 +447,8 @@ async function cmdVerify(argv: string[]): Promise<number> {
 		console.error(`Goal Guardian: ${guardProblems.join("; ")}`);
 		return 1;
 	}
-	const engine = argValue(argv, "--engine") ?? join(import.meta.dir, "quality-gate.ts");
+	// Движок фиксирован: подмена --engine давала бы фальшивый PASS мимо настоящей проверки.
+	const engine = join(import.meta.dir, "quality-gate.ts");
 	const child = spawn("bun", [engine, "verify", gateSlug], { cwd: process.cwd() });
 	let out = "";
 	let err = "";
@@ -516,8 +517,14 @@ async function cmdReport(argv: string[]): Promise<number> {
 async function cmdDrive(argv: string[]): Promise<number> {
 	const slug = argv[1];
 	if (!slug) throw new Error("нужен slug");
-	const driver = argValue(argv, "--driver") ?? "omp -p";
+
 	let state = await load(slug);
+	// Model Router: сложный шаг уходит сильной модели, сбой драйвера — фолбэку.
+	const strong = argValue(argv, "--driver-strong");
+	const fallback = argValue(argv, "--driver-fallback");
+	const baseDriver = argValue(argv, "--driver") ?? "omp -p";
+	const isComplex = (name: string) => /(?:архитект|сложн|debug|разбер|исслед|уязвим)/iu.test(name);
+	let driver = strong && currentStep(state) && isComplex(currentStep(state)?.name ?? "") ? strong : baseDriver;
 	for (let iteration = 0; iteration < state.limits.maxSteps; iteration++) {
 		if (state.phase === "RESULT" || state.phase === "BLOCKED") break;
 		const prompt = `${context(state)}\n\nСделай ОДИН шаг. Ответ строго тремя строками:\nSTEP: <что сделал>\nRESULT: ok|fail\nEVIDENCE: <чем подтверждено>`;
@@ -534,6 +541,30 @@ async function cmdDrive(argv: string[]): Promise<number> {
 		const did = /STEP:\s*(.+)/u.exec(out)?.[1]?.trim();
 		const result = /RESULT:\s*(ok|fail)/iu.exec(out)?.[1]?.toLowerCase() as "ok" | "fail" | undefined;
 		const evidence = /EVIDENCE:\s*(.+)/u.exec(out)?.[1]?.trim();
+		if ((!did || !result) && fallback && driver !== fallback) {
+			// Роутер: драйвер не справился — задача уходит резервной модели без потери состояния.
+			log(state, "router.fallback", `драйвер «${driver}» не дал шага → «${fallback}»`);
+			driver = fallback;
+			const retry = spawn("bash", ["-lc", fallback], { cwd: process.cwd() });
+			let retryOut = "";
+			const retryDone = Promise.withResolvers<void>();
+			retry.stdout.on("data", (chunk: Buffer) => (retryOut += chunk.toString()));
+			retry.on("close", () => retryDone.resolve());
+			retry.on("error", () => retryDone.resolve());
+			retry.stdin.write(prompt);
+			retry.stdin.end();
+			await retryDone.promise;
+			const retryDid = /STEP:\s*(.+)/u.exec(retryOut)?.[1]?.trim();
+			const retryResult = /RESULT:\s*(ok|fail)/iu.exec(retryOut)?.[1]?.toLowerCase() as "ok" | "fail" | undefined;
+			const retryEvidence = /EVIDENCE:\s*(.+)/u.exec(retryOut)?.[1]?.trim();
+			if (retryDid && retryResult) {
+				const retryArgs = ["step", slug, "--did", retryDid, "--result", retryResult];
+				if (retryEvidence) retryArgs.push("--evidence", retryEvidence);
+				await cmdStep(retryArgs);
+				state = await load(slug);
+				continue;
+			}
+		}
 		if (!did || !result) {
 			state.phase = "RECOVER";
 			state.residuals.push({
