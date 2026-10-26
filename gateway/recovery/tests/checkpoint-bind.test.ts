@@ -93,6 +93,29 @@ describe("bindSessions: связывание хоста с панелью", () =
 		expect(sessions[1]?.paneId).toBeNull();
 	});
 
+	// Контрпример состязательного разбора: панель по pid принадлежит второму хосту,
+	// а её sessionId указывает на первый. Исход не должен зависеть от порядка хостов
+	// в реестре — иначе одна панель доставалась бы двум сессиям сразу.
+	test("рассинхрон панели: pid-владелец побеждает при любом порядке хостов", () => {
+		const a = host({ pid: 1000, sessionId: "sess-a", instanceId: "inst-a" });
+		const b = host({ pid: 2000, sessionId: "sess-b", instanceId: "inst-b", cwd: "/work/b" });
+		const confused = pane({ paneId: "pane-1", pid: 2000, sessionId: "sess-a", instanceId: "inst-a" });
+		const forward = bindSessions([a, b], [confused], [probe({ pid: 1000 }), probe({ pid: 2000 })]);
+		expect(forward[0]?.paneId).toBeNull();
+		expect(forward[1]?.paneId).toBe("pane-1");
+		const reversed = bindSessions([b, a], [confused], [probe({ pid: 1000 }), probe({ pid: 2000 })]);
+		expect(reversed[0]?.paneId).toBe("pane-1");
+		expect(reversed[1]?.paneId).toBeNull();
+	});
+
+	// Контрпример состязательного разбора: фолбэк не должен брать панель, где проба
+	// видит живой процесс (чужой агент) — иначе перезапуск убьёт его и упрётся в
+	// «панель не вернулась к оболочке», а сессия останется мёртвой.
+	test("фолбэк не берёт занятую панель с живым процессом", () => {
+		const sessions = bindSessions([host()], [pane({ paneId: "pane-busy", pid: 9999, sessionId: "sess-a" })], []);
+		expect(sessions[0]?.paneId).toBeNull();
+	});
+
 	test("мёртвый хост и фильтр --only не попадают в чекпоинт", () => {
 		const dead = host({ pid: 3000, sessionId: "sess-dead", alive: false });
 		const other = host({ pid: 4000, sessionId: "sess-other", cwd: "/work/other" });

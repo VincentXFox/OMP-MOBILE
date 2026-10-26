@@ -103,7 +103,11 @@ function sessionFileFor(host: OmpHost, pane: PaneInfo | null, proc: OmpProcessPr
  * агента (пустой `processInfo`, гонка после рестарта демона). Тогда законные данные
  * панели — её `sessionId`/`instanceId`: без этого фолбэка сессия попадала в
  * «вне панелей рантайма» и оставалась на старом образе после обновления.
- * Одну панель двум хостам не отдаём: первым выигрывает точный pid.
+ *
+ * Порядок фиксирован: сначала все точные pid-связи (их панели резервируются), затем
+ * фолбэки — и только на свободную панель (проба не увидела в ней процесса). Иначе
+ * рассинхрон в панели отдал бы её двум сессиям сразу, а перезапуск занял бы чужого
+ * агента и упёрся в «панель не вернулась к оболочке».
  */
 export function bindSessions(
 	hosts: readonly OmpHost[],
@@ -121,26 +125,40 @@ export function bindSessions(
 	}
 	const procByPid = new Map<number, OmpProcessProbe>();
 	for (const proc of procs) procByPid.set(proc.pid, proc);
+
+	// частичное применение (перезапуск одной сессии) — по подстроке cwd или sessionId
+	const selected = hosts.filter(
+		(host) => host.alive && (only === null || host.cwd.includes(only) || host.sessionId.includes(only)),
+	);
+	const logicalIdOf = (host: OmpHost): string => `${host.cwd}::${host.sessionId}`;
+
+	// Проход 1: точный pid. Панели резервируются до фолбэков.
+	const exact = new Map<string, PaneInfo>();
 	const claimed = new Set<string>();
+	for (const host of selected) {
+		const pane = paneByPid.get(host.pid);
+		if (pane === undefined || claimed.has(pane.paneId)) continue;
+		exact.set(logicalIdOf(host), pane);
+		claimed.add(pane.paneId);
+	}
 
 	const sessions: LogicalSession[] = [];
-	for (const host of hosts) {
-		if (!host.alive) continue;
-		// частичное применение (перезапуск одной сессии) — по подстроке cwd или sessionId
-		if (only !== null && !host.cwd.includes(only) && !host.sessionId.includes(only)) continue;
-		const byPid = paneByPid.get(host.pid) ?? null;
-		if (byPid !== null) claimed.add(byPid.paneId);
-		const bySession = paneBySession.get(host.sessionId);
-		const byInstance = paneByInstance.get(host.instanceId);
-		const pane = byPid ?? (bySession !== undefined && !claimed.has(bySession.paneId) ? bySession : null) ??
-			(byInstance !== undefined && !claimed.has(byInstance.paneId) ? byInstance : null);
-		if (pane !== null && pane !== byPid) claimed.add(pane.paneId);
+	for (const host of selected) {
+		let pane = exact.get(logicalIdOf(host)) ?? null;
+		if (pane === null) {
+			for (const candidate of [paneBySession.get(host.sessionId), paneByInstance.get(host.instanceId)]) {
+				if (candidate === undefined || candidate.pid !== null || claimed.has(candidate.paneId)) continue;
+				pane = candidate;
+				claimed.add(candidate.paneId);
+				break;
+			}
+		}
 		const proc = procByPid.get(host.pid) ?? null;
 		const file = sessionFileFor(host, pane, proc);
 		const turn = file === null ? null : classifySession(file);
 		const argv = launchArgvOf(proc?.argv ?? (pane !== null && pane.argv.length > 0 ? pane.argv : (pane?.launchArgv ?? [])));
 		sessions.push({
-			logicalId: `${host.cwd}::${host.sessionId}`,
+			logicalId: logicalIdOf(host),
 			sessionId: host.sessionId,
 			cwd: host.cwd,
 			files: file === null ? [] : [file],

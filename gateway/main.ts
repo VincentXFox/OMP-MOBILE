@@ -60,23 +60,32 @@ const GATEWAY_PKG_VERSION = (() => {
 })();
 /** Версия установленного omp для `/api/health`. Снимок на старте врал после
  * обновления (бинарь уже новый, health отдавал прежнюю цифру), поэтому читаем
- * заново раз в минуту — асинхронно, без блокировки цикла событий на спавне. */
+ * заново раз в минуту — асинхронно, без блокировки цикла событий на спавне.
+ * Кэшируется и неудачная проба: ручка /api/health отдаётся без токена, и промах
+ * не должен превращаться в спавн omp на каждый запрос; параллельные запросы
+ * делят одну пробу. */
 const OMP_VERSION_TTL_MS = 60_000;
 let ompVersion: string | null = null;
 let ompVersionAt = 0;
+let ompVersionRead: Promise<void> | null = null;
 
 async function ompVersionNow(): Promise<string | null> {
-  if (ompVersion !== null && Date.now() - ompVersionAt < OMP_VERSION_TTL_MS) return ompVersion;
-  try {
-    const proc = Bun.spawn(["omp", "--version"], { stdout: "pipe", stderr: "ignore" });
-    const [text] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    const match = /^omp\/(\d+\.\d+\.\d+)/m.exec(text);
-    if (match?.[1] !== undefined) ompVersion = match[1];
-  } catch {
-    // omp недоступен — оставляем прежнее значение, health не должен падать
-  }
-  ompVersionAt = Date.now();
-  return ompVersion;
+	if (ompVersionAt !== 0 && Date.now() - ompVersionAt < OMP_VERSION_TTL_MS) return ompVersion;
+	ompVersionRead ??= (async () => {
+		try {
+			const proc = Bun.spawn(["omp", "--version"], { stdout: "pipe", stderr: "ignore" });
+			const [text] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+			const match = /^omp\/(\d+\.\d+\.\d+)/m.exec(text);
+			if (match?.[1] !== undefined) ompVersion = match[1];
+		} catch {
+			// omp недоступен — оставляем прежнее значение, health не должен падать
+		} finally {
+			ompVersionAt = Date.now();
+			ompVersionRead = null;
+		}
+	})();
+	await ompVersionRead;
+	return ompVersion;
 }
 
 const MIME_BY_EXT: Record<string, string> = {
