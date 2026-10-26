@@ -58,15 +58,26 @@ const GATEWAY_PKG_VERSION = (() => {
     return null;
   }
 })();
-const OMP_VERSION_AT_START = (() => {
+/** Версия установленного omp для `/api/health`. Снимок на старте врал после
+ * обновления (бинарь уже новый, health отдавал прежнюю цифру), поэтому читаем
+ * заново раз в минуту — асинхронно, без блокировки цикла событий на спавне. */
+const OMP_VERSION_TTL_MS = 60_000;
+let ompVersion: string | null = null;
+let ompVersionAt = 0;
+
+async function ompVersionNow(): Promise<string | null> {
+  if (ompVersion !== null && Date.now() - ompVersionAt < OMP_VERSION_TTL_MS) return ompVersion;
   try {
-    const out = Bun.spawnSync(["omp", "--version"], { stdout: "pipe", stderr: "ignore" });
-    const match = /^omp\/(\d+\.\d+\.\d+)/m.exec(out.stdout.toString());
-    return match?.[1] ?? null;
+    const proc = Bun.spawn(["omp", "--version"], { stdout: "pipe", stderr: "ignore" });
+    const [text] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    const match = /^omp\/(\d+\.\d+\.\d+)/m.exec(text);
+    if (match?.[1] !== undefined) ompVersion = match[1];
   } catch {
-    return null;
+    // omp недоступен — оставляем прежнее значение, health не должен падать
   }
-})();
+  ompVersionAt = Date.now();
+  return ompVersion;
+}
 
 const MIME_BY_EXT: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -455,7 +466,7 @@ async function route(req: Request, url: URL): Promise<Response> {
         pid: process.pid,
         startedAt: new Date(PROCESS_STARTED_AT).toISOString(),
         buildSha: GATEWAY_BUILD_SHA,
-        ompVersion: OMP_VERSION_AT_START,
+        ompVersion: await ompVersionNow(),
         version: GATEWAY_PKG_VERSION,
         uptimeMs: Date.now() - PROCESS_STARTED_AT,
         time: Date.now(),
