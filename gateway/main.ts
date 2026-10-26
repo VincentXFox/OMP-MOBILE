@@ -559,7 +559,9 @@ async function route(req: Request, url: URL): Promise<Response> {
     const limitRaw = Number(url.searchParams.get("limit"));
     const offsetRaw = Number(url.searchParams.get("offset"));
     const limit = Number.isInteger(limitRaw) && limitRaw >= 1 && limitRaw <= 200 ? limitRaw : 50;
-    const offset = Number.isInteger(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+    // Верхняя граница offset: в режиме all на каждую таблицу берётся пул
+    // limit+offset, и огромное смещение = полный скан пяти таблиц на запрос.
+    const offset = Number.isInteger(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 5000) : 0;
     const q = url.searchParams.get("q")?.trim() || undefined;
     const sortRaw = url.searchParams.get("sort") ?? "";
     const sort = sortRaw === "importance" || sortRaw === "recall" || sortRaw === "confidence" || sortRaw === "ts" ? sortRaw : undefined;
@@ -567,7 +569,13 @@ async function route(req: Request, url: URL): Promise<Response> {
     const kind = url.searchParams.get("kind")?.trim() || undefined;
     const minRaw = Number(url.searchParams.get("minImportance"));
     const minImportance = Number.isFinite(minRaw) && minRaw > 0 ? minRaw : undefined;
-    const bank = decodeURIComponent(memMatch[1]);
+    let bank: string;
+    try {
+      bank = decodeURIComponent(memMatch[1]);
+    } catch {
+      // Битое процентное кодирование — ошибка вызывающего, а не шлюза.
+      return json(400, { error: "malformed bank name" });
+    }
     const result =
       type === "all"
         ? searchAllEntries(bank, { q, sort, source, kind, minImportance, limit, offset })
@@ -580,7 +588,13 @@ async function route(req: Request, url: URL): Promise<Response> {
   if (memFacetMatch && req.method === "GET") {
     const type = url.searchParams.get("type") ?? "";
     if (!isMemoryTable(type)) return json(400, { error: "unknown memory type" });
-    const facets = listFacets(decodeURIComponent(memFacetMatch[1]), type);
+    let facetBank: string;
+    try {
+      facetBank = decodeURIComponent(memFacetMatch[1]);
+    } catch {
+      return json(400, { error: "malformed bank name" });
+    }
+    const facets = listFacets(facetBank, type);
     if (!facets) return json(404, { error: "bank not found" });
     return json(200, facets);
   }

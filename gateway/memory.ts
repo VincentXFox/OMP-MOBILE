@@ -120,8 +120,12 @@ const TABLE_SPEC: Record<MemoryTable, TableSpec> = {
     confidenceColumn: null,
   },
   annotations: {
-    columns: `CAST(id AS TEXT) AS id, kind AS title, value AS body, created_at AS ts, source, kind,
-       NULL AS importance, confidence, NULL AS recallCount, NULL AS sessionId, memory_id AS memoryId`,
+    // created_at — это CURRENT_TIMESTAMP SQLite: UTC без суффикса зоны. Отдаём ISO с «Z»,
+    // иначе и JS-парсинг, и сортировка слияния читают его как локальное время (сдвиг на
+    // смещение пояса и неверная группа дня).
+    columns: `CAST(id AS TEXT) AS id, kind AS title, value AS body,
+       CASE WHEN instr(created_at, ' ') > 0 THEN replace(created_at, ' ', 'T') || 'Z' ELSE created_at END AS ts,
+       source, kind, NULL AS importance, confidence, NULL AS recallCount, NULL AS sessionId, memory_id AS memoryId`,
     timeColumn: "created_at",
     searchColumns: "kind || ' ' || value",
     sourceColumn: "source",
@@ -177,27 +181,60 @@ interface Where {
   params: (string | number)[];
 }
 
+/** Варианты шаблона по регистру. LIKE в SQLite регистронезависим только для ASCII,
+ * поэтому кириллицу сравниваем вариантами запроса: как есть, нижним, верхним и с
+ * заглавной первой буквы. Асимметрии нет: «память» и «Память» дают одну выдачу.
+ * Произвольный смешанный регистр («ПаМять») так не ловится — это ограничение
+ * схемы Mnemopi (нормализованной колонки нет), а не недосмотр. */
+function likeVariants(q: string): string[] {
+  const capitalized = q.charAt(0).toUpperCase() + q.slice(1);
+  const forms = [q, q.toLowerCase(), q.toUpperCase(), capitalized];
+  return [...new Set(forms.filter(form => form.length > 0))].map(likePattern);
+}
+
 /** Условия отбора: текст, источник, вид записи и порог важности. */
 function buildWhere(spec: TableSpec, opts: QueryOptions): Where {
   const clauses: string[] = [];
   const params: (string | number)[] = [];
   if (opts.q) {
-    clauses.push(`(${spec.searchColumns}) LIKE ? ESCAPE '\\'`);
-    params.push(likePattern(opts.q));
+    const variants = likeVariants(opts.q);
+    const parts = variants.map(() => `(${spec.searchColumns}) LIKE ? ESCAPE '\\'`);
+    clauses.push(`(${parts.join(" OR ")})`);
+    params.push(...variants);
   }
-  if (opts.source && spec.sourceColumn !== null) {
-    clauses.push(`${spec.sourceColumn} = ?`);
-    params.push(opts.source);
+  if (opts.source !== undefined) {
+    // Фильтр по колонке, которой у таблицы нет, — это «ни одной строки», а не
+    // «фильтр проигнорируем»: молчаливое игнорирование врало в total.
+    if (spec.sourceColumn === null) clauses.push("0");
+    else {
+      clauses.push(`${spec.sourceColumn} = ?`);
+      params.push(opts.source);
+    }
   }
-  if (opts.kind && spec.kindColumn !== null) {
-    clauses.push(`${spec.kindColumn} = ?`);
-    params.push(opts.kind);
+  if (opts.kind !== undefined) {
+    if (spec.kindColumn === null) clauses.push("0");
+    else {
+      clauses.push(`${spec.kindColumn} = ?`);
+      params.push(opts.kind);
+    }
   }
-  if (opts.minImportance !== undefined && spec.importanceColumn !== null) {
-    clauses.push(`${spec.importanceColumn} >= ?`);
-    params.push(opts.minImportance);
+  if (opts.minImportance !== undefined) {
+    if (spec.importanceColumn === null) clauses.push("0");
+    else {
+      clauses.push(`${spec.importanceColumn} >= ?`);
+      params.push(opts.minImportance);
+    }
   }
   return { sql: clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "", params };
+}
+
+/** Может ли таблица применить фильтр: у неё должна быть нужная колонка. Без этого
+ * таблицы без колонки попадали в выдачу НЕотфильтрованными, и total врал. */
+function canFilter(spec: TableSpec, opts: QueryOptions): boolean {
+  if (opts.source !== undefined && spec.sourceColumn === null) return false;
+  if (opts.kind !== undefined && spec.kindColumn === null) return false;
+  if (opts.minImportance !== undefined && spec.importanceColumn === null) return false;
+  return true;
 }
 
 function queryEntries(db: Database, table: MemoryTable, opts: QueryOptions): { total: number; entries: MemoryEntry[] } {
@@ -210,7 +247,10 @@ function queryEntries(db: Database, table: MemoryTable, opts: QueryOptions): { t
   })();
   const rows = db
     .query<MemoryEntry, (string | number)[]>(
-      `SELECT ${spec.columns} FROM "${table}"${where.sql} ORDER BY ${sortColumn(spec, opts.sort)} DESC NULLS LAST LIMIT ? OFFSET ?`,
+      // Второй ключ сортировки — id: без него OFFSET-страницы режут блоки равных
+      // значений (у важности их сотни) произвольно, и «Показать ещё» может
+      // показать строку дважды, пропустив другую.
+      `SELECT ${spec.columns} FROM "${table}"${where.sql} ORDER BY ${sortColumn(spec, opts.sort)} DESC NULLS LAST, id ASC LIMIT ? OFFSET ?`,
     )
     .all(...binder);
   return { total, entries: rows.map(row => ({ ...row, table })) };
@@ -237,7 +277,9 @@ function enrichPage(db: Database, table: MemoryTable, entries: MemoryEntry[]): v
       }
       for (const entry of entries) entry.annotations = byMemory.get(entry.id) ?? [];
     }
-    if (tableExists(db, "gists")) {
+    // Гисты ссылаются только на эпизоды (episodic_memory), поэтому для памяти
+    // отдельный запрос не нужен.
+    if (table === "episodic_memory" && tableExists(db, "gists")) {
       const rows = db
         .query<{ memory_id: string; text: string }, string[]>(`SELECT memory_id, text FROM gists WHERE memory_id IN (${placeholders})`)
         .all(...ids);
@@ -324,19 +366,21 @@ export function listEntries(
 }
 
 /** Поиск сразу по всем разделам: «где я это писал» не должно требовать угадать
- * вкладку. Слияние по времени; total — сумма совпадений по всем таблицам. */
+ * вкладку. Слияние строго по времени: пул берётся по тому же ключу, по которому
+ * сливаем, иначе при sort != ts строки теряются и повторяются. */
 export function searchAllEntries(bank: string, opts: QueryOptions): { total: number; entries: MemoryEntry[] } | null {
   const db = openBankDb(bank);
   if (!db) return null;
   try {
     let total = 0;
     const merged: MemoryEntry[] = [];
+    const optsForMerge: QueryOptions = { ...opts, sort: "ts" };
     for (const table of MEMORY_TABLES) {
       if (!tableExists(db, table)) continue;
-      // Фильтр по источнику таблица без этой колонки применить не может — такие
-      // разделы в режиме «по источнику» просто не участвуют.
-      if (opts.source !== undefined && TABLE_SPEC[table].sourceColumn === null) continue;
-      const result = queryEntries(db, table, { ...opts, offset: 0, limit: opts.limit + opts.offset });
+      // Таблица без нужной колонки фильтр применить не может: в такой выдаче
+      // строки шли бы НЕотфильтрованными, а total считал бы их как совпадения.
+      if (!canFilter(TABLE_SPEC[table], optsForMerge)) continue;
+      const result = queryEntries(db, table, { ...optsForMerge, offset: 0, limit: optsForMerge.limit + optsForMerge.offset });
       total += result.total;
       enrichPage(db, table, result.entries);
       merged.push(...result.entries);

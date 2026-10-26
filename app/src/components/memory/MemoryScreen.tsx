@@ -128,10 +128,19 @@ function firstLine(text: string): string {
 	return at === -1 ? clean : clean.slice(0, at);
 }
 
+/** Время записи в мс. Часть таблиц отдаёт ISO с «Z», но SQLite-времена без зоны
+ * (например, created_at до нормализации) JS читает как локальные — сдвиг на пояс.
+ * Поэтому наивную строку считаем UTC явно. */
+function memoryTime(ts: string | null): number {
+	if (ts === null) return Number.NaN;
+	const naive = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(ts);
+	return Date.parse(naive ? `${ts.replace(" ", "T")}Z` : ts);
+}
+
 /** «Сегодня», «Вчера», «16 октября» — заголовок группы при сортировке по времени. */
 function dayHeading(ts: string | null): string {
 	if (ts === null) return "Без даты";
-	const time = Date.parse(ts);
+	const time = memoryTime(ts);
 	if (!Number.isFinite(time)) return "Без даты";
 	const date = new Date(time);
 	const now = new Date();
@@ -172,9 +181,17 @@ function Highlight(props: { text: string; query: string }): ReactNode {
 function Meter(props: { value: number; label: string; tone: "high" | "mid" | "low"; icon?: ReactNode }): ReactNode {
 	const percent = Math.round(Math.min(1, Math.max(0, props.value)) * 100);
 	return (
-		<span className={`mem-meter mem-meter--${props.tone}`} title={`${props.label}: ${percent}%`}>
+		<span
+			className={`mem-meter mem-meter--${props.tone}`}
+			title={`${props.label}: ${percent}%`}
+			role="meter"
+			aria-valuenow={percent}
+			aria-valuemin={0}
+			aria-valuemax={100}
+			aria-label={props.label}
+		>
 			{props.icon}
-			<span className="mem-meter-track">
+			<span className="mem-meter-track" aria-hidden="true">
 				<span className="mem-meter-fill" style={{ width: `${percent}%` }} />
 			</span>
 			<span className="mem-meter-label">{props.label}</span>
@@ -185,14 +202,17 @@ function Meter(props: { value: number; label: string; tone: "high" | "mid" | "lo
 function FactCard(props: { entry: MemoryEntry; query: string; open: boolean; onToggle: () => void }): ReactNode {
 	const { entry, open } = props;
 	const body = cleanMemoryText(entry.body);
-	const confidence = entry.confidence ?? 0;
+	const confidence = entry.confidence;
+	const confidenceTone = confidence === null ? "low" : importanceLevel(confidence);
 	return (
 		<button type="button" className="pk-card mem-card mem-card--fact" aria-expanded={open} onClick={props.onToggle}>
 			<div className="mem-top">
-				<span className="mem-when">{dayTimeLabel(Date.parse(entry.ts ?? ""))}</span>
+				<span className="mem-when">{dayTimeLabel(memoryTime(entry.ts))}</span>
 				{kindBadge(entry) !== null && <span className="mem-badge">{kindBadge(entry)}</span>}
 				<span className="mem-grow" />
-				<Meter value={confidence} tone={importanceLevel(confidence)} label={`уверенность ${Math.round(confidence * 100)}%`} />
+				{confidence !== null && (
+					<Meter value={confidence} tone={confidenceTone} label={`уверенность ${Math.round(confidence * 100)}%`} />
+				)}
 			</div>
 			<div className={`mem-body${open ? " mem-body--open" : ""}`}>
 				<Highlight text={body} query={props.query} />
@@ -209,7 +229,7 @@ function MemoryCard(props: { entry: MemoryEntry; query: string; open: boolean; o
 	return (
 		<button type="button" className="pk-card mem-card" aria-expanded={open} onClick={props.onToggle}>
 			<div className="mem-top">
-				<span className="mem-when">{dayTimeLabel(Date.parse(entry.ts ?? ""))}</span>
+				<span className="mem-when">{dayTimeLabel(memoryTime(entry.ts))}</span>
 				{kindBadge(entry) !== null && <span className="mem-badge">{kindBadge(entry)}</span>}
 				{entry.source && (
 					<span className="mem-badge mem-badge--src" title={`источник ${entry.source}`}>
@@ -263,7 +283,7 @@ function ServiceRow(props: { entry: MemoryEntry; query: string; onOpenParent: (e
 					{entry.title != null && entry.title !== text && <span className="mem-service-key">{entry.title}</span>}
 					<Highlight text={text} query={props.query} />
 				</span>
-				<span className="mem-when">{dayTimeLabel(Date.parse(entry.ts ?? ""))}</span>
+				<span className="mem-when">{dayTimeLabel(memoryTime(entry.ts))}</span>
 			</div>
 			{parent.length > 0 && entry.memoryId != null && (
 				<button type="button" className="mem-service-parent" onClick={() => props.onOpenParent(entry)}>
@@ -294,6 +314,8 @@ function MnemopiView(): ReactNode {
 	const [error, setError] = useState<string | null>(null);
 	const [openId, setOpenId] = useState<string | null>(null);
 	const [allBanks, setAllBanks] = useState(false);
+	// Раздел, из которого ушли в «Служебное»: повторное нажатие тумблера возвращает туда же.
+	const scopeBeforeService = useRef<MemoryScope>("working_memory");
 	const reqSeq = useRef(0);
 
 	// «Служебное» — не раздел данных, а режим показа гистов и аннотаций.
@@ -338,23 +360,37 @@ function MnemopiView(): ReactNode {
 		setKind(null);
 	}, []);
 
-	const pickService = useCallback((next: MemoryTable) => {
-		setService(next);
-		setScope(next);
-		setShowService(true);
-		setSort("ts");
-		setSource(null);
-		setKind(null);
-	}, []);
+	const pickService = useCallback(
+		(next: MemoryTable) => {
+			// Запоминаем содержательный раздел, из которого уходим в «Служебное»,
+			// чтобы тумблер мог вернуть обратно.
+			if (!showService && scope !== "gists" && scope !== "annotations") scopeBeforeService.current = scope;
+			setService(next);
+			setScope(next);
+			setShowService(true);
+			setSort("ts");
+			setSource(null);
+			setKind(null);
+		},
+		[scope, showService],
+	);
 
 	const load = useCallback(
 		async (offset: number, append: boolean): Promise<void> => {
 			if (!bank) return;
 			const seq = ++reqSeq.current;
 			setLoading(true);
+			// Смена банка/раздела/фильтра начинает список заново: иначе под новой
+			// шапкой висят строки прежнего выбора, а при ошибке — висят постоянно.
+			if (!append) {
+				setEntries([]);
+				setTotal(0);
+			}
 			try {
 				const data = await fetchMemoryEntries(bank, table, {
-					q: search || undefined,
+					// Порог совпадает с тем, что показывает интерфейс: с одного символа
+					// список не сужаем, иначе он молча пустеет без счётчика отбора.
+					q: search.length >= 2 ? search : undefined,
 					sort,
 					source: source ?? undefined,
 					kind: kind ?? undefined,
@@ -400,12 +436,12 @@ function MnemopiView(): ReactNode {
 	}, [bank, facetsTable]);
 
 	// Переход «из записи»: у гистов и аннотаций смысл живёт в родительской памяти,
-	// а ссылка — только id. Поиск шлюза идёт по тексту, поэтому ищем по началу
-	// родительской записи и переключаемся в тот раздел, где она лежит.
+	// а ссылка — только id. Поиск шлюза идёт по СЫРОМУ тексту, поэтому seed берём
+	// из него же: очищенный текст теряет теги и перестаёт быть подстрокой родителя.
 	const openParent = useCallback((entry: MemoryEntry) => {
-		const parentText = entry.episode != null ? cleanMemoryText(entry.episode) : "";
-		if (parentText.length === 0) return;
-		const seed = parentText.slice(0, 48);
+		const parentText = entry.episode ?? "";
+		if (parentText.trim().length === 0) return;
+		const seed = parentText.slice(0, 48).trim();
 		setShowService(false);
 		setScope(entry.table === "gists" ? "episodic_memory" : "working_memory");
 		setSource(null);
@@ -488,6 +524,8 @@ function MnemopiView(): ReactNode {
 
 	const sources = facets?.sources ?? [];
 	const kinds = facets?.kinds ?? [];
+	/** Список сужен пользователем: от этого зависят счётчик, подсказки и пустое состояние. */
+	const filtered = search.length >= 2 || source !== null || kind !== null;
 
 	// Банков на машине десятки: тестовые прогоны оставляют по банку на каждый
 	// запуск. В шапке — только непустые, и лишь первые; остальные по кнопке.
@@ -507,13 +545,16 @@ function MnemopiView(): ReactNode {
 				<button
 					key={option.id}
 					type="button"
+					aria-pressed={sort === option.id}
 					className={`pk-chip${sort === option.id ? " pk-chip--on" : ""}`}
 					onClick={() => setSort(option.id)}
 				>
 					{option.label}
 				</button>
 			))}
-			{sources.length > 0 && (
+			{/* Счётчики фасетов считаются по всей таблице и с активным поиском
+			 * разошлись бы с «Найдено N» — пока ищем, чипов не показываем. */}
+			{search.length < 2 && sources.length > 0 && (
 				<>
 					<span className="mem-sep" aria-hidden="true" />
 					{sources.map(item => (
@@ -521,6 +562,7 @@ function MnemopiView(): ReactNode {
 							key={item.value}
 							type="button"
 							title={`источник ${item.value}`}
+							aria-pressed={source === item.value}
 							className={`pk-chip${source === item.value ? " pk-chip--on" : ""}`}
 							onClick={() => setSource(current => (current === item.value ? null : item.value))}
 						>
@@ -530,13 +572,14 @@ function MnemopiView(): ReactNode {
 					))}
 				</>
 			)}
-			{kinds.length > 1 && (
+			{search.length < 2 && kinds.length > 1 && (
 				<>
 					<span className="mem-sep" aria-hidden="true" />
 					{kinds.map(item => (
 						<button
 							key={`kind:${item.value}`}
 							type="button"
+							aria-pressed={kind === item.value}
 							className={`pk-chip${kind === item.value ? " pk-chip--on" : ""}`}
 							onClick={() => setKind(current => (current === item.value ? null : item.value))}
 						>
@@ -589,6 +632,7 @@ function MnemopiView(): ReactNode {
 						<button
 							key={id}
 							type="button"
+							aria-pressed={!showService && scope === id}
 							className={`pk-chip${!showService && scope === id ? " pk-chip--on" : ""}`}
 							onClick={() => pickScope(id)}
 						>
@@ -598,8 +642,9 @@ function MnemopiView(): ReactNode {
 					))}
 					<button
 						type="button"
+						aria-pressed={showService}
 						className={`pk-chip mem-service-toggle${showService ? " pk-chip--on" : ""}`}
-						onClick={() => pickService(service)}
+						onClick={() => (showService ? pickScope(scopeBeforeService.current) : pickService(service))}
 					>
 						Служебное
 						<span className="mem-count">{(counts.gists ?? 0) + (counts.annotations ?? 0)}</span>
@@ -608,7 +653,13 @@ function MnemopiView(): ReactNode {
 				{showService && (
 					<div className="mem-row mem-row--service">
 						{SERVICE_SCOPES.map(id => (
-							<button key={id} type="button" className={`pk-chip${service === id ? " pk-chip--on" : ""}`} onClick={() => pickService(id)}>
+							<button
+								key={id}
+								type="button"
+								aria-pressed={service === id}
+								className={`pk-chip${service === id ? " pk-chip--on" : ""}`}
+								onClick={() => pickService(id)}
+							>
 								{SCOPE_INFO[id].label}
 								<span className="mem-count">{counts[id] ?? 0}</span>
 							</button>
@@ -637,7 +688,7 @@ function MnemopiView(): ReactNode {
 			<div className="mem-body-wrap">
 				{filtersRow}
 				<div className="mem-hint">{info.hint}</div>
-				{(search.length >= 2 || source !== null || kind !== null) && (
+				{filtered && (
 					<div className="mem-filterline">
 						Найдено {total} {pluralRu(total, "запись", "записи", "записей")}
 						{search.length >= 2 && ` по «${search.length > 40 ? `${search.slice(0, 40)}…` : search}»`}
@@ -672,13 +723,13 @@ function MnemopiView(): ReactNode {
 
 				{!loading && error == null && entries.length === 0 && (
 					<div className="pk-empty">
-						<div className="pk-empty-title">{search.length >= 2 ? "Ничего не найдено" : "Пусто"}</div>
+						<div className="pk-empty-title">{filtered ? "Ничего не найдено" : "Пусто"}</div>
 						<div className="pk-empty-text">
-							{search.length >= 2
-								? table === ALL_SCOPE
-									? "Другие слова — сравнение идёт по подстроке без учёта регистра."
-									: "Попробуй «искать везде»: в других разделах может быть то же слово."
-								: "В этом банке таких записей нет."}
+							{!filtered
+								? "В этом банке таких записей нет."
+								: table === ALL_SCOPE
+									? "Другие слова. Подстрока ищется без учёта регистра латиницы; кириллица — с учётом."
+									: "Попробуй «искать везде» или сбрось фильтры: в других разделах может быть то же слово."}
 						</div>
 					</div>
 				)}
@@ -1005,7 +1056,7 @@ function GraphSection(): ReactNode {
 			<div className="mem-body-wrap">
 				<div className="mem-hint">
 					Граф — второй слой памяти: факты из сессий с цитатами-доказательствами. Статистика и «Пересобрать» относятся ко всему графу,
-					фильтр проекта сужает только поиск. Слова запроса подсвечиваются.
+					фильтр проекта сужает карту и поиск. Слова запроса подсвечиваются.
 				</div>
 
 				{statsError != null && <GraphError text={statsError} onRetry={() => setAttempt(n => n + 1)} />}
