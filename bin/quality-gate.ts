@@ -19,10 +19,11 @@
  *
  * Где лежит: ./.omp/gate/<slug>/ (contract.json, certificate.json, certificate.md, logs/)
  */
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 
 type Risk = "normal" | "high";
 
@@ -40,6 +41,8 @@ interface Contract {
 	criteria: { id: string; text: string }[];
 	checks: CheckSpec[];
 	probes: { name: string; url: string; expect: string }[];
+	/** Явные исключения для фикстур/документации: путь + причина, попадают в сертификат. */
+	secretExemptions: { path: string; reason: string }[];
 	createdAt: string;
 	baseline: Record<string, string> | null;
 }
@@ -71,6 +74,7 @@ interface Review {
 	verdict: "PASS" | "FAIL" | "N/A";
 	note: string;
 	at: string;
+	supersedesFail?: boolean;
 }
 
 interface Certificate {
@@ -83,8 +87,10 @@ interface Certificate {
 	checks: CheckResult[];
 	probes: ProbeResult[];
 	invariants: { name: string; ok: boolean; detail: string }[];
+	after: Record<string, string>;
 	regression: { name: string; ok: boolean }[];
 	review: Review | null;
+	reviews: Review[];
 	residual: string[];
 	status: "ГОТОВО" | "PARTIAL" | "FAILED";
 }
@@ -121,12 +127,28 @@ function tail(text: string, limit = 400): string {
 
 async function execCheck(spec: CheckSpec, logDir: string): Promise<CheckResult> {
 	const started = Date.now();
-	const logFile = join(logDir, `${spec.name.replace(/[^\w.-]+/g, "_")}.log`);
+	// Имя лога уникально: две проверки с похожими именами не должны затирать доказательства друг друга.
+	const safeName = spec.name.replace(/[^\w.-]+/gu, "_").slice(0, 40);
+	const logFile = join(logDir, `${safeName}-${createHash("sha256").update(`${spec.name}\u0000${spec.cmd}`).digest("hex").slice(0, 8)}.log`);
 	const { promise: resultPromise, resolve: resolveResult } = Promise.withResolvers<{ code: number | null; out: string; err: string }>();
-	const child = spawn("bash", ["-lc", spec.cmd], { cwd: process.cwd(), env: process.env });
+	const child = spawn("bash", ["-lc", spec.cmd], { cwd: process.cwd(), env: process.env, detached: true });
 	let out = "";
 	let err = "";
-	const timer = setTimeout(() => child.kill("SIGKILL"), spec.timeoutMs);
+	// Убиваем всю группу: `cmd | cat` держит пайп, обычный kill оставлял гейт висеть.
+	const killGroup = (): void => {
+		try {
+			process.kill(-child.pid, "SIGKILL");
+		} catch {
+			child.kill("SIGKILL");
+		}
+	};
+	const timer = setTimeout(() => {
+		killGroup();
+		clearTimeout(hardTimer);
+		resolveResult({ code: null, out, err: `${err}\n[таймаут ${spec.timeoutMs} мс: процесс убит]` });
+	}, spec.timeoutMs);
+	// Жёсткая страховка: если внуки всё равно держат пайпы, не ждём их.
+	const hardTimer = setTimeout(() => resolveResult({ code: null, out, err: `${err}\n[проверка не закрыла пайпы]` }), spec.timeoutMs + 3000);
 	child.stdout.on("data", (chunk: Buffer) => {
 		out += chunk.toString();
 		if (out.length > 400_000) out = out.slice(-200_000);
@@ -137,10 +159,12 @@ async function execCheck(spec: CheckSpec, logDir: string): Promise<CheckResult> 
 	});
 	child.on("close", (code) => {
 		clearTimeout(timer);
+		clearTimeout(hardTimer);
 		resolveResult({ code, out, err });
 	});
 	child.on("error", (error) => {
 		clearTimeout(timer);
+		clearTimeout(hardTimer);
 		resolveResult({ code: null, out, err: `${err}\n${String(error)}` });
 	});
 	const result = await resultPromise;
@@ -160,8 +184,12 @@ async function execCheck(spec: CheckSpec, logDir: string): Promise<CheckResult> 
 
 function git(args: string[]): string {
 	// Синхронно: снимок базовой линии и список файлов читаются сразу, а не по событию close.
-	const result = Bun.spawnSync(["git", ...args], { cwd: process.cwd() });
-	return result.stdout.toString().trim();
+	try {
+		const result = Bun.spawnSync(["git", ...args], { cwd: process.cwd() });
+		return result.stdout.toString().trim();
+	} catch {
+		return "";
+	}
 }
 
 function gitOr(args: string[], fallback = "нет git"): string {
@@ -173,7 +201,7 @@ function gitOr(args: string[], fallback = "нет git"): string {
 	}
 }
 
-async function snapshotBaseline(risk: Risk): Promise<Record<string, string>> {
+async function snapshotBaseline(risk: Risk, pre = true): Promise<Record<string, string>> {
 	const baseline: Record<string, string> = {
 		"git HEAD": gitOr(["rev-parse", "--short", "HEAD"]),
 		"git изменений": gitOr(["status", "--porcelain"]).split("\n").filter(Boolean).length.toString(),
@@ -183,12 +211,19 @@ async function snapshotBaseline(risk: Risk): Promise<Record<string, string>> {
 		const units = ["omp-pocket-gateway", "omp-pocket-runtime", "omp-local-relay"];
 		const states: string[] = [];
 		for (const unit of units) {
-			const child = spawn("systemctl", ["--user", "is-active", unit]);
-			const { promise: unitPromise, resolve: resolveUnit } = Promise.withResolvers<number>();
-			child.on("close", (code) => resolveUnit(code ?? 1));
-			states.push(`${unit}=${(await unitPromise) === 0 ? "active" : "inactive"}`);
+			let state = "недоступно";
+			try {
+				const child = spawn("systemctl", ["--user", "is-active", unit]);
+				const { promise: unitPromise, resolve: resolveUnit } = Promise.withResolvers<number>();
+				child.on("close", (code) => resolveUnit(code ?? 1));
+				child.on("error", () => resolveUnit(1));
+				state = (await unitPromise) === 0 ? "active" : "inactive";
+			} catch {
+				// на хосте без systemctl состояние просто не наблюдается
+			}
+			states.push(`${unit}=${state}`);
 		}
-		baseline["юниты до"] = states.join(", ");
+		baseline[risk === "high" ? (pre ? "юниты до" : "юниты после") : "юниты"] = states.join(", ");
 	}
 	return baseline;
 }
@@ -202,46 +237,72 @@ const SECRET_PATTERNS: readonly { name: string; re: RegExp }[] = [
 	{ name: "telegram bot token", re: /\b\d{8,12}:[A-Za-z0-9_-]{30,}\b/ },
 ];
 
-async function invariants(): Promise<{ name: string; ok: boolean; detail: string }[]> {
+async function invariants(
+	checks: readonly CheckSpec[],
+	exemptions: readonly { path: string; reason: string }[],
+): Promise<{ name: string; ok: boolean; detail: string }[]> {
 	const result: { name: string; ok: boolean; detail: string }[] = [];
-	// 1. Секреты не попадают в изменения.
+	// 1. Секреты не попадают в изменения. Усечение по символам давало ложный PASS на больших файлах,
+	// поэтому читаем файл целиком до 2 МиБ, а всё, что больше, честно помечаем как непроверенное.
 	const diff = spawn("git", ["diff", "--unified=0", "HEAD"], { cwd: process.cwd() });
 	let diffText = "";
 	const { promise: diffPromise, resolve: resolveDiff } = Promise.withResolvers<void>();
 	diff.stdout.on("data", (chunk: Buffer) => (diffText += chunk.toString()));
 	diff.on("close", () => resolveDiff());
+	diff.on("error", () => resolveDiff());
 	await diffPromise;
-	const addedParts = diffText
+	const scannedParts: string[] = diffText
 		.split("\n")
 		.filter((line) => line.startsWith("+") && !line.startsWith("+++"));
-	// Новые файлы в diff HEAD не попадают: секрет в ещё не добавленном файле — тот же риск.
 	const untracked = gitOr(["ls-files", "--others", "--exclude-standard"], "")
 		.split("\n")
-		.filter(Boolean)
-		.slice(0, 200);
+		.filter(Boolean);
+	const oversized: string[] = [];
+	const readFailed: string[] = [];
 	for (const file of untracked) {
 		try {
-			const content = await readFile(join(process.cwd(), file), "utf8");
-			addedParts.push(`+ ${file}`, ...content.slice(0, 20_000).split("\n").map((line) => `+${line}`));
+			const path = join(process.cwd(), file);
+			const info = await stat(path);
+			if (info.size > 2 * 1024 * 1024) {
+				oversized.push(file);
+				continue;
+			}
+			const content = await readFile(path, "utf8");
+			scannedParts.push(`+ ${file}`, ...content.split("\n").map((line) => `+${line}`));
 		} catch {
-			// бинарник или нечитаемый файл — секретов в текстовом виде там нет
+			readFailed.push(file);
 		}
 	}
-	const added = addedParts.join("\n");
+	const added = scannedParts.join("\n");
+	// Исключения не вычищают строки молча: находки в них перечисляются в отчёте.
+	const exemptHits: string[] = [];
+	for (const exemption of exemptions) {
+		const pattern = SECRET_PATTERNS.find((item) => item.re.test(added) && added.includes(exemption.path));
+		if (pattern) exemptHits.push(`${exemption.path}: ${pattern.name}`);
+	}
 	const hits = SECRET_PATTERNS.filter((pattern) => pattern.re.test(added)).map((pattern) => pattern.name);
 	result.push({
 		name: "секреты не в диффе",
-		ok: hits.length === 0,
-		detail: hits.length === 0 ? `добавленных строк ${added.length}, совпадений 0` : `найдено: ${hits.join(", ")}`,
+		ok: hits.length === 0 && oversized.length === 0 && readFailed.length === 0,
+		detail:
+			hits.length > 0
+				? `найдено: ${hits.join(", ")}`
+				: oversized.length > 0 || readFailed.length > 0
+					? `не проверено полностью: ${[...oversized.map((f) => `${f} > 2 МиБ`), ...readFailed.map((f) => `${f} не прочитан`)].join(", ").slice(0, 200)}`
+					: `строк ${scannedParts.length}, файлов ${untracked.length}, совпадений 0${exemptHits.length > 0 ? `; исключения: ${exemptHits.join("; ")}` : ""}`,
 	});
-	// 2. Опасные git-операции не выполняются автоматически.
-	const destructive = ["push --force", "push -f", "reset --hard", "clean -fdx"].filter((needle) =>
-		gitOr(["status", "--porcelain"]).includes(needle),
+	// 2. Необратимые git-команды. Наблюдать чужие вызовы мы не можем, поэтому проверяем ровно то,
+	// что видим: команды объявленных проверок и наличие точки возврата для отката рабочего дерева.
+	const destructive = checks.filter((check) =>
+		/(?:push\s+(?:--force|-f)|reset\s+--hard|clean\s+-fdx)/u.test(check.cmd),
 	);
 	result.push({
-		name: "нет необратимых git-команд",
+		name: "в проверках нет необратимых git-команд",
 		ok: destructive.length === 0,
-		detail: destructive.length === 0 ? "force-push/reset --hard не заявлены" : destructive.join(", "),
+		detail:
+			destructive.length === 0
+				? `проверено объявленных команд: ${checks.length}`
+				: `найдено в проверках: ${destructive.map((check) => check.name).join(", ")}`,
 	});
 	return result;
 }
@@ -283,8 +344,8 @@ function formatReport(cert: Certificate): string {
 	lines.push(`REGRESSION: ${cert.regression.map((r) => `${r.name} → ${r.ok ? "PASS" : "FAIL"}`).join("; ") || "проверок не объявлено"}`);
 	lines.push(`INVARIANTS: ${cert.invariants.map((i) => `${i.name} → ${i.ok ? "соблюдён" : "НАРУШЕН"} (${i.detail})`).join("; ")}`);
 	if (cert.risk === "high") {
-		lines.push(`OBSERVABILITY: юниты после = ${cert.baseline["юниты до"] ?? "не снимались"}`);
-		lines.push(`ROLLBACK: git ${cert.baseline["git HEAD"] ?? "?"} → откат рабочего дерева, PLANNED`);
+		lines.push(`OBSERVABILITY: юниты после = ${cert.after["юниты после"] ?? "не снимались"}; git после = ${cert.after["git HEAD"] ?? "?"}`);
+		lines.push(`ROLLBACK: git ${cert.baseline["git HEAD"] ?? "?"} → откат рабочего дерева, PLANNED (не проверялся)`);
 	}
 	lines.push(`INDEPENDENT REVIEW: ${cert.review ? `${cert.review.by} → ${cert.review.verdict} (${cert.review.note})` : "не проводилась"}`);
 	lines.push(`RESIDUAL: ${cert.residual.length > 0 ? cert.residual.join("; ") : "в охвате выполненных проверок дефектов не найдено"}`);
@@ -320,6 +381,10 @@ async function cmdInit(argv: string[]): Promise<number> {
 			timeoutMs: Number(argValue(argv, "--timeout") ?? 300) * 1000,
 		};
 	});
+	const secretExemptions = argValues(argv, "--allow-secret-path").map((raw) => {
+		const [path, ...rest] = raw.split("::");
+		return { path: (path ?? "").trim(), reason: rest.join("::").trim() || "без пояснения" };
+	});
 	const probes = argValues(argv, "--probe").map((raw) => {
 		const [url, ...rest] = raw.split("::");
 		if (rest.length === 0) throw new Error(`проба должна быть «url::ожидаемая-подстрока»: ${raw}`);
@@ -333,6 +398,7 @@ async function cmdInit(argv: string[]): Promise<number> {
 		criteria,
 		checks,
 		probes,
+		secretExemptions,
 		createdAt: new Date().toISOString(),
 		baseline: null,
 	};
@@ -346,19 +412,28 @@ async function cmdRun(argv: string[]): Promise<number> {
 	if (!slug) throw new Error("нужен slug: quality-gate run <slug>");
 	const contract = await loadContract(slug);
 	const dir = dirOf(slug);
+	// Каталог логов мог быть удалён между прогонами: не падаем, а создаём заново.
+	await ensureDir(join(dir, "logs"));
 	const baseline = contract.baseline ?? (await snapshotBaseline(contract.risk));
 	const checks: CheckResult[] = [];
 	for (const spec of contract.checks) checks.push(await execCheck(spec, join(dir, "logs")));
 	const probes: ProbeResult[] = [];
 	for (const spec of contract.probes) probes.push(await probe(spec));
-	const inv = await invariants();
+	const inv = await invariants(contract.checks, contract.secretExemptions);
+	const after = await snapshotBaseline(contract.risk, false);
 	const blockingFailed = checks.filter((check) => check.blocking && !check.ok).map((check) => check.name);
 	const probesFailed = probes.filter((item) => !item.ok).map((item) => item.name);
 	const invariantsFailed = inv.filter((item) => !item.ok).map((item) => item.name);
 	const failed = [...blockingFailed, ...probesFailed, ...invariantsFailed];
 	const residual: string[] = [];
 	if (failed.length > 0) residual.push(`не прошли проверки: ${failed.join(", ")}`);
-	const prevReview = existsSync(join(dir, "certificate.json")) ? (JSON.parse(await readFile(join(dir, "certificate.json"), "utf8")) as Certificate).review : null;
+	const prevCert = existsSync(join(dir, "certificate.json"))
+		? (JSON.parse(await readFile(join(dir, "certificate.json"), "utf8")) as Certificate)
+		: null;
+	const prevReview = prevCert?.review ?? null;
+	const reviewHistory = prevCert?.reviews ?? (prevReview ? [prevReview] : []);
+	const failStanding = reviewHistory.some((item) => item.verdict === "FAIL") && prevReview?.verdict !== "PASS";
+	// Провал ревьюера не стирается повторным прогоном: иначе FAIL отмывается обычным `run`.
 	const cert: Certificate = {
 		slug,
 		task: contract.task,
@@ -369,14 +444,17 @@ async function cmdRun(argv: string[]): Promise<number> {
 		checks,
 		probes,
 		invariants: inv,
+		after,
 		regression: checks.map((check) => ({ name: check.name, ok: check.ok })),
 		review: prevReview,
+		reviews: reviewHistory,
 		residual,
-		status: failed.length > 0 ? "FAILED" : "PARTIAL",
+		status: failed.length > 0 || failStanding || prevReview?.verdict === "FAIL" ? "FAILED" : "PARTIAL",
 	};
 	await writeCertificate(cert);
 	console.log(formatReport(cert));
-	return failed.length > 0 ? 1 : 0;
+	// Провал ревьюера — тоже провал прогона, иначе код выхода маскирует FAILED.
+	return failed.length > 0 || cert.status === "FAILED" ? 1 : 0;
 }
 
 async function cmdReview(argv: string[]): Promise<number> {
@@ -384,6 +462,16 @@ async function cmdReview(argv: string[]): Promise<number> {
 	if (!slug) throw new Error("нужен slug: quality-gate review <slug>");
 	const cert = await loadCertificate(slug);
 	const dir = dirOf(slug);
+	const by = (argValue(argv, "--by") ?? "reviewer").trim();
+	// Независимость — белый список, а не чёрный: иначе автор называет себя любым словом и проходит.
+	const INDEPENDENT_BY = /^(?:reviewer|security-reviewer|revьюер|review|subagent:[\w.-]+|agent:[\w.-]+)$/iu;
+	// Имя, которым автор называет самого себя, не делает проверку независимой даже в форме subagent:<имя>.
+	const AUTHOR_WORDS = /^(?:self|builder|author|me|я|сам|автор|кодер|разработчик)$/iu;
+	const innerName = /^(?:subagent|agent):(.+)$/iu.exec(by)?.[1] ?? by;
+	if (!hasFlag(argv, "--spawn") && (!INDEPENDENT_BY.test(by) || AUTHOR_WORDS.test(innerName))) {
+		console.error(`«${by}» не считается независимым ревьюером: укажи --by reviewer|security-reviewer|subagent:<имя> или запусти --spawn`);
+		return 2;
+	}
 	let review: Review;
 	if (hasFlag(argv, "--spawn")) {
 		const diff = gitOr(["diff", "HEAD"], "");
@@ -392,17 +480,30 @@ async function cmdReview(argv: string[]): Promise<number> {
 			"что не доказано, где доказательство подменяет поведение. Ответь ровно двумя строками: " +
 			"`VERDICT: PASS|FAIL` и `NOTE: <одна строка>`. Не верь утверждениям автора — только тому, что видно.\n\n" +
 			`Критерии: ${cert.criteria.map((c) => `${c.id} ${c.text}`).join("; ")}\n\nДифф:\n${diff.slice(0, 60_000)}`;
-		const child = spawn("omp", ["-p", prompt], { cwd: process.cwd(), env: { ...process.env, OMP_NO_HOOKS: "1" } });
+		const child = spawn("omp", ["-p", prompt], { cwd: process.cwd(), env: { ...process.env, OMP_NO_HOOKS: "1" }, detached: true });
 		let out = "";
+		const timeoutMs = Number(argValue(argv, "--review-timeout") ?? 240) * 1000;
 		const { promise: reviewPromise, resolve: resolveReview } = Promise.withResolvers<void>();
 		child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
 		child.stderr.on("data", () => {});
 		child.on("close", () => resolveReview());
+		child.on("error", () => resolveReview());
+		// Ревьюер может промолчать (провайдер, лимит): тогда это N/A, а не зависание и не PASS.
+		const killer = setTimeout(() => {
+			try {
+				process.kill(-child.pid, "SIGKILL");
+			} catch {
+				child.kill("SIGKILL");
+			}
+			out += "\n[ревьюер не ответил за отведённое время]";
+			resolveReview();
+		}, timeoutMs);
 		await reviewPromise;
+		clearTimeout(killer);
 		await writeFile(join(dir, "review.log"), out, "utf8");
 		const verdict = /VERDICT:\s*(PASS|FAIL)/i.exec(out)?.[1]?.toUpperCase() as "PASS" | "FAIL" | undefined;
 		const note = /NOTE:\s*(.+)/i.exec(out)?.[1]?.trim() ?? "ревьюер не дал строку NOTE";
-		review = { by: "omp -p ревьюер", independent: true, verdict: verdict ?? "N/A", note, at: new Date().toISOString() };
+		review = { by: "omp -p ревьюер", independent: verdict !== undefined, verdict: verdict ?? "N/A", note, at: new Date().toISOString() };
 	} else {
 		const by = argValue(argv, "--by") ?? "reviewer";
 		const verdict = (argValue(argv, "--verdict") ?? "N/A") as Review["verdict"];
@@ -414,21 +515,70 @@ async function cmdReview(argv: string[]): Promise<number> {
 			at: new Date().toISOString(),
 		};
 	}
+	const history = cert.reviews ?? (cert.review ? [cert.review] : []);
+	const hadFail = history.some((item) => item.verdict === "FAIL");
+	if (review.verdict === "PASS" && hadFail && !hasFlag(argv, "--supersede")) {
+		console.error("в истории есть FAIL: перекрыть его можно только явно — добавь --supersede и причину в --note");
+		return 2;
+	}
+	if (review.verdict === "PASS" && hadFail) review.supersedesFail = true;
+	cert.reviews = [...history, review];
 	cert.review = review;
-	cert.status = review.verdict === "FAIL" ? "FAILED" : review.verdict === "PASS" && cert.status === "PARTIAL" ? "ГОТОВО" : cert.status;
+	cert.status =
+		review.verdict === "FAIL"
+			? "FAILED"
+			: review.verdict === "PASS" && cert.status === "PARTIAL"
+				? "ГОТОВО"
+				: cert.status;
 	await writeCertificate(cert);
 	console.log(`REVIEW: ${review.by} → ${review.verdict} (${review.note}); статус сертификата ${cert.status}`);
 	return review.verdict === "FAIL" ? 1 : 0;
 }
 
-function missingParts(cert: Certificate): string[] {
+async function missingParts(cert: Certificate): Promise<string[]> {
 	const missing: string[] = [];
+	if (!Array.isArray(cert.checks) || !Array.isArray(cert.criteria) || !Array.isArray(cert.invariants))
+		return ["сертификат повреждён: нет обязательных массивов criteria/checks/invariants"];
 	if (cert.criteria.length === 0) missing.push("критерии приёмки (CONTRACT)");
+	if (cert.criteria.some((item) => item.text.trim().length === 0)) missing.push("пустой текст критерия (CONTRACT)");
 	if (cert.checks.length === 0 && cert.probes.length === 0) missing.push("ни одной выполненной проверки (EVIDENCE)");
+	// Сертификат — артефакт: лог каждой проверки должен существовать, лежать внутри .omp/gate и
+	// содержать именно свою команду и код выхода, иначе «доказательство» подменяется пустым файлом.
+	const badLogs: string[] = [];
+	for (const check of cert.checks) {
+		const rel = String(check.logFile ?? "").replaceAll("\\", "/");
+		const inside = rel.startsWith(`${GATE_DIR}/`) && !rel.includes("..");
+		const full = join(process.cwd(), rel);
+		if (!inside || !existsSync(full)) {
+			badLogs.push(`${check.name}: ${inside ? "лог отсутствует" : "лог вне .omp/gate"}`);
+			continue;
+		}
+		const text = await readFile(full, "utf8");
+		if (!text.includes(`$ ${check.cmd}`) || !text.includes(`--- exit ${check.exitCode ?? "нет"} ---`))
+			badLogs.push(`${check.name}: лог не соответствует команде и коду выхода`);
+	}
+	if (badLogs.length > 0) missing.push(`логи проверок: ${badLogs.join("; ")}`);
 	if (cert.checks.some((check) => !check.ok && check.blocking)) missing.push("проваленные блокирующие проверки");
 	if (cert.invariants.length === 0 || cert.invariants.some((item) => !item.ok)) missing.push("инварианты (INVARIANTS)");
+	const stale = Date.now() - Date.parse(cert.certifiedAt) > 24 * 60 * 60 * 1000;
+	if (Number.isFinite(stale) && stale) missing.push("сертификат старше суток");
+	if (cert.review !== null && cert.review.verdict === "FAIL") missing.push("вердикт ревьюера FAIL");
+	// История ревью — не декорация: стоящий FAIL закрывается только записью с supersedesFail.
+	const history = cert.reviews ?? [];
+	const lastHistory = history[history.length - 1];
+	const sameReview = (a?: Review | null, b?: Review | null): boolean =>
+		Boolean(a && b && a.by === b.by && a.at === b.at && a.verdict === b.verdict);
+	if (history.length > 0 && !sameReview(lastHistory, cert.review)) missing.push("cert.review не совпадает с последней записью reviews[]");
+	const failing = history.some((item) => item.verdict === "FAIL");
+	const superseded = history.some((item) => item.verdict === "PASS" && item.supersedesFail === true);
+	if (failing && !superseded) missing.push("в истории ревью есть FAIL без явного --supersede");
+	// Сертификат обязан быть самосогласованным: ok = (exitCode === 0).
+	const inconsistent = cert.checks.filter((check) => check.ok !== (check.exitCode === 0));
+	if (inconsistent.length > 0) missing.push(`ok не совпадает с кодом выхода: ${inconsistent.map((check) => check.name).join(", ")}`);
 	if (cert.risk === "high" && cert.review === null) missing.push("независимая проверка (REVIEW) для рискованной работы");
 	if (cert.risk === "high" && cert.review !== null && cert.review.verdict !== "PASS") missing.push("вердикт ревьюера не PASS");
+	if (cert.risk === "high" && cert.review !== null && cert.review.independent !== true)
+		missing.push("ревьюер не независим (independent=false)");
 	if (cert.status === "FAILED") missing.push("статус сертификата FAILED");
 	return missing;
 }
@@ -437,7 +587,7 @@ async function cmdVerify(argv: string[]): Promise<number> {
 	const slug = argv[1];
 	if (!slug) throw new Error("нужен slug: quality-gate verify <slug>");
 	const cert = await loadCertificate(slug);
-	const missing = missingParts(cert);
+	const missing = await missingParts(cert);
 	if (missing.length > 0) {
 		console.error(`сертификат неполный: ${missing.join("; ")}`);
 		return 1;
