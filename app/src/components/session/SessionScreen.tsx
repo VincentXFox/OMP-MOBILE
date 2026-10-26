@@ -871,6 +871,18 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 
 	const busy = snap.state?.isStreaming ?? false;
 	const isLive = snap.phase === "live";
+	// Короткий обрыв связи чинится первым же ретраем (backoff от 400 мс) — баннер
+	// «Нет сети» показываем только если реконнект и правда затянулся, иначе он
+	// мигает на каждом сворачивании вкладки.
+	const [showReconnect, setShowReconnect] = useState(false);
+	useEffect(() => {
+		if (snap.phase !== "reconnecting") {
+			setShowReconnect(false);
+			return;
+		}
+		const t = setTimeout(() => setShowReconnect(true), 700);
+		return () => clearTimeout(t);
+	}, [snap.phase]);
 	const readOnly = snap.readOnly;
 	const queuedCount = snap.state?.queuedMessageCount ?? 0;
 	const todoBoard = useMemo(() => todoBoardFromEntries(snap.entries), [snap.entries]);
@@ -1524,7 +1536,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 						<ArrowDown size={18} />
 					</button>
 				)}
-				{snap.phase === "reconnecting" && (
+				{snap.phase === "reconnecting" && showReconnect && (
 					<div className="ss-phase-banner">
 						Нет сети — переподключение…
 						<button type="button" className="ss-phase-action" onClick={() => client.reconnectNow()}>

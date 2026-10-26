@@ -1019,17 +1019,21 @@ export function AgentsScreen(props: {
 			</div>
 		);
 
+		// Липким остаётся только поиск: чипы режимов едут со списком — иначе на
+		// маленьком экране шапка занимала четверть высоты и накрывала карточки.
 		const head = (
-			<div className="ag-head">
-				{searchBar}
-				{modeChips}
-				{filterCwd && (
-					<button type="button" className="pk-filter" onClick={onClearFilter}>
-						Проект: {shortenPath(filterCwd)}
-						<X size={14} />
-					</button>
-				)}
-			</div>
+			<>
+				<div className="ag-head">
+					{searchBar}
+					{filterCwd && (
+						<button type="button" className="pk-filter" onClick={onClearFilter}>
+							Проект: {shortenPath(filterCwd)}
+							<X size={14} />
+						</button>
+					)}
+				</div>
+				<div className="ag-modes-row">{modeChips}</div>
+			</>
 		);
 
 		if (mode === "text") {

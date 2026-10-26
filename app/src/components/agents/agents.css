@@ -793,3 +793,9 @@
 	align-items: center;
 	gap: 5px;
 }
+
+/* Чипы режимов вне липкой шапки: прокручиваются вместе со списком. */
+.ag-modes-row {
+	padding-top: 8px;
+	margin-bottom: 2px;
+}

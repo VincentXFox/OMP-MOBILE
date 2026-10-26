@@ -828,3 +828,8 @@
 	color: var(--fg-tertiary);
 	white-space: nowrap;
 }
+
+/* Экран с плавающей кнопкой «+»: последний ряд не должен уезжать под неё. */
+.pk-main:has(.pk-fab) {
+	padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 88px);
+}

@@ -17,8 +17,10 @@ const RELAY_CLOSE_REASONS: Record<number, string> = {
 	4029: "room is full",
 };
 
-const BACKOFF_BASE_MS = 1_000;
-const BACKOFF_MAX_MS = 30_000;
+/** Первый ретрай короткий: короткий обрыв сети гасится до появления баннера. */
+const BACKOFF_BASE_MS = 400;
+/** Потолок паузы: после короткого падения релея чат должен подняться за секунды, а не за полминуты. */
+const BACKOFF_MAX_MS = 2_000;
 /** Max enveloped frames buffered while a reconnect is pending; overflow is dropped. */
 const MAX_PENDING_SENDS = 256;
 
