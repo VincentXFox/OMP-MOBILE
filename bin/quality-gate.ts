@@ -261,8 +261,9 @@ async function readChain(slug: string): Promise<ChainEntry[]> {
 async function appendChain(cert: Certificate, mac: string): Promise<void> {
 	const all = existsSync(LOG_PATH) ? (await readFile(LOG_PATH, "utf8")).split("\n").filter(Boolean) : [];
 	const prev = all.length > 0 ? (JSON.parse(all[all.length - 1] as string) as ChainEntry).mac : "";
+	const project = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 8);
 	await mkdir(join(LOG_PATH, ".."), { recursive: true });
-	await writeFile(LOG_PATH, `${all.concat(JSON.stringify({ slug: cert.slug, at: cert.certifiedAt, status: cert.status, mac, prev })).join("\n")}\n`, "utf8");
+	await writeFile(LOG_PATH, `${all.concat(JSON.stringify({ slug: cert.slug, project, at: cert.certifiedAt, status: cert.status, mac, prev })).join("\n")}\n`, "utf8");
 }
 
 function dirOf(slug: string): string {
@@ -420,6 +421,19 @@ const SECURITY_PATTERNS: readonly { name: string; re: RegExp }[] = [
 	{ name: "инструкции внутри данных", re: /(?:ignore|disregard)\s+(?:all\s+)?(?:previous|prior)\s+instructions|ты\s+теперь\s+(?:другой|систем)|system\s+prompt\s*:/iu },
 ];
 
+/** Хеш артефакта: только внутри проекта, иначе «целостность» проверяет чужие файлы. */
+function hashFile(path: string): ArtifactHash | null {
+	try {
+		const root = resolve(process.cwd());
+		const full = resolve(root, path);
+		if (full !== root && !full.startsWith(`${root}/`)) return null;
+		const data = readFileSync(full);
+		return { path, sha256: createHash("sha256").update(data).digest("hex") };
+	} catch {
+		return null;
+	}
+}
+
 /** Изменённые строки по файлам: отслеженные (diff) и новые (untracked), без исключённых путей. */
 async function collectChanges(exemptPaths: readonly string[]): Promise<Map<string, string[]>> {
 	const exempt = new Set(exemptPaths.map((item) => item.trim()).filter(Boolean));
@@ -443,7 +457,9 @@ async function collectChanges(exemptPaths: readonly string[]): Promise<Map<strin
 	}
 	const untracked = gitOr(["ls-files", "--others", "--exclude-standard"], "")
 		.split("\n")
-		.filter(Boolean);
+		.filter(Boolean)
+		// Наши собственные артефакты не являются изменением кода и не должны себя же флагать.
+		.filter((path) => !path.startsWith(`${GATE_DIR}/`));
 	for (const path of untracked) {
 		try {
 			const info = await stat(join(process.cwd(), path));
@@ -655,7 +671,13 @@ async function cmdInit(argv: string[]): Promise<number> {
 		const [hypothesis, method, outcome] = raw.split("::");
 		if (!hypothesis || !method || !outcome)
 			throw new Error(`состязательная запись — «гипотеза::метод::исход»: ${raw}`);
-		const placeholders = new Set(["x", "y", "z", "test", "todo", "n/a", "na", "нет", "ok", "-"]);
+		const placeholders = new Set([
+			"x", "y", "z", "test", "todo", "n/a", "na", "нет", "ok", "-", "aaaa", "bbbb", "cccc",
+			"noop", "тест", "гипотеза", "метод", "исход", "проверка", "результат",
+		]);
+		const parts = [hypothesis.trim().toLowerCase(), method.trim().toLowerCase(), outcome.trim().toLowerCase()];
+		if (new Set(parts).size < 3)
+			throw new Error(`состязательная запись повторяет одно и то же — это заглушка: ${raw}`);
 		if ([hypothesis, method, outcome].some((part) => part.trim().length < 4 || placeholders.has(part.trim().toLowerCase())))
 			throw new Error(`состязательная запись — заглушка, нужна настоящая гипотеза и исход: ${raw}`);
 		return { hypothesis: hypothesis.trim(), method: method.trim(), outcome: outcome.trim() };
@@ -1026,7 +1048,7 @@ async function cmdAttest(argv: string[]): Promise<number> {
 	return code === 0 ? 0 : 1;
 }
 
-/** Контрольная точка: слепок рабочего дерева для отката неудачного изменения. */
+/** Контрольная точка: состояние ДО изменения — HEAD, локальные правки и список новых файлов. */
 async function cmdSnapshot(argv: string[]): Promise<number> {
 	const slug = argv[1];
 	if (!slug) throw new Error("нужен slug: quality-gate snapshot <slug>");
@@ -1042,15 +1064,20 @@ async function cmdSnapshot(argv: string[]): Promise<number> {
 		promise.then(() => resolvePromise(out));
 	});
 	await writeFile(join(dir, "rollback.patch"), patch, "utf8");
-	// Неотслеженные файлы в патч не попадают: фиксируем их отдельно, иначе откат оставит мусор.
+	// Новые файлы на момент точки: их откат сохраняет, а всё появившееся позже — удаляет.
 	const untracked = gitOr(["ls-files", "--others", "--exclude-standard"], "")
 		.split("\n")
 		.filter(Boolean)
+		.filter((path) => !path.startsWith(`${GATE_DIR}/`))
 		.map((path) => ({ path, sha256: hashFile(path)?.sha256 ?? "" }));
 	await writeFile(join(dir, "rollback-untracked.json"), `${JSON.stringify(untracked, null, "\t")}\n`, "utf8");
 	const head = gitOr(["rev-parse", "HEAD"], "");
-	await writeFile(join(dir, "rollback.json"), `${JSON.stringify({ head, files: patch.split("\n").filter((line) => line.startsWith("diff --git")).length, at: new Date().toISOString() }, null, "\t")}\n`, "utf8");
-	console.log(`контрольная точка: ${join(GATE_DIR, slug, "rollback.patch")} · файлов ${patch.split("\n").filter((line) => line.startsWith("diff --git")).length}, HEAD ${head.slice(0, 8)}`);
+	await writeFile(
+		join(dir, "rollback.json"),
+		`${JSON.stringify({ head, patchBytes: patch.length, untracked: untracked.length, at: new Date().toISOString() }, null, "\t")}\n`,
+		"utf8",
+	);
+	console.log(`контрольная точка: ${join(GATE_DIR, slug, "rollback.patch")} · локальных правок ${patch.length} байт, новых файлов ${untracked.length}, HEAD ${head.slice(0, 8)}`);
 	return 0;
 }
 
@@ -1058,46 +1085,57 @@ async function cmdRollback(argv: string[]): Promise<number> {
 	const slug = argv[1];
 	if (!slug) throw new Error("нужен slug: quality-gate rollback <slug>");
 	if (!hasFlag(argv, "--approve")) {
-		console.error("откат меняет рабочее дерево: это требует --approve \"причина\" (граница, а не препятствие)");
+		console.error("откат меняет рабочее дерево: нужно --approve \"причина\" (граница, а не препятствие)");
 		return 3;
 	}
-	const patchPath = join(dirOf(slug), "rollback.patch");
+	const dir = dirOf(slug);
+	const patchPath = join(dir, "rollback.patch");
 	if (!existsSync(patchPath)) {
 		console.error(`нет контрольной точки: сначала quality-gate snapshot ${slug}`);
 		return 1;
 	}
-	// Сначала убираем новые файлы, появившиеся после контрольной точки.
-	const untrackedPath = join(dirOf(slug), "rollback-untracked.json");
-	if (existsSync(untrackedPath)) {
-		const recorded = JSON.parse(await readFile(untrackedPath, "utf8")) as { path: string; sha256: string }[];
-		const current = new Set(
-			gitOr(["ls-files", "--others", "--exclude-standard"], "")
-				.split("\n")
-				.filter(Boolean),
-		);
-		for (const item of recorded) {
-			if (!current.has(item.path)) continue;
-			// Удаляем только то, что не изменилось с момента снимка: чужие правки не трогаем.
-			if (item.sha256 && hashFile(item.path)?.sha256 !== item.sha256) continue;
-			try {
-				await rm(join(process.cwd(), item.path), { force: true });
-			} catch {
-				// файл уже удалён — откат продолжается
-			}
+	const saved = JSON.parse(await readFile(join(dir, "rollback-untracked.json"), "utf8").catch(() => "[]")) as { path: string }[];
+	const allowed = new Set(saved.map((item) => item.path));
+
+	// 1. Убираем всё, что появилось ПОСЛЕ точки (свои артефакты не трогаем).
+	const currentUntracked = gitOr(["ls-files", "--others", "--exclude-standard"], "")
+		.split("\n")
+		.filter(Boolean)
+		.filter((path) => !path.startsWith(`${GATE_DIR}/`));
+	const removed: string[] = [];
+	for (const path of currentUntracked) {
+		if (allowed.has(path)) continue;
+		try {
+			await rm(join(process.cwd(), path), { force: true });
+			removed.push(path);
+		} catch {
+			// файл уже исчез — откат продолжается
 		}
 	}
-	const child = spawn("git", ["apply", "--reverse", patchPath], { cwd: process.cwd() });
-	let err = "";
-	child.stderr.on("data", (chunk: Buffer) => (err += chunk.toString()));
-	const { promise, resolve } = Promise.withResolvers<number>();
-	child.on("close", (code) => resolve(code ?? 1));
-	child.on("error", () => resolve(1));
-	const code = await promise;
-	if (code !== 0) {
-		console.error(`откат не применился: ${err.trim().slice(0, 200)}`);
+
+	// 2. Возвращаем отслеживаемые файлы к HEAD и накладываем сохранённые локальные правки.
+	const checkout = spawn("git", ["checkout", "--", "."], { cwd: process.cwd() });
+	const checkoutDone = Promise.withResolvers<number>();
+	checkout.on("close", (code) => checkoutDone.resolve(code ?? 1));
+	checkout.on("error", () => checkoutDone.resolve(1));
+	if ((await checkoutDone.promise) !== 0) {
+		console.error("не удалось вернуть отслеживаемые файлы к HEAD");
 		return 1;
 	}
-	console.log("откат применён: рабочее дерево вернулось к контрольной точке");
+	const savedPatch = await readFile(patchPath, "utf8");
+	if (savedPatch.trim().length > 0) {
+		const apply = spawn("git", ["apply", patchPath], { cwd: process.cwd() });
+		let err = "";
+		apply.stderr.on("data", (chunk: Buffer) => (err += chunk.toString()));
+		const applyDone = Promise.withResolvers<number>();
+		apply.on("close", (code) => applyDone.resolve(code ?? 1));
+		apply.on("error", () => applyDone.resolve(1));
+		if ((await applyDone.promise) !== 0) {
+			console.error(`сохранённые правки не наложились: ${err.trim().slice(0, 200)}`);
+			return 1;
+		}
+	}
+	console.log(`откат применён: удалено новых файлов ${removed.length}, локальные правки восстановлены, HEAD ${gitOr(["rev-parse", "HEAD"], "").slice(0, 8)}`);
 	return 0;
 }
 

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -380,5 +380,36 @@ describe("quality-gate", () => {
 		const verify = await gate(cwd, ["verify", "nores"]);
 		expect(verify.code).toBe(1);
 		expect(verify.err).toContain("RESIDUAL не заявлен");
+	});
+
+	test("snapshot/rollback: возвращает состояние до точки и не трогает чужое", async () => {
+		const cwd = repo();
+		// было до точки: отслеживаемый файл + локальная правка + чужой новый файл
+		writeFileSync(join(cwd, "readme.md"), "# проект\nлокальная правка\n");
+		writeFileSync(join(cwd, "user-file.ts"), "export const user = 1;\n");
+		const snap = await gate(cwd, ["init", "rb", "--task", "t", "--ac", "AC-01: x", "--check", "readme::test -f readme.md", "--covers", "readme=AC-01", "--residual-none", "охват — файл"]);
+		expect(snap.code).toBe(0);
+		expect((await gate(cwd, ["snapshot", "rb"])).code).toBe(0);
+		// после точки: новый мусор и ещё одна правка
+		writeFileSync(join(cwd, "garbage.ts"), "eval('плохо');\n");
+		writeFileSync(join(cwd, "readme.md"), "# проект\nсломал\n");
+		const denied = await gate(cwd, ["rollback", "rb"]);
+		expect(denied.code).toBe(3);
+		const rolled = await gate(cwd, ["rollback", "rb", "--approve", "вернуть как было"]);
+		expect(rolled.code).toBe(0);
+		const readme = await Bun.file(join(cwd, "readme.md")).text();
+		expect(readme).toContain("локальная правка");
+		expect(readme).not.toContain("сломал");
+		expect(existsSync(join(cwd, "garbage.ts"))).toBe(false);
+		expect(existsSync(join(cwd, "user-file.ts"))).toBe(true);
+	});
+
+	test("собственные артефакты приёмки не считаются изменением кода", async () => {
+		const cwd = repo();
+		writeFileSync(join(cwd, ".gitignore"), "node_modules\n");
+		await gate(cwd, ["init", "selfscan", "--task", "t", "--ac", "AC-01: x", "--check", "вывод::printf 'fixture: eval(payload) отклонён\\n'", "--covers", "вывод=AC-01", "--residual-none", "охват — вывод"]);
+		const run = await gate(cwd, ["run", "selfscan"]);
+		// в логе проверки есть слово-шаблон, но это не наш код: сканер не должен себя флагать
+		expect(run.out).toContain("eval / new Function → чисто");
 	});
 });
