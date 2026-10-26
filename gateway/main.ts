@@ -17,6 +17,8 @@ import { isMemoryTable, listBanks, listEntries, listFacets, searchAllEntries } f
 import { openGraphDb, getMeta } from "./memory-graph/store.ts";
 import { indexSessions, rebuildGraph, stats as graphStatsOf } from "./memory-graph/index.ts";
 import { contextBlock, searchGraph, topNodes } from "./memory-graph/retrieve.ts";
+import { defaultTreeRoots, lintAgentTree, scanAgentTree } from "./agent-tree.ts";
+import { graphMap } from "./memory-graph/map.ts";
 import { UpdateService, isComponentIdLocal } from "./update/service.ts";
 import { dispatchTasks, superActivity, superBoard, validateDispatchItems } from "./super.ts";
 import { bindSession, crewRoot, crewSnapshot, deskByDir, deskOfSession, ensureDesk, isSharedCwd, pruneEmptyDesk, resolveDeskForStart, setDeskCharter } from "./crew.ts";
@@ -572,6 +574,18 @@ async function route(req: Request, url: URL): Promise<Response> {
     return json(200, facets);
   }
 
+  // ---- Файловое дерево агентских процессов (Workflow → Task → Subtask) ----
+  if (url.pathname === "/api/tree" && req.method === "GET") {
+    const rootParam = url.searchParams.get("root");
+    const roots = rootParam !== null && rootParam !== "" ? [rootParam] : defaultTreeRoots();
+    const scanned = roots.map((path) => {
+      const workflows = scanAgentTree(path);
+      const lint = lintAgentTree(path);
+      return { path, workflows, lint };
+    });
+    return json(200, { roots: scanned });
+  }
+
   // ---- Граф памяти (второй слой рядом с Mnemopi) ----
   if (url.pathname === "/api/graph/stats" && req.method === "GET") {
     const project = url.searchParams.get("project");
@@ -599,6 +613,14 @@ async function route(req: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get("project") ?? "";
     if (project === "") return json(400, { error: "нужен project" });
     return json(200, { nodes: topNodes(graphDb, project, 40) });
+  }
+
+  // Карта графа: узлы и рёбра для визуализации. project пустой — вся карта.
+  if (url.pathname === "/api/graph/map" && req.method === "GET") {
+    const project = url.searchParams.get("project")?.trim() ?? "";
+    const limitRaw = Number(url.searchParams.get("limit"));
+    const limit = Number.isInteger(limitRaw) && limitRaw >= 20 && limitRaw <= 500 ? limitRaw : undefined;
+    return json(200, graphMap(graphDb, project === "" ? null : project, limit));
   }
 
   if (url.pathname === "/api/graph/rebuild" && req.method === "POST") {
