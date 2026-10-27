@@ -321,8 +321,8 @@ function AboutRow(props: { label: string; value: string; onToast: (text: string)
 	);
 }
 
-export function SettingsScreen(props: { onOpenUpdates?: () => void }): ReactNode {
-	const { onOpenUpdates } = props;
+export function SettingsScreen(props: { onOpenUpdates?: () => void; onOpenGoals?: () => void }): ReactNode {
+	const { onOpenUpdates, onOpenGoals } = props;
 	const [toast, setToast] = useState<string | null>(null);
 	const [updateAvailable, setUpdateAvailable] = useState(false);
 
@@ -348,6 +348,12 @@ export function SettingsScreen(props: { onOpenUpdates?: () => void }): ReactNode
 
 	return (
 		<div className="pk-list set-screen">
+			{onOpenGoals && (
+				<button type="button" className="pk-fieldrow" onClick={onOpenGoals}>
+					<span className="pk-fieldrow-label">Автономные цели</span>
+					<span className="pk-fieldrow-value">контроллер, доказательства, риски</span>
+				</button>
+			)}
 			{onOpenUpdates && (
 				<section className="pk-section">
 					<div className="pk-section-body">

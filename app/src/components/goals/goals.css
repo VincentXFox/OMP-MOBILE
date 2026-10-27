@@ -1,0 +1,371 @@
+.go {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding-bottom: 8px;
+}
+
+.go-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.go-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 650;
+	font-size: 17px;
+}
+
+.go-count {
+	padding: 1px 8px;
+	border-radius: 999px;
+	background: var(--surface-2, rgba(127, 127, 127, 0.14));
+	color: var(--muted, #7b8794);
+	font-size: 13px;
+}
+
+.go-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.go-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 34px;
+	height: 34px;
+	border-radius: 10px;
+	border: 1px solid var(--border, rgba(127, 127, 127, 0.24));
+	background: transparent;
+	color: inherit;
+}
+
+.go-primary,
+.go-ghost {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	border-radius: 10px;
+	padding: 8px 12px;
+	font-size: 14px;
+	font-weight: 600;
+	border: 1px solid transparent;
+}
+
+.go-primary {
+	background: var(--accent, #4a6cf7);
+	color: #fff;
+}
+
+.go-primary:disabled {
+	opacity: 0.5;
+}
+
+.go-ghost {
+	background: transparent;
+	border-color: var(--border, rgba(127, 127, 127, 0.24));
+	color: inherit;
+}
+
+.go-error {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 10px 12px;
+	border-radius: 10px;
+	font-size: 14px;
+	background: color-mix(in srgb, var(--error, #c0392b) 14%, transparent);
+	color: var(--error, #c0392b);
+}
+
+.go-error button {
+	background: transparent;
+	color: inherit;
+	border: none;
+}
+
+.go-form {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 12px;
+	border-radius: 12px;
+	border: 1px solid var(--border, rgba(127, 127, 127, 0.2));
+}
+
+.go-label {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	font-size: 13px;
+	color: var(--muted, #7b8794);
+}
+
+.go-label textarea,
+.go-label input {
+	width: 100%;
+	padding: 9px 10px;
+	border-radius: 9px;
+	border: 1px solid var(--border, rgba(127, 127, 127, 0.24));
+	background: var(--surface-1, rgba(127, 127, 127, 0.06));
+	color: inherit;
+	font: inherit;
+	font-size: 15px;
+	resize: vertical;
+}
+
+.go-form-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.go-empty {
+	padding: 18px 14px;
+	border-radius: 12px;
+	border: 1px dashed var(--border, rgba(127, 127, 127, 0.3));
+	color: var(--muted, #7b8794);
+	font-size: 14px;
+	line-height: 1.5;
+}
+
+.go-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.go-card {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px;
+	border-radius: 12px;
+	border: 1px solid var(--border, rgba(127, 127, 127, 0.2));
+	background: var(--surface-1, rgba(127, 127, 127, 0.05));
+	text-align: left;
+	color: inherit;
+}
+
+.go-card--on {
+	border-color: var(--accent, #4a6cf7);
+}
+
+.go-card-top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.go-badge {
+	padding: 2px 9px;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 600;
+	background: rgba(74, 108, 247, 0.14);
+	color: var(--accent, #4a6cf7);
+}
+
+.go-badge--ok {
+	background: rgba(30, 132, 73, 0.16);
+	color: var(--success, #1e8449);
+}
+
+.go-badge--bad {
+	background: rgba(192, 57, 43, 0.16);
+	color: var(--error, #c0392b);
+}
+
+.go-badge--warn {
+	background: rgba(169, 121, 28, 0.18);
+	color: var(--warning, #a9791c);
+}
+
+.go-when {
+	font-size: 12px;
+	color: var(--muted, #7b8794);
+}
+
+.go-goal {
+	font-size: 15px;
+	font-weight: 550;
+	line-height: 1.35;
+}
+
+.go-bar {
+	height: 6px;
+	border-radius: 999px;
+	background: rgba(127, 127, 127, 0.18);
+	overflow: hidden;
+}
+
+.go-bar span {
+	display: block;
+	height: 100%;
+	background: var(--accent, #4a6cf7);
+	border-radius: 999px;
+	transition: width 240ms ease;
+}
+
+.go-meta {
+	font-size: 12px;
+	color: var(--muted, #7b8794);
+}
+
+.go-detail {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 12px;
+	border-radius: 12px;
+	border: 1px solid var(--border, rgba(127, 127, 127, 0.2));
+}
+
+.go-detail-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.go-detail-head h3 {
+	margin: 0;
+	font-size: 16px;
+	line-height: 1.3;
+}
+
+.go-result {
+	padding: 9px 11px;
+	border-radius: 9px;
+	font-size: 13px;
+	line-height: 1.4;
+}
+
+.go-result--ok {
+	background: rgba(30, 132, 73, 0.14);
+	color: var(--success, #1e8449);
+}
+
+.go-result--bad {
+	background: rgba(192, 57, 43, 0.14);
+	color: var(--error, #c0392b);
+}
+
+.go-detail-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.go-sub {
+	margin: 6px 0 0;
+	font-size: 13px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--muted, #7b8794);
+}
+
+.go-steps {
+	margin: 0;
+	padding-left: 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	font-size: 14px;
+}
+
+.go-step-name {
+	font-weight: 550;
+}
+
+.go-step-state {
+	margin-left: 6px;
+	font-size: 12px;
+	color: var(--muted, #7b8794);
+}
+
+.go-step--done .go-step-state {
+	color: var(--success, #1e8449);
+}
+
+.go-step--failed .go-step-state {
+	color: var(--error, #c0392b);
+}
+
+.go-evidence {
+	margin: 4px 0 0;
+	padding-left: 16px;
+	font-size: 12px;
+	color: var(--muted, #7b8794);
+	list-style: circle;
+}
+
+.go-residual {
+	margin: 0;
+	padding-left: 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	font-size: 13px;
+}
+
+.go-residual li {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.go-residual span {
+	color: var(--muted, #7b8794);
+	font-size: 12px;
+}
+
+.go-log {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	font-size: 13px;
+}
+
+.go-log li {
+	display: grid;
+	grid-template-columns: 42px 92px 1fr;
+	gap: 8px;
+	align-items: baseline;
+}
+
+.go-log-time {
+	color: var(--muted, #7b8794);
+	font-variant-numeric: tabular-nums;
+}
+
+.go-log-event {
+	color: var(--accent, #4a6cf7);
+	font-size: 12px;
+}
+
+.go-log-detail {
+	color: inherit;
+	overflow-wrap: anywhere;
+}
+
+.go-report {
+	margin: 0;
+	padding: 10px;
+	border-radius: 9px;
+	background: rgba(127, 127, 127, 0.08);
+	font-size: 12px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}

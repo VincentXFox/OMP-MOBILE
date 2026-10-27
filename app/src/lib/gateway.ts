@@ -1628,3 +1628,48 @@ export async function fetchTree(root?: string | null, signal?: AbortSignal): Pro
 		})
 		.filter((root): root is TreeRoot => root !== null);
 }
+
+/** Автономные цели: контроллер ведёт их сам, UI только показывает состояние. */
+export interface GoalStepView {
+	name: string;
+	status: "todo" | "doing" | "done" | "failed";
+	attempts: number;
+	evidence: string[];
+}
+
+export interface GoalView {
+	slug: string;
+	goal: string;
+	phase: "PLAN" | "EXECUTE" | "RECOVER" | "VERIFY" | "RESULT" | "BLOCKED";
+	current: number;
+	steps: GoalStepView[];
+	criteria: string[];
+	residuals: { text: string; reason: string; impact: string; exitCondition: string }[];
+	log: { at: string; phase: string; event: string; detail: string }[];
+	result: { status: string; detail: string } | null;
+	project?: string;
+	updatedAt: string;
+}
+
+export const api = {
+	async getGoals(signal?: AbortSignal): Promise<{ goals: GoalView[] }> {
+		return request<{ goals: GoalView[] }>("/api/goals", { signal });
+	},
+	async createGoal(input: { goal: string; criteria?: string[]; steps?: string[]; project?: string }): Promise<{ ok: boolean; slug?: string; error?: string }> {
+		return request<{ ok: boolean; slug?: string; error?: string }>("/api/goals", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(input),
+		});
+	},
+	async driveGoal(slug: string): Promise<{ ok: boolean; detail: string }> {
+		return request<{ ok: boolean; detail: string }>(`/api/goals/${encodeURIComponent(slug)}/drive`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: "{}",
+		});
+	},
+	async goalReport(slug: string): Promise<{ ok: boolean; text: string }> {
+		return request<{ ok: boolean; text: string }>(`/api/goals/${encodeURIComponent(slug)}/report`);
+	},
+};

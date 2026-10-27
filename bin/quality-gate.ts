@@ -162,17 +162,6 @@ const KEY_PATH = process.env.QUALITY_GATE_KEY ?? join(homedir(), ".omp", "gate-k
 /** Внешний журнал: хэш-цепочка прогонов, чтобы историю нельзя было переписать молча. */
 const LOG_PATH = process.env.QUALITY_GATE_LOG ?? join(homedir(), ".omp", "gate-log.jsonl");
 
-/** Ключ верификатора отделён от ключа исполнителя: аттестат нельзя подписать «как прогон». */
-const VERIFIER_KEY_PATH = process.env.QUALITY_GATE_VERIFIER_KEY ?? join(homedir(), ".omp", "verifier-key");
-
-async function verifierKey(): Promise<Buffer> {
-	if (!existsSync(VERIFIER_KEY_PATH)) {
-		await mkdir(join(VERIFIER_KEY_PATH, ".."), { recursive: true });
-		await writeFile(VERIFIER_KEY_PATH, randomBytes(32).toString("hex"), { mode: 0o600 });
-	}
-	return Buffer.from((await readFile(VERIFIER_KEY_PATH, "utf8")).trim(), "hex");
-}
-
 async function signingKey(): Promise<Buffer> {
 	if (!existsSync(KEY_PATH)) {
 		await mkdir(join(KEY_PATH, ".."), { recursive: true });
@@ -873,13 +862,14 @@ async function missingParts(cert: Certificate): Promise<string[]> {
 		missing.push("нет состязательной проверки (гипотеза → метод → исход)");
 	// Аттестация независимым процессом: сертификат должен быть подтверждён аттестатом.
 	const attestation = await readAttestation(cert.slug);
-	// Аттестация проверяет всё, кроме самой себя: иначе верификатор не может стартовать.
-	if (cert.risk === "high" && !attestation && process.env.QUALITY_GATE_ATTESTING !== "1")
-		missing.push("нет аттестации независимым верификатором (quality-gate attest)");
-	if (process.env.QUALITY_GATE_ATTESTING !== "1" && attestation) {
-		if (attestation.certMac !== cert.signature?.mac) missing.push("аттестат относится к другой версии сертификата");
-		if (attestation.exitCode !== 0) missing.push("аттестат отрицательный: верификатор не подтвердил результат");
+	if (cert.risk === "high" && !attestation) {
+		missing.push(
+			existsSync(VERIFIER_SOCKET)
+				? "нет аттестации независимым верификатором (quality-gate attest)"
+				: "верификатор недоступен: проверь systemctl status omp-verifier",
+		);
 	}
+	if (attestation && !attestation.ok) missing.push(`аттестат не подтверждён: ${attestation.detail}`);
 	// Заглушки и проверки без ожидаемого результата не считаются доказательством.
 	const trivial = cert.checks.filter((check) => TRIVIAL_RE.test(check.cmd.trim()));
 	if (trivial.length > 0) missing.push(`проверки-заглушки: ${trivial.map((check) => check.name).join(", ")}`);
@@ -1001,22 +991,35 @@ async function diffHashNow(): Promise<string> {
 	return createHash("sha256").update(`${withoutGate}\n${status}`).digest("hex").slice(0, 16);
 }
 
+const VERIFIER_SOCKET = process.env.OMP_VERIFIER_SOCKET ?? "/run/omp-verifier/verify.sock";
+
+/** Запрос к независимому верификатору: ключ и доверие живут у него, не у исполнителя. */
+async function askVerifier(payload: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+	if (!existsSync(VERIFIER_SOCKET)) return null;
+	try {
+		const response = await fetch("http://verifier/", {
+			method: "POST",
+			unix: VERIFIER_SOCKET,
+			body: JSON.stringify(payload),
+			signal: AbortSignal.timeout(600_000),
+		});
+		return (await response.json()) as Record<string, unknown>;
+	} catch {
+		return null;
+	}
+}
+
 function attestationPath(slug: string): string {
 	return join(process.cwd(), ".omp", "gate", slug, "attestation.json");
 }
 
-async function readAttestation(slug: string): Promise<Attestation | null> {
+/** Аттестат подтверждает только верификатор: локальная проверка подписи недоступна по замыслу. */
+async function readAttestation(slug: string): Promise<{ ok: boolean; detail: string } | null> {
 	const path = attestationPath(slug);
 	if (!existsSync(path)) return null;
-	try {
-		const data = JSON.parse(await readFile(path, "utf8")) as Attestation;
-		const key = await verifierKey();
-		const { mac, ...rest } = data;
-		const expected = createHmac("sha256", key).update(canonical(rest)).digest("hex");
-		return expected === mac ? data : null;
-	} catch {
-		return null;
-	}
+	const answer = await askVerifier({ action: "check", project: process.cwd(), slug });
+	if (answer === null) return null;
+	return { ok: answer.ok === true, detail: String(answer.detail ?? "") };
 }
 
 /**
@@ -1032,42 +1035,24 @@ async function cmdAttest(argv: string[]): Promise<number> {
 		console.error("сертификат не подписан — аттестация невозможна");
 		return 1;
 	}
-	const engine = join(import.meta.dir, "quality-gate.ts");
-	// Старый аттестат не должен влиять на новую проверку.
-	try {
-		await rm(attestationPath(slug), { force: true });
-	} catch {
-		// файла нет — и хорошо
+	// Ключ аттестата есть только у omp-verifier: локально подписать нельзя.
+	const answer = await askVerifier({ action: "verify", project: process.cwd(), slug });
+	if (answer === null) {
+		console.error(
+			"верификатор недоступен: аттестация выдаётся только независимым сервисом omp-verifier " +
+				"(systemctl status omp-verifier). Локальная подпись не предусмотрена — иначе изоляция бессмысленна.",
+		);
+		return 1;
 	}
-	// Отдельный процесс вне окружения исполнителя: systemd scope, если он есть.
-	const command = existsSync("/usr/bin/systemd-run")
-		? ["systemd-run", "--user", "--scope", "--quiet", "--", "bun", engine, "verify", slug]
-		: ["bun", engine, "verify", slug];
-	const child = spawn(command[0] as string, command.slice(1), {
-		cwd: process.cwd(),
-		env: { ...process.env, QUALITY_GATE_ATTESTING: "1" },
-	});
-	let out = "";
-	let err = "";
-	child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
-	child.stderr.on("data", (chunk: Buffer) => (err += chunk.toString()));
-	const { promise, resolve } = Promise.withResolvers<number>();
-	child.on("close", (code) => resolve(code ?? 1));
-	child.on("error", () => resolve(1));
-	const code = await promise;
-	const key = await verifierKey();
-	const body = {
-		slug,
-		at: new Date().toISOString(),
-		certMac: cert.signature.mac,
-		exitCode: code,
-		detail: (code === 0 ? out : err || out).trim().slice(0, 400),
-		by: "systemd-verify",
-	};
-	const mac = createHmac("sha256", key).update(canonical(body)).digest("hex");
-	await writeFile(attestationPath(slug), `${JSON.stringify({ ...body, mac }, null, "\t")}\n`, "utf8");
-	console.log(`АТТЕСТАЦИЯ: ${code === 0 ? "PASS" : "FAIL"} · ${body.detail}`);
-	return code === 0 ? 0 : 1;
+	const attestation = answer.attestation as Attestation | undefined;
+	if (!attestation) {
+		console.error(`верификатор не выдал аттестат: ${String(answer.detail ?? "без пояснения")}`);
+		return 1;
+	}
+	await ensureDir(join(process.cwd(), GATE_DIR, slug));
+	await writeFile(attestationPath(slug), `${JSON.stringify(attestation, null, "\t")}\n`, "utf8");
+	console.log(`АТТЕСТАЦИЯ: ${String(answer.verdict)} · ${String(answer.detail ?? "")}`);
+	return answer.verdict === "PASS" ? 0 : 1;
 }
 
 /** Контрольная точка: состояние ДО изменения — HEAD, локальные правки и список новых файлов. */

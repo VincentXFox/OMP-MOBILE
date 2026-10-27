@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bot, Folder, Settings, Activity, Brain, Send, UsersRound } from "lucide-react";
+import { Bot, Folder, Settings, Activity, Brain, Send, UsersRound, Target } from "lucide-react";
 import { AgentsScreen } from "./components/agents/AgentsScreen";
 import { ActivityScreen } from "./components/activity/ActivityScreen";
 import { MemoryScreen } from "./components/memory/MemoryScreen";
+import { GoalsScreen } from "./components/goals/GoalsScreen";
 import { ProjectsScreen } from "./components/projects/ProjectsScreen";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
 import { SettingsScreen } from "./components/settings/SettingsScreen";
@@ -18,7 +19,7 @@ import { rebaseCollabLink } from "./lib/link";
 import "./components/shell/pocket.css";
 import "./styles/desktop.css";
 
-type Screen = "agents" | "telegram" | "super" | "projects" | "sessions" | "memory" | "activity" | "updates" | "settings" | "session";
+type Screen = "agents" | "telegram" | "super" | "projects" | "sessions" | "memory" | "activity" | "updates" | "settings" | "goals" | "session";
 
 /* 5 fixed tabs (HIG ≤5, M3 3-5). super/sessions/updates are reachable from
  * screen-level entry points (header «Рой», Projects segment, Settings row). */
@@ -41,6 +42,7 @@ const SCREEN_TITLE: Record<Screen, string> = {
 	activity: "Активность",
 	updates: "Обновления",
 	settings: "Настройки",
+	goals: "Цели",
 	session: "Сессия",
 };
 
@@ -69,7 +71,7 @@ function screenFromHash(): { screen: Screen; instanceId: string | null } {
 	const hash = window.location.hash.replace(/^#\/?/, "");
 	const sessionMatch = /^session\/([A-Za-z0-9_-]+)$/.exec(hash);
 	if (sessionMatch) return { screen: "session", instanceId: sessionMatch[1] ?? null };
-	if (hash === "telegram" || hash === "super" || hash === "projects" || hash === "sessions" || hash === "memory" || hash === "activity" || hash === "updates" || hash === "settings") {
+	if (hash === "telegram" || hash === "super" || hash === "projects" || hash === "sessions" || hash === "memory" || hash === "activity" || hash === "updates" || hash === "settings" || hash === "goals") {
 		return { screen: hash, instanceId: null };
 	}
 	return { screen: "agents", instanceId: null };
@@ -432,6 +434,8 @@ export function App(): ReactNode {
 				return <SuperScreen onOpenSession={openSuperSession} />;
 			case "sessions":
 				return <SessionsScreen onOpenInstance={id => void openInstance(id)} />;
+			case "goals":
+				return <GoalsScreen />;
 			case "projects":
 				return (
 					<ProjectsScreen
@@ -492,6 +496,7 @@ export function App(): ReactNode {
 		activity: <Activity size={22} />,
 		memory: <Brain size={22} />,
 		settings: <Settings size={22} />,
+		goals: <Target size={22} />,
 		super: <UsersRound size={22} />,
 		sessions: <Folder size={22} />,
 		updates: <Settings size={22} />,
@@ -532,7 +537,7 @@ export function App(): ReactNode {
 				<div className="pk-content">
 					{body}
 					{keepAlive("memory", <MemoryScreen />)}
-					{keepAlive("settings", <SettingsScreen onOpenUpdates={() => goto("updates")} />)}
+					{keepAlive("settings", <SettingsScreen onOpenUpdates={() => goto("updates")} onOpenGoals={() => goto("goals")} />)}
 				</div>
 			</main>
 			<nav

@@ -8,6 +8,7 @@ import { resumeAgent, startAgent, stopAgent } from "./agents.ts";
 import { findSessionFile, listSessions, parseSessionHead, recentActivity, renameSession, tailEntries, type RenameOutcome } from "./sessions.ts";
 import { refreshIndexWithin, searchIndexStatus, searchSessions, SEARCH_QUERY_MIN, warmSearchIndex } from "./session-search.ts";
 import { displayName, setDisplayName } from "./names.ts";
+import { createGoal, driveGoal, listGoals, readGoal, reportGoal } from "./goals.ts";
 import { bootRestore, forgetSession, observeHosts, remapInstance } from "./restore.ts";
 import { watchPanes } from "./recovery/runtimeWatch.ts";
 import { getAgentSettings, listModelOptions, listProjectFiles, projectGit, readProjectFile, readTerminal, renameAgent, sendTerminalKeys, sendTerminalText, setAgentSettings, MAX_TERMINAL_TEXT_BYTES } from "./files.ts";
@@ -516,6 +517,42 @@ async function route(req: Request, url: URL): Promise<Response> {
     }
   }
 
+  // Цели автономного рантайма: список, создание, состояние, запуск и отчёт.
+  if (url.pathname === "/api/goals" && req.method === "GET") {
+    return json(200, { goals: await listGoals() });
+  }
+  if (url.pathname === "/api/goals" && req.method === "POST") {
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    const created = await createGoal({
+      goal: String(body.goal ?? ""),
+      criteria: Array.isArray(body.criteria) ? body.criteria.map(String) : [],
+      steps: Array.isArray(body.steps) ? body.steps.map(String) : [],
+      strategy: Array.isArray(body.strategy) ? body.strategy.map(String) : [],
+      project: typeof body.project === "string" ? body.project : undefined,
+      gate: typeof body.gate === "string" ? body.gate : undefined,
+      maxMinutes: Number(body.maxMinutes) || undefined,
+      maxCost: Number(body.maxCost) || undefined,
+    });
+    return json(created.ok ? 201 : 400, created);
+  }
+  const goalMatch = /^\/api\/goals\/([^/]+)(?:\/(drive|report))?$/u.exec(url.pathname);
+  if (goalMatch) {
+    let slug = goalMatch[1] as string;
+			try { slug = decodeURIComponent(slug); } catch { /* как есть */ }
+    const action = goalMatch[2];
+    if (action === "drive" && req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const driver = typeof body.driver === "string" && body.driver.trim() ? body.driver : "omp -p";
+      return json(200, await driveGoal(slug, driver));
+    }
+    if (action === "report" && req.method === "GET") {
+      return json(200, await reportGoal(slug));
+    }
+    if (req.method === "GET") {
+      const state = await readGoal(slug);
+      return state ? json(200, state) : json(404, { error: "цель не найдена" });
+    }
+  }
   if (url.pathname === "/api/hosts" && req.method === "GET") {
     const out = await cache.get();
     // displayName = explicitly user-set name (stable across restarts); null →

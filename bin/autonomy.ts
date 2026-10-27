@@ -58,6 +58,7 @@ interface State {
 	cost: number;
 	stall: number;
 	startedAt: string;
+	project?: string;
 	attemptKeys: { key: string; count: number }[];
 	approvals: { action: string; note: string; at: string }[];
 	danger: string[];
@@ -68,7 +69,8 @@ interface State {
 	result: { status: "ГОТОВО" | "PARTIAL" | "BLOCKED"; detail: string } | null;
 }
 
-const ROOT = join(process.cwd(), ".omp", "autonomy");
+// Каталог целей: в проекте — локально, для Pocket — общий корень (OMP_AUTONOMY_ROOT).
+const ROOT = process.env.OMP_AUTONOMY_ROOT ?? join(process.cwd(), ".omp", "autonomy");
 
 /** Границы: без явного подтверждения такие действия контроллер не пропускает. */
 const DEFAULT_DANGER = [
@@ -170,6 +172,11 @@ function attemptKey(step: string, action: string): string {
 	return createHash("sha256").update(`${step}\u0000${action}`).digest("hex").slice(0, 12);
 }
 
+/** Рабочий каталог цели: Pocket хранит цели централизованно, а проверки идут в проекте. */
+function projectDir(argv: string[]): string {
+	return argValue(argv, "--project") ?? process.cwd();
+}
+
 async function cmdStart(argv: string[]): Promise<number> {
 	const slug = argv[1];
 	if (!slug) throw new Error("нужен slug: autonomy start <slug> --goal \"…\"");
@@ -215,6 +222,7 @@ async function cmdStart(argv: string[]): Promise<number> {
 		createdAt: now(),
 		updatedAt: now(),
 		result: null,
+		project: projectDir(argv),
 	};
 	log(state, "start", `цель принята: ${goal}`);
 	await save(state);
@@ -403,7 +411,7 @@ async function cmdStep(argv: string[]): Promise<number> {
  */
 async function goalGuard(state: State, gateSlug: string): Promise<string[]> {
 	const problems: string[] = [];
-	const certPath = join(process.cwd(), ".omp", "gate", gateSlug, "certificate.json");
+	const certPath = join(state.project ?? process.cwd(), ".omp", "gate", gateSlug, "certificate.json");
 	if (!existsSync(certPath)) return [...problems, `нет сертификата ${gateSlug}: результат не подтверждён`];
 	const cert = JSON.parse(await readFile(certPath, "utf8")) as {
 		status?: string;
@@ -451,9 +459,16 @@ async function cmdVerify(argv: string[]): Promise<number> {
 	const state = await load(slug);
 	const gateSlug = argValue(argv, "--gate") ?? state.gateSlug;
 	if (!gateSlug) {
-		console.error("VERIFY невозможен без контракта: передай --gate <slug> сертификата quality-gate");
+		// Без контракта приёмки результат не доказан: это остаток, а не «почти готово».
 		state.phase = "RECOVER";
+		state.residuals.push({
+			text: "нет контракта приёмки",
+			reason: "цель запущена без --gate (quality-gate контракта и сертификата)",
+			impact: "RESULT невозможен: нечем доказать выполнение критериев",
+			exitCondition: "создать контракт quality-gate и повторить verify",
+		});
 		await save(state);
+		console.error("VERIFY невозможен без контракта: передай --gate <slug> сертификата quality-gate");
 		return 1;
 	}
 	const guardProblems = await goalGuard(state, gateSlug);
@@ -472,7 +487,7 @@ async function cmdVerify(argv: string[]): Promise<number> {
 	}
 	// Движок фиксирован: подмена --engine давала бы фальшивый PASS мимо настоящей проверки.
 	const engine = join(import.meta.dir, "quality-gate.ts");
-	const child = spawn("bun", [engine, "verify", gateSlug], { cwd: process.cwd() });
+	const child = spawn("bun", [engine, "verify", gateSlug], { cwd: state.project ?? process.cwd() });
 	let out = "";
 	let err = "";
 	child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
