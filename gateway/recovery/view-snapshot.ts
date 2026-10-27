@@ -12,7 +12,7 @@ export async function readEmptyViewSnapshot(expected: EmptySnapshot): Promise<un
   globalThis.WebSocket = class extends NativeSocket {
     constructor(address: string | URL, protocols?: string | string[]) {
       const url = new URL(String(address));
-      if (["thor1.local", "192.168.1.4", "127.0.0.1", "localhost"].includes(url.hostname)) {
+      if (["thor1.local", "192.0.2.10", "127.0.0.1", "localhost"].includes(url.hostname)) {
         url.protocol = "ws:"; url.hostname = "127.0.0.1"; url.port = "7466";
       } else {
         throw new Error("Read-only snapshot relay is not an audited local address");

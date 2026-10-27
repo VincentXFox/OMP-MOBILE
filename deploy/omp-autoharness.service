@@ -4,12 +4,12 @@ After=omp-pocket-gateway.service
 
 [Service]
 Type=oneshot
-ExecStart=/home/vincentfox/omp-mobile/deploy/autoharness-run.sh
-WorkingDirectory=/home/vincentfox/omp-mobile
+ExecStart=%h/omp-mobile/deploy/autoharness-run.sh
+WorkingDirectory=%h/omp-mobile
 # До трёх сессий, каждая — отдельный рефлектор на flash (2–5 мин): запас по времени.
 TimeoutStartSec=2400
-Environment=HOME=/home/vincentfox
-Environment=PATH=/home/vincentfox/.local/bin:/home/vincentfox/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=%h
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
 Environment=AUTOHARNESS_WINDOW_HOURS=24
 Environment=AUTOHARNESS_REFLECT_EVERY_N=40
 Environment=AUTOHARNESS_MAX_SESSIONS=3

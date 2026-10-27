@@ -177,7 +177,7 @@ export function GoalsScreen(): ReactNode {
 					</label>
 					<label className="go-label">
 						Проект (каталог, где идут проверки)
-						<input value={project} onChange={event => setProject(event.target.value)} placeholder="/home/vincentfox/OMP/omp" />
+						<input value={project} onChange={event => setProject(event.target.value)} placeholder="/home/user/OMP/omp" />
 					</label>
 					<div className="go-form-actions">
 						<button type="button" className="go-ghost" onClick={() => setCreating(false)}>

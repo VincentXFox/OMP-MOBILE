@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { runtimeSocketPath } from "../runtime/protocol.ts";
 
@@ -34,7 +35,7 @@ export interface UpdatePaths {
   buildOrigin: string;
 }
 
-const HOME = process.env["HOME"] ?? "/home/vincentfox";
+const HOME = process.env["HOME"] ?? homedir();
 
 function envPath(name: string, fallback: string): string {
   const raw = process.env[name];

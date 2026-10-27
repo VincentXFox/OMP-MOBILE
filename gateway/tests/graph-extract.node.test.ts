@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { extractClaims, extractEntities, extractFromTranscript, messageText, splitClaims } from "../memory-graph/extract.ts";
 
-const CTX = { project: "/home/vincentfox/omp-mobile", sessionId: "s-1" };
+const CTX = { project: "/home/user/omp-mobile", sessionId: "s-1" };
 
 describe("экстракция фактов", () => {
 	test("решение с сущностями становится фактом", () => {

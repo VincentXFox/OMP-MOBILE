@@ -116,8 +116,8 @@ function ConnectionSection(props: { onToast: (text: string) => void }): ReactNod
 				)}
 				{check && <div className={check.ok ? "pk-check pk-check--ok" : "pk-check pk-check--err"}>{check.message}</div>}
 				<p className="set-hint">
-					Пусто = приложение использует собственный адрес. Примеры: LAN <code>https://192.168.1.18:8443</code>, публичный{" "}
-					<code>https://pocket.31-77-109-219.sslip.io</code>.
+					Пусто = приложение использует собственный адрес. Примеры: LAN <code>https://192.0.2.11:8443</code>, публичный{" "}
+					<code>https://pocket.example.com</code>.
 				</p>
 			</div>
 		</section>

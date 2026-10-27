@@ -23,14 +23,14 @@ omp config set collab.autoStart control
 
 # 5. HTTPS (публичный доступ)
 sudo cp ~/omp-mobile/deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
-# + на роутере пробросить 80 и 443 -> 192.168.1.88 (как существующий :8089)
+# + на роутере пробросить 80 и 443 -> 192.0.2.88 (как существующий :8089)
 ```
 
 Уже запущенные сессии публикуются командой `/collab` внутри них (один раз); все новые — автоматически (шаг 4).
 
 ## Телефон (Android)
 
-1. Открыть `https://pocket.31-77-109-219.sslip.io` (через reverse-туннель на VPS `de5`) → «Добавить на главный экран» (установится как приложение).
+1. Открыть `https://pocket.example.com` (через reverse-туннель на VPS `de5`) → «Добавить на главный экран» (установится как приложение).
 2. Настройки → Подключение: вставить токен из `~/omp-mobile/gateway/config.json`.
 3. Настройки → Уведомления: включить push (разрешение + подписка).
 
@@ -50,9 +50,9 @@ sudo cp ~/omp-mobile/deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl rel
 
 При появлении/смене сети туннель перезапускает NetworkManager-хук `/etc/NetworkManager/dispatcher.d/50-omp-pocket-tunnel` (root:root 0755, антидребезг 10 с) — окно недоступности сокращается до одного реконнекта ssh. Без него связь восстанавливают `ServerAliveInterval` и `Restart=always`.
 
-Клиент в Настройках → Подключение принимает несколько адресов (по одному в строке, порядок = приоритет): пусто = адрес самого приложения; типовой набор — публичный домен (`https://pocket.31-77-109-219.sslip.io`) и LAN (`https://192.168.1.4:8443` или `https://thor1.local:8443`). Активный адрес переключается на первый живой автоматически; при нескольких адресах POST-запросы уходят только на активный (перебор дал бы дубль задачи).
+Клиент в Настройках → Подключение принимает несколько адресов (по одному в строке, порядок = приоритет): пусто = адрес самого приложения; типовой набор — публичный домен (`https://pocket.example.com`) и LAN (`https://192.0.2.10:8443` или `https://thor1.local:8443`). Активный адрес переключается на первый живой автоматически; при нескольких адресах POST-запросы уходят только на активный (перебор дал бы дубль задачи).
 
-LAN-кандидат требует доверия к локальному CA на устройстве: сертификат `leaf.crt` подписан `OMP Pocket Local CA` (тот же `certs/ca.crt`, отдаётся как `https://pocket.31-77-109-219.sslip.io/pocket-root-ca.crt`) и покрывает `192.168.1.4`, `192.168.1.18`, `thor1.local`, `localhost`, `127.0.0.1`. IP Thor1 приходит по DHCP и уже менялся (`.18` → `.4`): после смены адреса SAN перевыпускается (`certs/*.bak-*` — старые копии), иначе LAN-вход отдаёт ошибку сертификата. Без доверия к CA браузер отклоняет LAN-адрес до всякого CORS. Свежие Chrome дополнительно спрашивают разрешение на доступ к локальной сети.
+LAN-кандидат требует доверия к локальному CA на устройстве: сертификат `leaf.crt` подписан `OMP Pocket Local CA` (тот же `certs/ca.crt`, отдаётся как `https://pocket.example.com/pocket-root-ca.crt`) и покрывает `192.0.2.10`, `192.0.2.11`, `thor1.local`, `localhost`, `127.0.0.1`. IP Thor1 приходит по DHCP и уже менялся (`.18` → `.4`): после смены адреса SAN перевыпускается (`certs/*.bak-*` — старые копии), иначе LAN-вход отдаёт ошибку сертификата. Без доверия к CA браузер отклоняет LAN-адрес до всякого CORS. Свежие Chrome дополнительно спрашивают разрешение на доступ к локальной сети.
 
 ## Безопасность
 
@@ -72,7 +72,7 @@ omp config set tools.approvalMode write   # правки файлов — сам
 
 ## LAN без домена (fallback)
 
-Сервис-воркер и WebCrypto требуют HTTPS. Без домена: `mkcert -install && mkcert 192.168.1.88`, затем в Caddyfile `tls /path/192.168.1.88.pem /path/192.168.1.88-key.pem`, корневой CA mkcert установить на телефоне. Либо пользоваться VPN (WireGuard) + вариант с доменом.
+Сервис-воркер и WebCrypto требуют HTTPS. Без домена: `mkcert -install && mkcert 192.0.2.88`, затем в Caddyfile `tls /path/192.0.2.88.pem /path/192.0.2.88-key.pem`, корневой CA mkcert установить на телефоне. Либо пользоваться VPN (WireGuard) + вариант с доменом.
 
 ## Компоненты
 
@@ -81,7 +81,7 @@ omp config set tools.approvalMode write   # правки файлов — сам
 | `~/omp-mobile/app` | PWA (React+Bun, форк официального клиента omp collab-web, протокол не изменён) |
 | `~/omp-mobile/gateway` | API реестра + выдача ссылок + Web Push + статика |
 | `~/.config/systemd/user/omp-pocket-gateway.service` | user-юнит gateway |
-| `~/.config/systemd/user/omp-pocket-tunnel.service` | user-юнит reverse-SSH-туннеля: терминатор — de5 (`de5:8088` → gateway `127.0.0.1:8088`), соединение идёт через шлюз `srv78` (`ProxyCommand ssh -W 127.0.0.1:2222 srv78`, в нём тоже `BatchMode`/`ConnectTimeout=8`/keepalive); публичный адрес `https://pocket.31-77-109-219.sslip.io`; самовосстанавливающийся, без start-limit |
+| `~/.config/systemd/user/omp-pocket-tunnel.service` | user-юнит reverse-SSH-туннеля: терминатор — de5 (`de5:8088` → gateway `127.0.0.1:8088`), соединение идёт через шлюз `srv78` (`ProxyCommand ssh -W 127.0.0.1:2222 srv78`, в нём тоже `BatchMode`/`ConnectTimeout=8`/keepalive); публичный адрес `https://pocket.example.com`; самовосстанавливающийся, без start-limit |
 | `~/.config/systemd/user/omp-pocket-tunnel-watchdog.{service,timer}` + `deploy/tunnel-watchdog.sh` | watchdog туннеля: раз в 30 с проба `GET /api/health` через de5, два провала → рестарт юнита |
 | `~/.config/systemd/user/omp-pocket-organizer.{service,timer}` + `bin/organizer.ts` | штат агентов: раз в сутки (04:00, `Persistent=true`) раскладывает агентов по папкам `~/OMP/<slug>` и фиксирует ответственности; модель — `OMP_POCKET_ORGANIZER_MODEL` или `--model`, без модели действует «один агент = один стол» |
 | `~/OMP/` | сами столы: `AGENTS.md` (устав стола, omp читает его как правила проекта), `JOURNAL.md`, `CREW.md` — индекс «кто за что отвечает» |
@@ -249,7 +249,7 @@ bun bin/harness-reflect.ts run                        # реальный про�
 ```bash
 # поставить задачу (критерии пишутся ДО первого действия и модель их не меняет)
 curl -s -X POST -H "authorization: Bearer <token>" -H 'content-type: application/json' \
-  -d '{"goal":"Создай hello.txt с текстом ok","cwd":"/home/vincentfox/task-live",
+  -d '{"goal":"Создай hello.txt с текстом ok","cwd":"/home/user/task-live",
        "model":"deepseek/deepseek-v4-flash",
        "criteria":[{"id":"c1","statement":"файл содержит ok","check":{"command":"grep -qx ok hello.txt"}}],
        "budget":{"maxTokens":200000,"reserveTokens":20000}}' \

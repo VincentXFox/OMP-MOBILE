@@ -628,7 +628,7 @@ export function isAllowedProjectPath(dir: string): boolean {
 	}
 	if (!statSync(resolved).isDirectory()) return false;
 	const home = HOME + "/";
-	// Сам дом — тоже «проект» (агенты Main/restores живут в /home/vincentfox).
+	// Сам дом — тоже «проект» (агенты Main/restores живут в /home/user).
 	if (resolved === HOME) return true;
 	if (!resolved.startsWith(home)) return resolved.startsWith("/tmp/") && !resolved.slice(5).split("/").some(s => s.startsWith("."));
 	const rest = resolved.slice(home.length);

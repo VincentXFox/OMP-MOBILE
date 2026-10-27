@@ -3,9 +3,9 @@
 # восстановились из panes.json, и оставить доказательство в журнале стола.
 set -u
 
-TOKEN=$(python3 -c "import json;print(json.load(open('/home/vincentfox/omp-mobile/gateway/config.json'))['token'])")
-OUT=${POST_BOOT_OUT:-/home/vincentfox/OMP/omp/POST-BOOT.md}
-JOURNAL=${POST_BOOT_JOURNAL:-/home/vincentfox/OMP/omp/JOURNAL.md}
+TOKEN=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/omp-mobile/gateway/config.json')))['token'])")
+OUT=${POST_BOOT_OUT:-$HOME/OMP/omp/POST-BOOT.md}
+JOURNAL=${POST_BOOT_JOURNAL:-$HOME/OMP/omp/JOURNAL.md}
 API=${POST_BOOT_API:-http://127.0.0.1:8088}
 
 # Каждая проверка — отдельный прогон: ждать до 6 минут (панели поднимаются не мгновенно).
@@ -28,7 +28,7 @@ print(len(h), sum(1 for x in h if x.get('relayConnected')))
 		panes=$(python3 -c "
 import json
 try:
-    print(len(json.load(open('/home/vincentfox/.local/state/omp-pocket/runtime/panes.json'))['panes']))
+    print(len(json.load(open(os.path.expanduser('~/.local/state/omp-pocket/runtime/panes.json')))['panes']))
 except Exception:
     print('?')
 " 2>/dev/null)

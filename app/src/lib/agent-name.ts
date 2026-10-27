@@ -7,7 +7,7 @@ import type { HostInfo } from "./gateway";
  *
  * Заголовок из файла свежее реестра (переименование из TUI) и есть у сессий,
  * запущенных без панели шлюза: реестр им имени не даёт вовсе, и в списках
- * агентов они выглядели слагом или путём «/home/vincentfox».
+ * агентов они выглядели слагом или путём «/home/user».
  */
 
 /** Служебные имена (resume--x, restore-x, черновики Pocket) → человеческий текст. */
@@ -29,6 +29,6 @@ export function agentName(host: HostInfo): string {
 	if (host.sessionTitle) return host.sessionTitle;
 	if (host.sessionPreview) return host.sessionPreview;
 	if (host.sessionName) return humanizeServiceName(host.sessionName);
-	// Имени нет нигде: честная короткая примета вместо пути «/home/vincentfox».
+	// Имени нет нигде: честная короткая примета вместо пути «/home/user».
 	return `Сессия ${host.sessionId.slice(0, 8)}`;
 }

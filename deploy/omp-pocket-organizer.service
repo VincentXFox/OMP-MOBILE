@@ -4,12 +4,12 @@ After=omp-pocket-gateway.service
 
 [Service]
 Type=oneshot
-ExecStart=/home/vincentfox/.bun/bin/bun /home/vincentfox/omp-mobile/bin/organizer.ts run
-WorkingDirectory=/home/vincentfox/omp-mobile
+ExecStart=%h/.bun/bin/bun %h/omp-mobile/bin/organizer.ts run
+WorkingDirectory=%h/omp-mobile
 # Разбор двадцати агентов моделью идёт минутами: не рубим прогон на 90 с.
 TimeoutStartSec=1200
 # omp живёт в ~/.local/bin: без PATH организатор не найдёт модель-раннер.
-Environment=HOME=/home/vincentfox
-Environment=PATH=/home/vincentfox/.local/bin:/home/vincentfox/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=%h
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
 # Только flash: pro/платные провайдеры в автоматике не используем.
 Environment=OMP_POCKET_ORGANIZER_MODEL=deepseek/deepseek-v4-flash

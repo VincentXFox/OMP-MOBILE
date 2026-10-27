@@ -2,8 +2,8 @@
 	auto_https off
 	admin off
 }
-https://192.168.1.4:8443, https://thor1.local:8443 {
-	tls /home/vincentfox/omp-mobile/certs/leaf.crt /home/vincentfox/omp-mobile/certs/leaf.key
+https://192.0.2.10:8443, https://thor1.local:8443 {
+	tls {$HOME}/omp-mobile/certs/leaf.crt {$HOME}/omp-mobile/certs/leaf.key
 	# collab-релей (WebSocket /r/<room>) — отдельно от PWA, иначе WS не апгрейдится
 	handle /r/* {
 		reverse_proxy 127.0.0.1:7466

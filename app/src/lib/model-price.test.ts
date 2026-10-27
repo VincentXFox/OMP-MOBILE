@@ -9,7 +9,7 @@ test("цена показывается парой вход/выход за 1M �
 
 test("локальная модель названа бесплатной, а не нулевой ценой", () => {
 	expect(modelPriceLabel("big-pc/huihui-qwen3.8-27b-vl", null)).toBe("бесплатно · локальная");
-	expect(modelPriceLabel("llama.cpp//home/vincentfox/models/x.gguf", { input: 0, output: 0 })).toBe("бесплатно · локальная");
+	expect(modelPriceLabel("llama.cpp//home/user/models/x.gguf", { input: 0, output: 0 })).toBe("бесплатно · локальная");
 });
 
 test("неизвестная цена честно помечена, а не показана как ноль", () => {

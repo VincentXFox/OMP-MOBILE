@@ -28,7 +28,7 @@ describe("порядок моделей по цене использования
 
 	test("локальные модели бесплатны и стоят первыми", () => {
 		expect(usagePriceWeight(model("big-pc/huihui-qwen3.8-27b-vl", null, null))).toBe(0);
-		expect(usagePriceWeight(model("llama.cpp//home/vincentfox/models/x.gguf", 0, 0))).toBe(0);
+		expect(usagePriceWeight(model("llama.cpp//home/user/models/x.gguf", 0, 0))).toBe(0);
 		const ordered = orderByUsagePrice([model("cheaperinference/gpt-5.6-luna", 0.08, 0.48), model("helper/qwen3-vl-4b", null, null)]);
 		expect(ordered[0]?.selector).toBe("helper/qwen3-vl-4b");
 	});

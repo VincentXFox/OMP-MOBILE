@@ -17,8 +17,8 @@ test("kind labels are russian and unknown kinds stay visible", () => {
 });
 
 test("short project keeps last path segment and survives trailing slash", () => {
-	expect(shortProject("/home/vincentfox/omp-mobile")).toBe("omp-mobile");
-	expect(shortProject("/home/vincentfox/omp-mobile/")).toBe("omp-mobile");
+	expect(shortProject("/home/user/omp-mobile")).toBe("omp-mobile");
+	expect(shortProject("/home/user/omp-mobile/")).toBe("omp-mobile");
 	expect(shortProject("omp-mobile")).toBe("omp-mobile");
 	expect(shortProject("/")).toBe("/");
 });
@@ -65,8 +65,8 @@ test("percent clamps and never prints NaN", () => {
 });
 
 test("fact meta line joins project, date, mentions and confidence", () => {
-	expect(graphFactMeta({ project: "/home/vincentfox/omp-mobile", lastSeen: SAME_YEAR, mentions: 7, confidence: 0.9 }, NOW)).toBe(
-		"/home/vincentfox/omp-mobile · 26.10 · упоминаний 7 · уверенность 90%",
+	expect(graphFactMeta({ project: "/home/user/omp-mobile", lastSeen: SAME_YEAR, mentions: 7, confidence: 0.9 }, NOW)).toBe(
+		"/home/user/omp-mobile · 26.10 · упоминаний 7 · уверенность 90%",
 	);
 	expect(graphFactMeta({ project: "", lastSeen: 0, mentions: 0, confidence: 0 }, NOW)).toBe(
 		"без проекта · без даты · упоминаний 0 · уверенность 0%",

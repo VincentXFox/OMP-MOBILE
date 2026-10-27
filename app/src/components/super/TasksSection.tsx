@@ -322,7 +322,7 @@ export function TasksSection(): ReactNode {
 					/>
 					<input
 						className="pk-input"
-						placeholder="Рабочий каталог, например /home/vincentfox/omp-mobile"
+						placeholder="Рабочий каталог, например /home/user/omp-mobile"
 						value={cwd}
 						onChange={e => setCwd(e.target.value)}
 						autoCapitalize="off"
