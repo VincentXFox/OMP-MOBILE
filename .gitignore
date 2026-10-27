@@ -29,3 +29,4 @@ deploy/*.bak-*
 
 # манифест панелей пишется рантаймом на старте (состояние, не код)
 gateway/runtime-manifest.json
+.omp/gate/

@@ -970,13 +970,24 @@ async function diffHashNow(): Promise<string> {
 	diff.on("close", () => resolveDiff());
 	diff.on("error", () => resolveDiff());
 	await promise;
-	// Собственные артефакты приёмки не считаются правкой кода.
+	// Собственные артефакты приёмки не считаются правкой кода: иначе каждый прогон
+	// обесценивает собственное ревью и приёмка не может закрыться.
+	let withoutGate = "";
+	let skippingGate = false;
+	for (const line of text.split("\n")) {
+		const header = /^diff --git a\/(.+?) b\/(.+)$/u.exec(line);
+		if (header) {
+			skippingGate = (header[2] ?? header[1] ?? "").startsWith(".omp/");
+			if (skippingGate) continue;
+		}
+		if (!skippingGate) withoutGate += `${line}\n`;
+	}
 	const status = gitOr(["status", "--porcelain"], "")
 		.split("\n")
 		.filter((line) => line.length > 0 && !line.includes(".omp/gate"))
 		.sort()
 		.join("\n");
-	return createHash("sha256").update(`${text}\n${status}`).digest("hex").slice(0, 16);
+	return createHash("sha256").update(`${withoutGate}\n${status}`).digest("hex").slice(0, 16);
 }
 
 function attestationPath(slug: string): string {
