@@ -6,7 +6,7 @@
 # 3) Caddy: сайт pocket.vincentfox.ru -> 127.0.0.1:8088 (OMP Pocket)
 # 4) проверка https://pocket.vincentfox.ru/api/hosts
 set -u
-HOME_IP="78.17.85.23"
+HOME_IP="${HOME_IP:-192.0.2.78}"
 LOG=/tmp/de5-recovery.log
 log() { echo "$(date '+%H:%M:%S') $*" >> "$LOG"; }
 
@@ -14,11 +14,11 @@ for attempt in 1 2 3 4; do
   log "проба $attempt"
   if ssh -o ConnectTimeout=10 -o BatchMode=yes de5 'echo SSH-OK' 2>/dev/null | grep -q SSH-OK; then
     log "SSH пустил — разворачиваю пакет"
-    ssh -o BatchMode=yes de5 bash -s <<'REMOTE'
+    ssh -o BatchMode=yes de5 bash -s <<REMOTE
 set -e
-sudo fail2ban-client set sshd unbanip 78.17.85.23 2>/dev/null || sudo fail2ban-client unban 78.17.85.23 2>/dev/null || echo "fail2ban не установлен/уже разбанен"
+sudo fail2ban-client set sshd unbanip $HOME_IP 2>/dev/null || sudo fail2ban-client unban $HOME_IP 2>/dev/null || echo "fail2ban не установлен/уже разбанен"
 sudo mkdir -p /etc/fail2ban/jail.d
-echo -e "[sshd]\nignoreip = 127.0.0.1/8 78.17.85.23" | sudo tee /etc/fail2ban/jail.d/ignore-home.conf >/dev/null
+echo -e "[sshd]\nignoreip = 127.0.0.1/8 $HOME_IP" | sudo tee /etc/fail2ban/jail.d/ignore-home.conf >/dev/null
 sudo systemctl reload fail2ban 2>/dev/null || true
 if grep -q '^MaxStartups' /etc/ssh/sshd_config; then
   sudo sed -i 's/^MaxStartups.*/MaxStartups 30:30:60/' /etc/ssh/sshd_config
@@ -29,7 +29,7 @@ sudo sshd -t && sudo systemctl reload sshd
 echo "sshd: MaxStartups поднят, ignoreip прописан"
 REMOTE
     log "ssh-пакет применён; правлю Caddy"
-    ssh -o BatchMode=yes de5 bash -s <<'REMOTE'
+    ssh -o BatchMode=yes de5 bash -s <<REMOTE
 set -e
 sudo cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.$(date +%s)"
 grep -q 'pocket.vincentfox.ru' /etc/caddy/Caddyfile || printf '\npocket.vincentfox.ru {\n\treverse_proxy 127.0.0.1:8088\n}\n' | sudo tee -a /etc/caddy/Caddyfile >/dev/null
@@ -45,5 +45,5 @@ REMOTE
   # бан ещё висит: тихо ждём 30 мин (без долбления — иначе рекидив продлит бан)
   sleep 1800
 done
-log "за 2 часа бан не спал — нужен ручной unban с консоли VPS: fail2ban-client set sshd unbanip 78.17.85.23"
+log "за 2 часа бан не спал — нужен ручной unban с консоли VPS: fail2ban-client set sshd unbanip $HOME_IP"
 exit 1
