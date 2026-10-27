@@ -825,7 +825,7 @@ async function cmdReview(argv: string[]): Promise<number> {
 			verdict,
 			note: argValue(argv, "--note") ?? "без пояснения",
 			at: new Date().toISOString(),
-			diffHash: await diffHashNow(),
+			diffHash: subjectHash(cert),
 		};
 	}
 	const history = cert.reviews ?? (cert.review ? [cert.review] : []);
@@ -930,8 +930,11 @@ async function missingParts(cert: Certificate): Promise<string[]> {
 	if (!Number.isFinite(certifiedAt) || Date.now() - certifiedAt > 24 * 60 * 60 * 1000) missing.push("сертификат старше суток");
 	if (cert.review !== null && cert.review.verdict === "FAIL") missing.push("вердикт ревьюера FAIL");
 	// Ревью, выданное до последних правок, ничего не подтверждает.
-	if (cert.review !== null && cert.review.diffHash && cert.review.diffHash !== (await diffHashNow()))
-		missing.push("ревью устарело: код менялся после вердикта");
+	if (cert.review !== null && cert.review.diffHash && cert.review.diffHash !== subjectHash(cert))
+		missing.push("ревью устарело: артефакты или проверки менялись после вердикта");
+	// Высокий риск требует закреплённых артефактов: иначе предмет ревью пуст.
+	if (cert.risk === "high" && (cert.artifacts ?? []).length === 0)
+		missing.push("не закреплены артефакты (--artifact): нечего подтверждать по содержимому");
 	// История ревью — не декорация: стоящий FAIL закрывается только записью с supersedesFail.
 	// Массив reviews — часть артефакта: его отсутствие означает, что либо ревью не было,
 	// либо историю подчистили, чтобы спрятать FAIL. И то и другое не приёмка.
@@ -959,6 +962,14 @@ async function missingParts(cert: Certificate): Promise<string[]> {
 		missing.push(`ревьюер «${by}» не независим`);
 	if (cert.status === "FAILED") missing.push("статус сертификата FAILED");
 	return missing;
+}
+
+/** Отпечаток предмета ревью: файлы-артефакты и объявленные проверки. */
+function subjectHash(cert: { artifacts?: ArtifactHash[]; checks?: { cmd?: string }[]; criteria?: { id?: string; text?: string }[] }): string {
+	const artifacts = (cert.artifacts ?? []).map((item) => `${item.path}:${item.sha256}`).sort().join(",");
+	const checks = (cert.checks ?? []).map((item) => item.cmd ?? "").join("|");
+	const criteria = (cert.criteria ?? []).map((item) => `${item.id ?? ""}:${item.text ?? ""}`).join("|");
+	return createHash("sha256").update(`${artifacts}\n${checks}\n${criteria}`).digest("hex").slice(0, 16);
 }
 
 /** Отпечаток рабочего дерева: ревью, выданное на другой дифф, недействительно. */

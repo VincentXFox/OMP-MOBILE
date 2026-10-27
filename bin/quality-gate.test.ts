@@ -93,7 +93,7 @@ describe("quality-gate", () => {
 
 	test("рискованная работа без независимой проверки не проходит verify", async () => {
 		const cwd = repo();
-		await gate(cwd, ["init", "risk", "--task", "риск", "--risk", "high", "--ac", "AC-01: службы живы", "--check", "readme::test -f readme.md", "--covers", "readme=AC-01", "--check", "нет::test -f missing.txt", "--expect", "нет=1", "--covers", "нет=AC-01", "--adversarial", "проверка врёт::пустой файл::получен отказ", "--residual-none", "охват — существование файла"]);
+		await gate(cwd, ["init", "risk", "--task", "риск", "--risk", "high", "--ac", "AC-01: службы живы", "--check", "readme::test -f readme.md", "--covers", "readme=AC-01", "--check", "нет::test -f missing.txt", "--expect", "нет=1", "--covers", "нет=AC-01", "--adversarial", "проверка врёт::пустой файл::получен отказ", "--artifact", "readme.md", "--residual-none", "охват — существование файла"]);
 		await gate(cwd, ["run", "risk"]);
 		const before = await gate(cwd, ["verify", "risk"]);
 		expect(before.code).toBe(1);
@@ -348,7 +348,7 @@ describe("quality-gate", () => {
 
 	test("негативный сценарий проходит, когда код совпал с ожиданием", async () => {
 		const cwd = repo();
-		await gate(cwd, ["init", "neg", "--task", "t", "--risk", "high", "--ac", "AC-01: файла нет — команда падает", "--check", "нет::test -f missing.txt", "--expect", "нет=1", "--covers", "нет=AC-01", "--adversarial", "отрицательный сценарий подделан::проверил на реальном отсутствии файла::код 1 как ожидалось", "--residual-none", "охват — отсутствие файла"]);
+		await gate(cwd, ["init", "neg", "--task", "t", "--risk", "high", "--ac", "AC-01: файла нет — команда падает", "--check", "нет::test -f missing.txt", "--expect", "нет=1", "--covers", "нет=AC-01", "--adversarial", "отрицательный сценарий подделан::проверил на реальном отсутствии файла::код 1 как ожидалось", "--artifact", "readme.md", "--residual-none", "охват — отсутствие файла"]);
 		const run = await gate(cwd, ["run", "neg"]);
 		expect(run.code).toBe(0);
 		await gate(cwd, ["review", "neg", "--by", "reviewer", "--verdict", "PASS", "--note", "негатив ожидаем"]);
