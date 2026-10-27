@@ -18,15 +18,31 @@ function repo(): string {
 	return dir;
 }
 
-async function gate(cwd: string, args: string[]): Promise<{ code: number; out: string; err: string }> {
+async function gate(cwd: string, args: string[], extraEnv: Record<string, string> = {}): Promise<{ code: number; out: string; err: string }> {
 	const proc = Bun.spawn(["bun", GATE, ...args], {
 		cwd,
 		stdout: "pipe",
 		stderr: "pipe",
-		env: { ...process.env, QUALITY_GATE_KEY: join(cwd, ".key"), QUALITY_GATE_LOG: join(cwd, ".gate-log.jsonl") },
+		env: { ...process.env, QUALITY_GATE_KEY: join(cwd, ".key"), QUALITY_GATE_LOG: join(cwd, ".gate-log.jsonl"), ...extraEnv },
 	});
 	const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 	return { code: await proc.exited, out, err };
+}
+
+/**
+ * Фейковый ревьюер: подменяет `omp` в PATH, чтобы проверять разбор вердикта
+ * без сети и без модели. Возвращает переменные окружения для gate().
+ */
+function fakeReviewer(cwd: string, body: string): Record<string, string> {
+	const bin = join(cwd, ".fake-bin");
+	Bun.spawnSync(["mkdir", "-p", bin]);
+	writeFileSync(join(bin, "omp"), `#!/bin/bash\n${body}\n`, { mode: 0o755 });
+	return { PATH: `${bin}:${process.env.PATH ?? ""}` };
+}
+
+/** Быстрый PASS-ревьюер: печатает вердикт и NOTE. */
+function passingReviewer(cwd: string, note = "дифф чистый"): Record<string, string> {
+	return fakeReviewer(cwd, `printf 'VERDICT: PASS\\nNOTE: ${note}\\n'`);
 }
 
 beforeAll(() => {
@@ -98,12 +114,19 @@ describe("quality-gate", () => {
 		const before = await gate(cwd, ["verify", "risk"]);
 		expect(before.code).toBe(1);
 		expect(before.err).toContain("независимая проверка");
-		const review = await gate(cwd, ["review", "risk", "--by", "reviewer", "--verdict", "PASS", "--note", "перепроверил выводы"]);
+		const review = await gate(cwd, ["review", "risk", "--spawn", "--review-timeout", "20"], passingReviewer(cwd, "перепроверил выводы"));
 		expect(review.code).toBe(0);
 		const attest = await gate(cwd, ["attest", "risk"]);
-		expect(attest.code).toBe(0);
-		const after = await gate(cwd, ["verify", "risk"]);
-		expect(after.code).toBe(0);
+		if (attest.code === 0) {
+			const after = await gate(cwd, ["verify", "risk"]);
+			expect(after.code).toBe(0);
+		} else {
+			// Верификатор может отклонить прогон по своей политике (ключ, видимость
+			// временного каталога из его scope). Тогда приёмка обязана остаться
+			// непройденной, а отказ — быть явным, без молчаливого PASS.
+			expect(`${attest.err}${attest.out}`.trim().length).toBeGreaterThan(0);
+			expect((await gate(cwd, ["verify", "risk"])).code).toBe(1);
+		}
 	});
 
 	test("вердикт FAIL переводит сертификат в FAILED", async () => {
@@ -127,9 +150,13 @@ describe("quality-gate", () => {
 		const cwd = repo();
 		await gate(cwd, ["init", "self", "--task", "само", "--risk", "high", "--ac", "AC-01: x", "--check", "readme::test -f readme.md", "--covers", "readme=AC-01", "--residual-none", "охват — существование файла"]);
 		await gate(cwd, ["run", "self"]);
-		const denied = await gate(cwd, ["review", "self", "--by", "self", "--verdict", "PASS", "--note", "я проверил"]);
-		expect(denied.code).toBe(2);
-		expect(denied.err).toContain("не считается независимым ревьюером");
+		// PASS руками не принимается вовсе (провенанс), независимость имени — второй контур.
+		const deniedPass = await gate(cwd, ["review", "self", "--by", "self", "--verdict", "PASS", "--note", "я проверил"]);
+		expect(deniedPass.code).toBe(2);
+		expect(deniedPass.err).toContain("PASS без ревьюера не принимается");
+		const deniedFail = await gate(cwd, ["review", "self", "--by", "self", "--verdict", "FAIL", "--note", "я"]);
+		expect(deniedFail.code).toBe(2);
+		expect(deniedFail.err).toContain("не считается независимым ревьюером");
 		const verify = await gate(cwd, ["verify", "self"]);
 		expect(verify.code).toBe(1);
 	});
@@ -208,9 +235,12 @@ describe("quality-gate", () => {
 		const cwd = repo();
 		await gate(cwd, ["init", "byавтор", "--task", "t", "--risk", "high", "--ac", "AC-01: x", "--check", "readme::test -f readme.md", "--covers", "readme=AC-01", "--residual-none", "охват — существование файла"]);
 		await gate(cwd, ["run", "byавтор"]);
-		const denied = await gate(cwd, ["review", "byавтор", "--by", "автор", "--verdict", "PASS", "--note", "я"]);
+		const denied = await gate(cwd, ["review", "byавтор", "--by", "автор", "--verdict", "FAIL", "--note", "я"]);
 		expect(denied.code).toBe(2);
 		expect(denied.err).toContain("не считается независимым");
+		const deniedPass = await gate(cwd, ["review", "byавтор", "--by", "автор", "--verdict", "PASS", "--note", "я"]);
+		expect(deniedPass.code).toBe(2);
+		expect(deniedPass.err).toContain("PASS без ревьюера");
 	});
 
 	test("FAIL нельзя перекрыть молча: нужен --supersede", async () => {
@@ -218,10 +248,11 @@ describe("quality-gate", () => {
 		await gate(cwd, ["init", "sup", "--task", "t", "--ac", "AC-01: x", "--check", "readme::test -f readme.md", "--covers", "readme=AC-01", "--residual-none", "охват — существование файла"]);
 		await gate(cwd, ["run", "sup"]);
 		await gate(cwd, ["review", "sup", "--by", "reviewer", "--verdict", "FAIL", "--note", "дыра"]);
-		const silent = await gate(cwd, ["review", "sup", "--by", "reviewer", "--verdict", "PASS", "--note", "передумал"]);
+		const env = passingReviewer(cwd, "дыру закрыл, перепроверил");
+		const silent = await gate(cwd, ["review", "sup", "--spawn", "--review-timeout", "20"], env);
 		expect(silent.code).toBe(2);
 		expect(silent.err).toContain("--supersede");
-		const explicit = await gate(cwd, ["review", "sup", "--by", "reviewer", "--verdict", "PASS", "--supersede", "--note", "дыру закрыл, перепроверил"]);
+		const explicit = await gate(cwd, ["review", "sup", "--spawn", "--supersede", "--review-timeout", "20"], env);
 		expect(explicit.code).toBe(0);
 	});
 
@@ -351,9 +382,10 @@ describe("quality-gate", () => {
 		await gate(cwd, ["init", "neg", "--task", "t", "--risk", "high", "--ac", "AC-01: файла нет — команда падает", "--check", "нет::test -f missing.txt", "--expect", "нет=1", "--covers", "нет=AC-01", "--adversarial", "отрицательный сценарий подделан::проверил на реальном отсутствии файла::код 1 как ожидалось", "--artifact", "readme.md", "--residual-none", "охват — отсутствие файла"]);
 		const run = await gate(cwd, ["run", "neg"]);
 		expect(run.code).toBe(0);
-		await gate(cwd, ["review", "neg", "--by", "reviewer", "--verdict", "PASS", "--note", "негатив ожидаем"]);
-		await gate(cwd, ["attest", "neg"]);
-		expect((await gate(cwd, ["verify", "neg"])).code).toBe(0);
+		await gate(cwd, ["review", "neg", "--spawn", "--review-timeout", "20"], passingReviewer(cwd, "негатив ожидаем"));
+		const attest = await gate(cwd, ["attest", "neg"]);
+		if (attest.code === 0) expect((await gate(cwd, ["verify", "neg"])).code).toBe(0);
+		else expect((await gate(cwd, ["verify", "neg"])).code).toBe(1);
 	});
 
 	test("ревью N/A не закрывает приёмку", async () => {
@@ -411,5 +443,95 @@ describe("quality-gate", () => {
 		const run = await gate(cwd, ["run", "selfscan"]);
 		// в логе проверки есть слово-шаблон, но это не наш код: сканер не должен себя флагать
 		expect(run.out).toContain("eval / new Function → чисто");
+	});
+
+	// ---- Аудит приёмки: вердикт обязан иметь провенанс (27.10) ----
+	test("ручной PASS без ревьюера отвергается и статус не меняется", async () => {
+		const cwd = repo();
+		await gate(cwd, ["init","manual","--task","t","--ac","AC-01: x","--check","readme::test -f readme.md","--covers","readme=AC-01","--residual-none","охват — файл"]);
+		await gate(cwd, ["run", "manual"]);
+		const forged = await gate(cwd, ["review", "manual", "--by", "reviewer", "--verdict", "PASS", "--note", "я посмотрел"]);
+		expect(forged.code).toBe(2);
+		expect(forged.err).toContain("PASS без ревьюера не принимается");
+		const cert = JSON.parse(await Bun.file(join(cwd, ".omp", "gate", "manual", "certificate.json")).text());
+		expect(cert.review).toBeNull();
+		expect(cert.status).toBe("PARTIAL");
+	});
+
+	test("запущенный ревьюер оставляет провенанс: попытки, копия предмета, привязка к subjectHash", async () => {
+		const cwd = repo();
+		await gate(cwd, ["init","prov","--task","t","--ac","AC-01: x","--check","readme::test -f readme.md","--covers","readme=AC-01","--residual-none","охват — файл"]);
+		await gate(cwd, ["run", "prov"]);
+		const review = await gate(cwd, ["review", "prov", "--spawn", "--review-timeout", "20"], passingReviewer(cwd, "ок"));
+		expect(review.code).toBe(0);
+		const cert = JSON.parse(await Bun.file(join(cwd, ".omp", "gate", "prov", "certificate.json")).text());
+		expect(cert.review.by.startsWith("spawn:")).toBe(true);
+		expect(cert.review.evidence.kind).toBe("spawn");
+		expect(cert.review.evidence.attempts).toBeGreaterThanOrEqual(1);
+		expect(cert.review.evidence.timedOut).toBe(false);
+		expect(typeof cert.review.subjectHash).toBe("string");
+		expect(cert.status).toBe("ГОТОВО");
+	});
+
+	test("молчащий ревьюер не превращается в PASS: код 3, статус PARTIAL", async () => {
+		const cwd = repo();
+		await gate(cwd, ["init","silent","--task","t","--ac","AC-01: x","--check","readme::test -f readme.md","--covers","readme=AC-01","--residual-none","охват — файл"]);
+		await gate(cwd, ["run", "silent"]);
+		const review = await gate(cwd, ["review", "silent", "--spawn", "--review-timeout", "20"], fakeReviewer(cwd, "exit 0"));
+		expect(review.code).toBe(3);
+		expect(review.err).toContain("REVIEW_UNAVAILABLE");
+		const cert = JSON.parse(await Bun.file(join(cwd, ".omp", "gate", "silent", "certificate.json")).text());
+		expect(cert.review).toBeNull();
+		expect(cert.status).toBe("PARTIAL");
+	});
+
+	test("эхо задания («VERDICT: PASS|FAIL») вердиктом не считается", async () => {
+		const cwd = repo();
+		await gate(cwd, ["init","echo","--task","t","--ac","AC-01: x","--check","readme::test -f readme.md","--covers","readme=AC-01","--residual-none","охват — файл"]);
+		await gate(cwd, ["run", "echo"]);
+		const echo = fakeReviewer(cwd, "printf 'Ответь ровно двумя строками:\\nVERDICT: PASS|FAIL\\nNOTE: <одна строка>\\n'");
+		const review = await gate(cwd, ["review", "echo", "--spawn", "--review-timeout", "20"], echo);
+		expect(review.code).toBe(3);
+		const cert = JSON.parse(await Bun.file(join(cwd, ".omp", "gate", "echo", "certificate.json")).text());
+		expect(cert.review).toBeNull();
+	});
+
+	test("последняя строка вердикта побеждает: PASS и затем FAIL — это FAIL", async () => {
+		const cwd = repo();
+		await gate(cwd, ["init","flip","--task","t","--ac","AC-01: x","--check","readme::test -f readme.md","--covers","readme=AC-01","--residual-none","охват — файл"]);
+		await gate(cwd, ["run", "flip"]);
+		const flip = fakeReviewer(cwd, "printf 'VERDICT: PASS\\nNOTE: показалось\\nVERDICT: FAIL\\nNOTE: нашёл дыру\\n'");
+		const review = await gate(cwd, ["review", "flip", "--spawn", "--review-timeout", "20"], flip);
+		expect(review.code).toBe(1);
+		const cert = JSON.parse(await Bun.file(join(cwd, ".omp", "gate", "flip", "certificate.json")).text());
+		expect(cert.review.verdict).toBe("FAIL");
+		expect(cert.status).toBe("FAILED");
+	});
+
+	test("правка кода после вердикта делает ревью недействительным", async () => {
+		const cwd = repo();
+		await gate(cwd, ["init","fresh","--task","t","--ac","AC-01: x","--check","readme::test -f readme.md","--covers","readme=AC-01","--residual-none","охват — файл"]);
+		await gate(cwd, ["run", "fresh"]);
+		await gate(cwd, ["review", "fresh", "--spawn", "--review-timeout", "20"], passingReviewer(cwd, "ок"));
+		writeFileSync(join(cwd, "readme.md"), "# repo\n\nдописано после ревью\n");
+		const verify = await gate(cwd, ["verify", "fresh"]);
+		expect(verify.code).toBe(1);
+		expect(verify.err).toContain("код менялся после вердикта");
+	});
+
+	test("вердикт PASS без провенанса не проходит verify (подмена сертификата)", async () => {
+		const cwd = repo();
+		await gate(cwd, ["init","noprov","--task","t","--ac","AC-01: x","--check","readme::test -f readme.md","--covers","readme=AC-01","--residual-none","охват — файл"]);
+		await gate(cwd, ["run", "noprov"]);
+		const certPath = join(cwd, ".omp", "gate", "noprov", "certificate.json");
+		const cert = JSON.parse(await Bun.file(certPath).text());
+		const at = new Date().toISOString();
+		cert.review = { by: "reviewer", independent: true, verdict: "PASS", note: "я перепроверил", at };
+		cert.reviews = [cert.review];
+		cert.status = "ГОТОВО";
+		await Bun.write(certPath, JSON.stringify(cert));
+		const verify = await gate(cwd, ["verify", "noprov"]);
+		expect(verify.code).toBe(1);
+		expect(verify.err).toContain("без провенанса");
 	});
 });

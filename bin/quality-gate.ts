@@ -20,11 +20,11 @@
  * Где лежит: ./.omp/gate/<slug>/ (contract.json, certificate.json, certificate.md, logs/)
  */
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 
 type Risk = "normal" | "high";
 
@@ -124,11 +124,26 @@ interface Review {
 	by: string;
 	/** Хеш диффа на момент ревью: если код изменился, вердикт устарел. */
 	diffHash?: string;
+	/** Отпечаток предмета ревью (артефакты + проверки + критерии): PASS без него не привязан к коду. */
+	subjectHash?: string;
 	independent: boolean;
 	verdict: "PASS" | "FAIL" | "N/A";
 	note: string;
 	at: string;
 	supersedesFail?: boolean;
+	/**
+	 * Провенанс: вердикт выдан запущенным процессом ревьюера (или аттестатом
+	 * верификатора), а не набран рукой в строке --verdict PASS.
+	 */
+	evidence?: {
+		kind: "spawn" | "attestation";
+		attempts: number;
+		tookMs: number;
+		exitCode: number | null;
+		timedOut: boolean;
+		/** Откуда смотрел ревьюер: копия предмета, а не проверяемое дерево. */
+		workspace?: string;
+	};
 }
 
 interface Certificate {
@@ -762,61 +777,66 @@ async function cmdReview(argv: string[]): Promise<number> {
 	const slug = argv[1];
 	if (!slug) throw new Error("нужен slug: quality-gate review <slug>");
 	const cert = await loadCertificate(slug);
-	const dir = dirOf(slug);
 	const by = (argValue(argv, "--by") ?? "reviewer").trim();
 	// Независимость — белый список, а не чёрный: иначе автор называет себя любым словом и проходит.
 	const INDEPENDENT_BY = /^(?:reviewer|security-reviewer|revьюер|review|subagent:[\w.-]+|agent:[\w.-]+)$/iu;
 	// Имя, которым автор называет самого себя, не делает проверку независимой даже в форме subagent:<имя>.
 	const AUTHOR_WORDS = /^(?:self|builder|author|me|я|сам|автор|кодер|разработчик)$/iu;
 	const innerName = /^(?:subagent|agent):(.+)$/iu.exec(by)?.[1] ?? by;
-	if (!hasFlag(argv, "--spawn") && (!INDEPENDENT_BY.test(by) || AUTHOR_WORDS.test(innerName))) {
+	const spawnMode = hasFlag(argv, "--spawn");
+	const verdictArg = (argValue(argv, "--verdict") ?? "N/A") as Review["verdict"];
+
+	// Положительный вердикт без запущенного ревьюера — это не проверка, а слово автора.
+	// PASS допускается только из процесса ревьюера (--spawn) или из аттестата верификатора.
+	if (!spawnMode && verdictArg === "PASS") {
+		const attestationFile = argValue(argv, "--attestation");
+		if (attestationFile === null || attestationFile === "") {
+			console.error(
+				"PASS без ревьюера не принимается: вердикт должен прийти из запущенного процесса или аттестата. " +
+					"Запусти `quality-gate review " + slug + " --spawn` (реальный reviewer) — либо `quality-gate attest " + slug + "` " +
+					"и передай файл аттестата через --attestation. Ручной --verdict PASS не считается проверкой.",
+			);
+			return 2;
+		}
+		const outcome = await recordAttestedPass(cert, slug, attestationFile, by, argValue(argv, "--note"));
+		if (outcome !== 0) return outcome;
+	} else if (!spawnMode && (!INDEPENDENT_BY.test(by) || AUTHOR_WORDS.test(innerName))) {
 		console.error(`«${by}» не считается независимым ревьюером: укажи --by reviewer|security-reviewer|subagent:<имя> или запусти --spawn`);
 		return 2;
 	}
+
 	let review: Review;
-	if (hasFlag(argv, "--spawn")) {
-		const diff = gitOr(["diff", "HEAD"], "");
-		const prompt =
-			"Ты независимый ревьюер. Ниже дифф изменений и критерии приёмки. Найди контрпримеры: что могло сломаться, " +
-			"что не доказано, где доказательство подменяет поведение. Ответь ровно двумя строками: " +
-			"`VERDICT: PASS|FAIL` и `NOTE: <одна строка>`. Не верь утверждениям автора — только тому, что видно.\n\n" +
-			`Критерии: ${cert.criteria.map((c) => `${c.id} ${c.text}`).join("; ")}\n\nДифф:\n${diff.slice(0, 60_000)}`;
-		const child = spawn("omp", ["-p", prompt], { cwd: process.cwd(), env: { ...process.env, OMP_NO_HOOKS: "1" }, detached: true });
-		let out = "";
-		const timeoutMs = Number(argValue(argv, "--review-timeout") ?? 240) * 1000;
-		const { promise: reviewPromise, resolve: resolveReview } = Promise.withResolvers<void>();
-		child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
-		child.stderr.on("data", () => {});
-		child.on("close", () => resolveReview());
-		child.on("error", () => resolveReview());
-		// Ревьюер может промолчать (провайдер, лимит): тогда это N/A, а не зависание и не PASS.
-		const killer = setTimeout(() => {
-			try {
-				process.kill(-child.pid, "SIGKILL");
-			} catch {
-				child.kill("SIGKILL");
-			}
-			out += "\n[ревьюер не ответил за отведённое время]";
-			resolveReview();
-		}, timeoutMs);
-		await reviewPromise;
-		clearTimeout(killer);
-		await writeFile(join(dir, "review.log"), out, "utf8");
-		const verdict = /VERDICT:\s*(PASS|FAIL)/i.exec(out)?.[1]?.toUpperCase() as "PASS" | "FAIL" | undefined;
-		const note = /NOTE:\s*(.+)/i.exec(out)?.[1]?.trim() ?? "ревьюер не дал строку NOTE";
-		review = { by: "omp -p ревьюер", independent: verdict !== undefined, verdict: verdict ?? "N/A", note, at: new Date().toISOString(), diffHash: await diffHashNow() };
-	} else {
-		const by = argValue(argv, "--by") ?? "reviewer";
-		const verdict = (argValue(argv, "--verdict") ?? "N/A") as Review["verdict"];
+	if (spawnMode) {
+		const outcome = await runSpawnReview(cert, argv);
+		if (outcome.kind === "unavailable") {
+			// Сбой ревьюера — не повод искать обход: выходим с отдельным кодом и без записи PASS.
+			console.error(`REVIEW_UNAVAILABLE: ${outcome.detail} (попыток: ${outcome.attempts})`);
+			console.error("Вердикт не записан. Повтори запуск или честно зафиксируй PARTIAL/BLOCKED — ручной PASS запрещён.");
+			return 3;
+		}
+		review = outcome.review;
+	} else if (!(verdictArg === "PASS" && (argValue(argv, "--attestation") ?? "") !== "")) {
+		const verdict = verdictArg;
 		review = {
 			by,
-			independent: !["builder", "self"].includes(by.toLowerCase()),
+			independent: INDEPENDENT_BY.test(by) && !AUTHOR_WORDS.test(innerName),
 			verdict,
 			note: argValue(argv, "--note") ?? "без пояснения",
 			at: new Date().toISOString(),
 			diffHash: subjectHash(cert),
+			subjectHash: subjectHash(cert),
 		};
+	} else {
+		// Аттестованный PASS уже записан в recordAttestedPass; перечитываем сертификат.
+		const fresh = await loadCertificate(slug);
+		review = fresh.review as Review;
+		return await finishReview(slug, fresh, review, argv);
 	}
+	return await finishReview(slug, cert, review, argv);
+}
+
+/** Общая часть: история, перекрытие FAIL, статус, запись. */
+async function finishReview(slug: string, cert: Certificate, review: Review, argv: string[]): Promise<number> {
 	const history = cert.reviews ?? (cert.review ? [cert.review] : []);
 	const hadFail = history.some((item) => item.verdict === "FAIL");
 	if (review.verdict === "PASS" && hadFail && !hasFlag(argv, "--supersede")) {
@@ -839,6 +859,211 @@ async function cmdReview(argv: string[]): Promise<number> {
 	await writeCertificate(cert);
 	console.log(`REVIEW: ${review.by} → ${review.verdict} (${review.note}); статус сертификата ${cert.status}`);
 	return review.verdict === "FAIL" ? 1 : 0;
+}
+
+/**
+ * Аттестованный PASS: файл аттестата обязан быть подтверждён верификатором
+ * (ключ у него, не у исполнителя) и относиться к этому slug и этому предмету.
+ */
+async function recordAttestedPass(cert: Certificate, slug: string, file: string, by: string, note: string | undefined): Promise<number> {
+	if (!existsSync(file)) {
+		console.error(`файл аттестата не найден: ${file}`);
+		return 2;
+	}
+	let parsed: Record<string, unknown>;
+	try {
+		parsed = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+	} catch {
+		console.error("аттестат не читается как JSON");
+		return 2;
+	}
+	const attestedSubject = typeof parsed["subjectHash"] === "string" ? parsed["subjectHash"] : "";
+	const current = subjectHash(cert);
+	if (attestedSubject !== "" && attestedSubject !== current)
+		return (console.error(`аттестат относится к другому предмету: ${attestedSubject} ≠ ${current}`), 2);
+	await ensureDir(dirOf(slug));
+	await writeFile(attestationPath(slug), `${JSON.stringify(parsed, null, "\t")}\n`, "utf8");
+	const check = await readAttestation(slug);
+	if (check === null || !check.ok) {
+		console.error(
+			`аттестат не подтверждён верификатором${check === null ? " (верификатор недоступен)" : `: ${check.detail}`}. ` +
+				"Подпись исполнителя независимой проверкой не является.",
+		);
+		return 2;
+	}
+	const review: Review = {
+		by,
+		independent: true,
+		verdict: "PASS",
+		note: note ?? "аттестат верификатора",
+		at: new Date().toISOString(),
+		diffHash: subjectHash(cert),
+		subjectHash: current,
+		evidence: { kind: "attestation", attempts: 1, tookMs: 0, exitCode: 0, timedOut: false },
+	};
+	return await finishReview(slug, cert, review, []);
+}
+
+/** Разбор ответа ревьюера: только отдельные строки, и только последняя пара VERDICT/NOTE. */
+export function parseReviewerVerdict(out: string): { verdict: "PASS" | "FAIL"; note: string } | null {
+	const lines = out.split("\n").map((line) => line.replace(/\r$/u, ""));
+	let verdict: "PASS" | "FAIL" | null = null;
+	let note: string | null = null;
+	for (const raw of lines) {
+		// Эхо задания («Ответь ровно двумя строками: `VERDICT: PASS|FAIL`») отдельной парой не считается:
+		// строка обязана быть чистым объявлением вердикта без обратных кавычек и хвоста.
+		const v = /^\s*VERDICT:\s*(PASS|FAIL)\s*$/iu.exec(raw);
+		if (v?.[1] !== undefined) {
+			verdict = v[1].toUpperCase() as "PASS" | "FAIL";
+			continue;
+		}
+		const n = /^\s*NOTE:\s*(.+)$/iu.exec(raw);
+		if (n?.[1] !== undefined) note = n[1].trim();
+	}
+	if (verdict === null) return null;
+	return { verdict, note: note ?? "ревьюер не дал строку NOTE" };
+}
+
+interface SpawnOutcome {
+	kind: "review" | "unavailable";
+	review?: Review;
+	detail?: string;
+	attempts: number;
+}
+
+/**
+ * Запуск независимого ревьюера.
+ *
+ * Ревьюер работает в копии предмета (detached worktree + применённый дифф), а не
+ * в проверяемом дереве: он не может править проверяемый код и не бродит по
+ * большому репозиторию. Попытки ограничены, сбой не превращается в PASS.
+ */
+async function runSpawnReview(cert: Certificate, argv: string[]): Promise<SpawnOutcome> {
+	const diff = gitOr(["diff", "HEAD"], "");
+	const timeoutMs = Number(argValue(argv, "--review-timeout") ?? 240) * 1000;
+	const attemptsMax = Math.max(1, Math.min(4, Number(argValue(argv, "--review-attempts") ?? 2)));
+	const prompt =
+		"Ты независимый ревьюер. Ниже дифф изменений и критерии приёмки. Найди контрпримеры: что могло сломаться, " +
+		"что не доказано, где доказательство подменяет поведение. Ответь ровно двумя строками без пояснений вокруг: " +
+		"VERDICT: PASS или VERDICT: FAIL, затем NOTE: <одна строка>. Не верь утверждениям автора — только тому, что видно.\n\n" +
+		`Критерии: ${cert.criteria.map((c) => `${c.id} ${c.text}`).join("; ")}\n\nДифф:\n${diff.slice(0, 60_000)}`;
+
+	const workspace = await makeReviewWorkspace(diff);
+	if (workspace.error !== null) return { kind: "unavailable", detail: workspace.error, attempts: 0 };
+
+	let attempts = 0;
+	let lastDetail = "ревьюер не дал вердикт";
+	let timedOut = false;
+	let exitCode: number | null = null;
+	const startedAt = Date.now();
+	try {
+		for (attempts = 1; attempts <= attemptsMax; attempts += 1) {
+			const run = await runReviewerOnce(prompt, timeoutMs, workspace.path);
+			exitCode = run.code;
+			timedOut = run.timedOut;
+			if (run.timedOut) {
+				lastDetail = `ревьюер не ответил за ${Math.round(timeoutMs / 1000)} с`;
+				continue;
+			}
+			const parsed = parseReviewerVerdict(run.out);
+			if (parsed === null) {
+				lastDetail = run.out.trim() === "" ? "ревьюер завершился без вывода" : "ревьюер не дал строку VERDICT";
+				continue;
+			}
+			const review: Review = {
+				by: `spawn:${byModelOf(run.out)}`,
+				independent: true,
+				verdict: parsed.verdict,
+				note: parsed.note,
+				at: new Date().toISOString(),
+				diffHash: await diffHashNow(),
+				subjectHash: subjectHash(cert),
+				evidence: { kind: "spawn", attempts, tookMs: Date.now() - startedAt, exitCode: run.code, timedOut: false, workspace: workspace.path },
+			};
+			return { kind: "review", review, attempts };
+		}
+	} finally {
+		await cleanupWorkspace(workspace);
+	}
+	return { kind: "unavailable", detail: `${lastDetail}${timedOut ? " (таймаут)" : ""}`, attempts: Math.max(1, attempts - 1) };
+}
+
+/** Модель ревьюера для провенанса: берём из его же ответа, иначе честно «неизвестна». */
+function byModelOf(out: string): string {
+	const model = /model[:\s]+([\w./-]+)/iu.exec(out)?.[1];
+	return model ?? "reviewer";
+}
+
+interface ReviewerRun {
+	out: string;
+	code: number | null;
+	timedOut: boolean;
+}
+
+/** Один запуск: stdout только, без наследования терминала; таймаут убивает всю группу. */
+async function runReviewerOnce(prompt: string, timeoutMs: number, cwd: string): Promise<ReviewerRun> {
+	const child = spawn("omp", ["-p", prompt], {
+		cwd,
+		env: { ...process.env, OMP_NO_HOOKS: "1" },
+		detached: true,
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	let out = "";
+	let timedOut = false;
+	const { promise, resolve } = Promise.withResolvers<number | null>();
+	child.stdout?.on("data", (chunk: Buffer) => {
+		// Ограничение вывода: болтливый ревьюер не должен съесть память.
+		if (out.length < 1_000_000) out += chunk.toString();
+	});
+	child.stderr?.on("data", () => {});
+	const killer = setTimeout(() => {
+		timedOut = true;
+		try {
+			if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+			else child.kill("SIGKILL");
+		} catch {
+			child.kill("SIGKILL");
+		}
+	}, timeoutMs);
+	child.on("close", (code) => resolve(code ?? null));
+	child.on("error", () => resolve(null));
+	const code = await promise;
+	clearTimeout(killer);
+	return { out, code, timedOut };
+}
+
+interface ReviewWorkspace {
+	path: string;
+	error: string | null;
+	created: boolean;
+}
+
+/**
+ * Копия предмета для ревьюера: detached worktree из HEAD плюс рабочий дифф.
+ * Вне git-дерева ревьюер получает пустой каталог — проверять нечего, и это
+ * лучше, чем отправить его править проверяемый код.
+ */
+async function makeReviewWorkspace(diff: string): Promise<ReviewWorkspace> {
+	const base = mkdtempSync(join(tmpdir(), "gate-review-"));
+	if (gitOr(["rev-parse", "--is-inside-work-tree"], "").trim() !== "true") return { path: base, error: null, created: true };
+	const worktree = Bun.spawnSync(["git", "worktree", "add", "--detach", base, "HEAD"], { cwd: process.cwd(), timeout: 30_000 });
+	if (worktree.exitCode !== 0) return { path: base, error: `не удалось сделать копию предмета: ${worktree.stderr.toString().trim().slice(0, 160)}`, created: true };
+	if (diff.trim() !== "") {
+		const patchPath = join(base, ".gate-review.patch");
+		// git apply требует перевод строки в конце патча, иначе «патч повреждён».
+		await writeFile(patchPath, diff.endsWith("\n") ? diff : `${diff}\n`, "utf8");
+		const applied = Bun.spawnSync(["git", "apply", "--whitespace=nowarn", patchPath], { cwd: base, timeout: 30_000 });
+		await rm(patchPath, { force: true });
+		if (applied.exitCode !== 0) return { path: base, error: `дифф не применился к копии: ${applied.stderr.toString().trim().slice(0, 160)}`, created: true };
+	}
+	return { path: base, error: null, created: true };
+}
+
+async function cleanupWorkspace(workspace: ReviewWorkspace): Promise<void> {
+	if (!workspace.created) return;
+	if (gitOr(["rev-parse", "--is-inside-work-tree"], "").trim() === "true")
+		Bun.spawnSync(["git", "worktree", "remove", "--force", workspace.path], { cwd: process.cwd(), timeout: 30_000 });
+	await rm(workspace.path, { recursive: true, force: true });
 }
 
 /** Заглушка вместо проверки: код выхода ничего не доказывает. */
@@ -920,8 +1145,22 @@ async function missingParts(cert: Certificate): Promise<string[]> {
 	if (!Number.isFinite(certifiedAt) || Date.now() - certifiedAt > 24 * 60 * 60 * 1000) missing.push("сертификат старше суток");
 	if (cert.review !== null && cert.review.verdict === "FAIL") missing.push("вердикт ревьюера FAIL");
 	// Ревью, выданное до последних правок, ничего не подтверждает.
-	if (cert.review !== null && cert.review.diffHash && cert.review.diffHash !== subjectHash(cert))
-		missing.push("ревью устарело: артефакты или проверки менялись после вердикта");
+	// Сравниваем одно с одним: subjectHash — отпечаток предмета (артефакты, проверки,
+	// критерии). Раньше сюда попадал diffHash из spawn-ветки, и легитимное ревью
+	// объявлялось устаревшим при каждом прогоне (дефект аудита).
+	if (cert.review !== null) {
+		const subject = cert.review.subjectHash;
+		if (subject !== undefined && subject !== subjectHash(cert)) missing.push("ревью устарело: артефакты или проверки менялись после вердикта");
+		else if (subject === undefined && cert.review.diffHash && cert.review.diffHash !== subjectHash(cert))
+			missing.push("ревью устарело: артефакты или проверки менялись после вердикта");
+		// Провенанс обязывает и к свежести: вердикт, выданный запущенным ревьюером,
+		// привязан к состоянию дерева. Иначе достаточно дописать код после PASS и
+		// сослаться на старый сертификат — «проверено» превращается в фикцию.
+		if (cert.review.evidence?.kind === "spawn" && cert.review.diffHash !== undefined) {
+			const currentDiff = await diffHashNow();
+			if (cert.review.diffHash !== currentDiff) missing.push("ревью устарело: код менялся после вердикта ревьюера");
+		}
+	}
 	// Высокий риск требует закреплённых артефактов: иначе предмет ревью пуст.
 	if (cert.risk === "high" && (cert.artifacts ?? []).length === 0)
 		missing.push("не закреплены артефакты (--artifact): нечего подтверждать по содержимому");
@@ -945,11 +1184,26 @@ async function missingParts(cert: Certificate): Promise<string[]> {
 	if (cert.risk === "high" && cert.review !== null && cert.review.verdict !== "PASS") missing.push("вердикт ревьюера не PASS");
 	if (cert.review !== null && cert.review.independent !== true) missing.push("ревьюер не независим (independent=false)");
 	const by = String(cert.review?.by ?? "").trim();
-	const INDEPENDENT_BY = /^(?:reviewer|security-reviewer|revьюер|review|subagent:[\w.-]+|agent:[\w.-]+)$/iu;
+	const INDEPENDENT_BY = /^(?:reviewer|security-reviewer|revьюер|review|subagent:[\w.-]+|agent:[\w.-]+|spawn:[\w./-]+)$/iu;
 	const AUTHOR_WORDS = /^(?:self|builder|author|me|я|сам|автор|кодер|разработчик)$/iu;
 	const innerName = /^(?:subagent|agent):(.+)$/iu.exec(by)?.[1] ?? by;
-	if (cert.review !== null && (!INDEPENDENT_BY.test(by) || AUTHOR_WORDS.test(innerName)))
+	// Провенанс сильнее имени: запущенный ревьюер и аттестат верификатора независимы
+	// по факту своего происхождения, а не по строке в поле by.
+	const hasProvenance = cert.review?.evidence?.kind === "spawn" || cert.review?.evidence?.kind === "attestation";
+	if (cert.review !== null && !hasProvenance && (!INDEPENDENT_BY.test(by) || AUTHOR_WORDS.test(innerName)))
 		missing.push(`ревьюер «${by}» не независим`);
+	// Провенанс вердикта: PASS обязан быть выдан запуском ревьюера или аттестатом.
+	// Без этого «reviewer → PASS» набирается в командной строке руками.
+	if (cert.review !== null && cert.review.verdict === "PASS") {
+		if (cert.review.evidence === undefined) missing.push("вердикт PASS без провенанса: не видно, кто и чем его выдал");
+		else {
+			if (cert.review.evidence.kind === "spawn" && cert.review.evidence.attempts < 1)
+				missing.push("вердикт PASS без единой попытки запуска ревьюера");
+			const subject = cert.review.subjectHash ?? "";
+			if (subject === "" || subject !== subjectHash(cert))
+				missing.push("вердикт PASS не привязан к предмету ревью (subjectHash)");
+		}
+	}
 	if (cert.status === "FAILED") missing.push("статус сертификата FAILED");
 	return missing;
 }

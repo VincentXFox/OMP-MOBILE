@@ -83,8 +83,8 @@ function env(b: Bench): Record<string, string> {
 	};
 }
 
-async function gate(b: Bench, args: string[]): Promise<{ code: number; out: string; err: string }> {
-	const proc = Bun.spawn(["bun", GATE, ...args], { cwd: b.cwd, stdout: "pipe", stderr: "pipe", env: env(b) });
+async function gate(b: Bench, args: string[], extraEnv: Record<string, string> = {}): Promise<{ code: number; out: string; err: string }> {
+	const proc = Bun.spawn(["bun", GATE, ...args], { cwd: b.cwd, stdout: "pipe", stderr: "pipe", env: { ...env(b), ...extraEnv } });
 	const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 	return { code: await proc.exited, out, err };
 }
@@ -117,7 +117,11 @@ async function prepared(b: Bench, slug = "iso"): Promise<void> {
 		"охват — существование файла",
 	]);
 	await gate(b, ["run", slug]);
-	await gate(b, ["review", slug, "--by", "reviewer", "--verdict", "PASS", "--note", "проверено"]);
+	// PASS теперь только из запущенного ревьюера: подменяем `omp` в PATH фейком.
+	const bin = join(b.cwd, ".fake-bin");
+	Bun.spawnSync(["mkdir", "-p", bin]);
+	writeFileSync(join(bin, "omp"), "#!/bin/bash\nprintf 'VERDICT: PASS\\nNOTE: проверено\\n'\n", { mode: 0o755 });
+	await gate(b, ["review", slug, "--spawn", "--review-timeout", "20"], { PATH: `${bin}:${process.env.PATH ?? ""}` });
 }
 
 afterAll(() => {
