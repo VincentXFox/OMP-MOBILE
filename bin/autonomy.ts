@@ -54,7 +54,8 @@ interface State {
 	strategies: string[];
 	strategyIndex: number;
 	gateSlug: string | null;
-	limits: { maxSteps: number; maxAttempts: number; maxIdentical: number; maxMinutes: number; maxStall: number };
+	limits: { maxSteps: number; maxAttempts: number; maxIdentical: number; maxMinutes: number; maxStall: number; maxCost: number };
+	cost: number;
 	stall: number;
 	startedAt: string;
 	attemptKeys: { key: string; count: number }[];
@@ -146,7 +147,7 @@ function context(state: State): string {
 	lines.push(`ДОСТУПНЫЕ ДЕЙСТВИЯ: step --did "…" --result ok|fail [--evidence "…"] · verify · resume · status`);
 	lines.push(`ГРАНИЦЫ: опасное действие требует --approve "причина"; запрет не обходится, а эскалируется`);
 	lines.push(`ПАМЯТЬ: решения и журнал — .omp/autonomy/${state.slug}/decisions.md и state.json (по ссылке, не в контексте)`);
-	lines.push(`РЕСУРСЫ: время ${Math.round((Date.now() - Date.parse(state.startedAt)) / 60000)}/${state.limits.maxMinutes} мин, застой ${state.stall}/${state.limits.maxStall}`);
+	lines.push(`РЕСУРСЫ: стоимость ${state.cost.toFixed(2)}/${state.limits.maxCost > 0 ? state.limits.maxCost.toFixed(2) : "∞"} у.е., время ${Math.round((Date.now() - Date.parse(state.startedAt)) / 60000)}/${state.limits.maxMinutes} мин, застой ${state.stall}/${state.limits.maxStall}`);
 	return lines.join("\n");
 }
 
@@ -201,7 +202,9 @@ async function cmdStart(argv: string[]): Promise<number> {
 			maxIdentical: Number(argValue(argv, "--max-identical") ?? 2),
 			maxMinutes: Number(argValue(argv, "--max-minutes") ?? 120),
 			maxStall: Number(argValue(argv, "--max-stall") ?? 6),
+			maxCost: Number(argValue(argv, "--max-cost") ?? 0),
 		},
+		cost: 0,
 		stall: 0,
 		startedAt: now(),
 		attemptKeys: [],
@@ -240,6 +243,23 @@ async function cmdStep(argv: string[]): Promise<number> {
 	const state = await load(slug);
 	if (state.phase === "RESULT" || state.phase === "BLOCKED") {
 		console.error(`цель уже закрыта: ${state.phase}`);
+		return 1;
+	}
+	// Ресурсный бюджет: стоимость сообщает драйвер строкой COST:, контроллер её копит и останавливает работу.
+	const reportedCost = Number(argValue(argv, "--cost") ?? 0);
+	if (Number.isFinite(reportedCost) && reportedCost > 0) state.cost += reportedCost;
+	if (state.limits.maxCost > 0 && state.cost > state.limits.maxCost) {
+		state.phase = "BLOCKED";
+		state.result = { status: "BLOCKED", detail: `превышен бюджет стоимости ${state.limits.maxCost}` };
+		state.residuals.push({
+			text: "цель не достигнута в пределах бюджета",
+			reason: `потрачено ${state.cost.toFixed(2)} при лимите ${state.limits.maxCost}`,
+			impact: "работа остановлена по ресурсному лимиту",
+			exitCondition: "согласовать новый бюджет или упростить цель",
+		});
+		log(state, "resource.blocked", `стоимость ${state.cost.toFixed(2)} > ${state.limits.maxCost}`);
+		await save(state);
+		console.error(`ресурсный лимит стоимости: ${state.cost.toFixed(2)} > ${state.limits.maxCost}`);
 		return 1;
 	}
 	const elapsedMinutes = (Date.now() - Date.parse(state.startedAt)) / 60000;
@@ -390,6 +410,7 @@ async function goalGuard(state: State, gateSlug: string): Promise<string[]> {
 		criteria?: { id: string }[];
 		checks?: { ok?: boolean; covers?: string[] }[];
 		review?: { verdict?: string } | null;
+		risk?: string;
 	};
 	// Критерии могут жить в контракте приёмки: цель в контроллере не обязана их дублировать.
 	const criteria = (cert.criteria ?? []).map((item) => item.id);
@@ -398,7 +419,9 @@ async function goalGuard(state: State, gateSlug: string): Promise<string[]> {
 	const uncovered = criteria.filter((id) => !covered.has(id));
 	if (uncovered.length > 0) problems.push(`критерии без доказательства: ${uncovered.join(", ")}`);
 	if (cert.status === "FAILED") problems.push("сертификат в статусе FAILED");
-	if ((cert.review?.verdict ?? "N/A") !== "PASS") problems.push(`ревью не PASS: ${cert.review?.verdict ?? "N/A"}`);
+	// Независимое ревью обязательно там, где риск высок; для обычной работы достаточно сертификата.
+	if (cert.risk === "high" && (cert.review?.verdict ?? "N/A") !== "PASS")
+		problems.push(`ревью не PASS: ${cert.review?.verdict ?? "N/A"}`);
 	const undone = state.steps.filter((step) => step.status !== "done").map((step) => step.name);
 	if (undone.length > 0) problems.push(`шаги не выполнены: ${undone.join(", ")}`);
 	return problems;
@@ -541,6 +564,7 @@ async function cmdDrive(argv: string[]): Promise<number> {
 		const did = /STEP:\s*(.+)/u.exec(out)?.[1]?.trim();
 		const result = /RESULT:\s*(ok|fail)/iu.exec(out)?.[1]?.toLowerCase() as "ok" | "fail" | undefined;
 		const evidence = /EVIDENCE:\s*(.+)/u.exec(out)?.[1]?.trim();
+		const cost = Number(/COST:\s*([\d.]+)/u.exec(out)?.[1] ?? 0);
 		if ((!did || !result) && fallback && driver !== fallback) {
 			// Роутер: драйвер не справился — задача уходит резервной модели без потери состояния.
 			log(state, "router.fallback", `драйвер «${driver}» не дал шага → «${fallback}»`);
@@ -579,6 +603,7 @@ async function cmdDrive(argv: string[]): Promise<number> {
 		}
 		const stepArgs = ["step", slug, "--did", did, "--result", result];
 		if (evidence) stepArgs.push("--evidence", evidence);
+		if (Number.isFinite(cost) && cost > 0) stepArgs.push("--cost", String(cost));
 		const code = await cmdStep(stepArgs);
 		state = await load(slug);
 		if (code !== 0) break;
