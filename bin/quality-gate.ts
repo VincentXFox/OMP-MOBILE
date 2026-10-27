@@ -19,9 +19,10 @@
  *
  * Где лежит: ./.omp/gate/<slug>/ (contract.json, certificate.json, certificate.md, logs/)
  */
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { runnerKeyId } from "./visual-gate.ts";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
@@ -167,6 +168,8 @@ interface Certificate {
 	adversarial: Adversarial[];
 	artifacts: ArtifactHash[];
 	signature: Signature | null;
+	/** Требование визуальной приёмки: URL стенда и обязательность. */
+	visual: { required: boolean; url: string; covers?: string[]; keyId?: string } | null;
 	status: "ГОТОВО" | "PARTIAL" | "FAILED";
 }
 
@@ -620,6 +623,13 @@ async function cmdInit(argv: string[]): Promise<number> {
 	if (!slug) throw new Error("нужен slug: quality-gate init <slug> --task … --ac …");
 	const dir = dirOf(slug);
 	await ensureDir(join(dir, "logs"));
+	const visualUrl = argValue(argv, "--visual-url") ?? "";
+	const visualRequired = argv.includes("--visual-required") || visualUrl !== "";
+	const visualCovers = argValues(argv, "--visual-covers");
+	// Якорь доверия фиксируется в контракте: контракт аттестуется верификатором,
+	// поэтому «подставить свой ключ» требует новой приёмки (найдено 27.10).
+	const visualKeyPath = argValue(argv, "--visual-key") ?? "";
+	const visualKeyId = visualKeyPath !== "" && existsSync(visualKeyPath) ? runnerKeyId(readFileSync(visualKeyPath, "utf8")) : undefined;
 	const criteria = argValues(argv, "--ac").map((text, index) => ({
 		id: /^AC-\d+/i.test(text) ? (text.match(/^AC-\d+/i)?.[0] as string) : `AC-0${index + 1}`,
 		text: text.replace(/^AC-\d+[:.\s]*/i, ""),
@@ -692,6 +702,7 @@ async function cmdInit(argv: string[]): Promise<number> {
 		task: argValue(argv, "--task") ?? slug,
 		risk,
 		criteria,
+		visual: visualRequired ? { required: true, url: visualUrl, covers: visualCovers, keyId: visualKeyId } : null,
 		checks,
 		probes,
 		artifacts: argValues(argv, "--artifact"),
@@ -764,6 +775,9 @@ async function cmdRun(argv: string[]): Promise<number> {
 		reviews: reviewHistory,
 		residual,
 		residualNone: contract.residualNone,
+		// Требование визуальной приёмки обязано попасть в сертификат: иначе verify
+		// и Deployment Gate считают, что интерфейс проверять не нужно (найдено 27.10).
+		visual: contract.visual ?? null,
 		signature: null,
 		status: failed.length > 0 || failStanding || prevReview?.verdict === "FAIL" ? "FAILED" : "PARTIAL",
 	};
@@ -904,6 +918,47 @@ async function recordAttestedPass(cert: Certificate, slug: string, file: string,
 	return await finishReview(slug, cert, review, []);
 }
 
+/**
+ * Сводка визуальных доказательств для ревьюера: он видит только дифф, а матрица
+ * скриншотов лежит в `.omp/`, который в дифф не попадает. Без этой сводки ревьюер
+ * справедливо пишет «критерий не покрыт ничем» (поймано на демо 27.10).
+ */
+async function visualEvidenceSummary(cert: Certificate, dir: string): Promise<string> {
+	if (cert.visual?.required !== true) return "Визуальная приёмка контрактом не требуется.";
+	const recordPath = join(dir, "visual.json");
+	if (!existsSync(recordPath)) return "Визуальная приёмка требуется, но пакета доказательств нет — критерии интерфейса не покрыты.";
+	try {
+		const record = JSON.parse(await readFile(recordPath, "utf8")) as {
+			status?: string;
+			combos?: number;
+			shots?: number;
+			commit?: string;
+			url?: string;
+			reasons?: string[];
+		};
+		const evidencePath = join(dir, "visual", "evidence.json");
+		let runId = "—";
+		let chrome = "—";
+		let startedAt = "—";
+		if (existsSync(evidencePath)) {
+			const evidence = JSON.parse(await readFile(evidencePath, "utf8")) as { runId?: string; runner?: { chrome?: string }; startedAt?: string };
+			runId = String(evidence.runId ?? "—");
+			chrome = String(evidence.runner?.chrome ?? "—");
+			startedAt = String(evidence.startedAt ?? "—");
+		}
+		const covers = (cert.visual.covers ?? []).join(", ");
+		return (
+			`Визуальная приёмка (подписанный пакет доверенного browser-runner, дифф в него не входит):\n` +
+			`- VISUAL_GATE: ${String(record.status ?? "?")} · комбинаций ${String(record.combos ?? 0)}/16 · скриншотов ${String(record.shots ?? 0)}/48\n` +
+			`- стенд: ${String(record.url ?? cert.visual.url)} · commit ${String(record.commit ?? "").slice(0, 8)} · запуск ${runId} · ${chrome} · ${startedAt}\n` +
+			`- покрывает критерии: ${covers === "" ? "не объявлено" : covers}\n` +
+			`- кадры и результаты DOM-проверок лежат в .omp/gate/<slug>/visual (по 3 кадра на комбинацию: верх/середина/низ, темы light и dark)`
+		);
+	} catch (error) {
+		return `Сводку визуальных доказательств прочитать не удалось: ${error instanceof Error ? error.message : String(error)}`;
+	}
+}
+
 /** Разбор ответа ревьюера: только отдельные строки, и только последняя пара VERDICT/NOTE. */
 export function parseReviewerVerdict(out: string): { verdict: "PASS" | "FAIL"; note: string } | null {
 	const lines = out.split("\n").map((line) => line.replace(/\r$/u, ""));
@@ -942,14 +997,18 @@ async function runSpawnReview(cert: Certificate, argv: string[]): Promise<SpawnO
 	const diff = gitOr(["diff", "HEAD"], "");
 	const timeoutMs = Number(argValue(argv, "--review-timeout") ?? 240) * 1000;
 	const attemptsMax = Math.max(1, Math.min(4, Number(argValue(argv, "--review-attempts") ?? 2)));
+	const visualSummary = await visualEvidenceSummary(cert, dirOf(cert.slug));
 	const prompt =
-		"Ты независимый ревьюер. Ниже дифф изменений и критерии приёмки. Найди контрпримеры: что могло сломаться, " +
+		"Ты независимый ревьюер. Ниже дифф изменений, критерии приёмки и сводка визуальной приёмки. Найди контрпримеры: что могло сломаться, " +
 		"что не доказано, где доказательство подменяет поведение. Ответь ровно двумя строками без пояснений вокруг: " +
 		"VERDICT: PASS или VERDICT: FAIL, затем NOTE: <одна строка>. Не верь утверждениям автора — только тому, что видно.\n\n" +
-		`Критерии: ${cert.criteria.map((c) => `${c.id} ${c.text}`).join("; ")}\n\nДифф:\n${diff.slice(0, 60_000)}`;
+		`Критерии: ${cert.criteria.map((c) => `${c.id} ${c.text}`).join("; ")}\n\n${visualSummary}\n\nДифф:\n${diff.slice(0, 60_000)}`;
 
 	const workspace = await makeReviewWorkspace(diff);
 	if (workspace.error !== null) return { kind: "unavailable", detail: workspace.error, attempts: 0 };
+	// Дифф считаем в копии: только там видны новые файлы (intent-to-add).
+	const fullDiff = subjectDiffIn(workspace.path);
+	const reviewPrompt = fullDiff.trim() === "" ? prompt : prompt.replace(diff.slice(0, 60_000), fullDiff.slice(0, 60_000));
 
 	let attempts = 0;
 	let lastDetail = "ревьюер не дал вердикт";
@@ -958,7 +1017,7 @@ async function runSpawnReview(cert: Certificate, argv: string[]): Promise<SpawnO
 	const startedAt = Date.now();
 	try {
 		for (attempts = 1; attempts <= attemptsMax; attempts += 1) {
-			const run = await runReviewerOnce(prompt, timeoutMs, workspace.path);
+			const run = await runReviewerOnce(reviewPrompt, timeoutMs, workspace.path);
 			exitCode = run.code;
 			timedOut = run.timedOut;
 			if (run.timedOut) {
@@ -1056,7 +1115,29 @@ async function makeReviewWorkspace(diff: string): Promise<ReviewWorkspace> {
 		await rm(patchPath, { force: true });
 		if (applied.exitCode !== 0) return { path: base, error: `дифф не применился к копии: ${applied.stderr.toString().trim().slice(0, 160)}`, created: true };
 	}
+	// Новые файлы в `git diff HEAD` не видны: копируем их и помечаем intent-to-add,
+	// иначе ревьюер проверяет пустой дифф там, где как раз добавили код.
+	const untracked = gitOr(["ls-files", "--others", "--exclude-standard"], "")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line !== "" && !line.startsWith(".omp/"));
+	for (const relative of untracked) {
+		const to = join(base, relative);
+		try {
+			await mkdir(dirname(to), { recursive: true });
+			await copyFile(join(process.cwd(), relative), to);
+		} catch {
+			// файл мог исчезнуть между листингом и копированием — не повод валить ревью
+		}
+	}
+	if (untracked.length > 0) Bun.spawnSync(["git", "add", "-N", "."], { cwd: base, timeout: 30_000 });
 	return { path: base, error: null, created: true };
+}
+
+/** Полный дифф предмета в копии: intent-to-add показывает ревьюеру и новые файлы. */
+function subjectDiffIn(workspace: string): string {
+	const proc = Bun.spawnSync(["git", "diff", "HEAD"], { cwd: workspace, timeout: 30_000, stderr: "ignore" });
+	return proc.exitCode === 0 ? proc.stdout.toString() : "";
 }
 
 async function cleanupWorkspace(workspace: ReviewWorkspace): Promise<void> {
@@ -1073,6 +1154,8 @@ async function missingParts(cert: Certificate): Promise<string[]> {
 	const missing: string[] = [];
 	if (!Array.isArray(cert.checks) || !Array.isArray(cert.criteria) || !Array.isArray(cert.invariants))
 		return ["сертификат повреждён: нет обязательных массивов criteria/checks/invariants"];
+	// Запись визуальной приёмки нужна и для покрытия критериев, и для блокировки.
+	const visualRecordPath = join(process.cwd(), GATE_DIR, cert.slug, "visual.json");
 	const integrity = await verifySignature(cert);
 	if (integrity) missing.push(integrity);
 	// Уровень Integrity: файлы должны остаться теми же, что проверялись.
@@ -1099,6 +1182,12 @@ async function missingParts(cert: Certificate): Promise<string[]> {
 	const trivial = cert.checks.filter((check) => TRIVIAL_RE.test(check.cmd.trim()));
 	if (trivial.length > 0) missing.push(`проверки-заглушки: ${trivial.map((check) => check.name).join(", ")}`);
 	const covered = new Set(cert.checks.filter((check) => check.ok).flatMap((check) => check.covers ?? []));
+	// Визуальная приёмка — тоже доказательство: подписанный пакет раннера с полной
+	// матрицей покрывает критерии, объявленные в контракте (--visual-covers).
+	if (cert.visual?.required === true) {
+		const record = existsSync(visualRecordPath) ? (JSON.parse(readFileSync(visualRecordPath, "utf8")) as { status?: string }) : null;
+		if (record?.status === "PASS") for (const id of cert.visual.covers ?? []) covered.add(id);
+	}
 	const uncovered = cert.criteria.map((item) => item.id).filter((id) => !covered.has(id));
 	if (uncovered.length > 0) missing.push(`критерии без доказательства (N/A): ${uncovered.join(", ")}`);
 	if (cert.risk === "high" && !cert.checks.some((check) => (check.expectExit ?? 0) !== 0))
@@ -1192,6 +1281,18 @@ async function missingParts(cert: Certificate): Promise<string[]> {
 	const hasProvenance = cert.review?.evidence?.kind === "spawn" || cert.review?.evidence?.kind === "attestation";
 	if (cert.review !== null && !hasProvenance && (!INDEPENDENT_BY.test(by) || AUTHOR_WORDS.test(innerName)))
 		missing.push(`ревьюер «${by}» не независим`);
+	// Визуальная приёмка: интерфейс нельзя принять по словам — нужен подписанный
+	// пакет доказательств от доверенного browser-runner.
+	const visualRequired = cert.visual?.required === true;
+	if (visualRequired) {
+		const record = existsSync(visualRecordPath) ? (JSON.parse(readFileSync(visualRecordPath, "utf8")) as { status?: string; reasons?: string[]; combos?: number; shots?: number }) : null;
+		if (record === null) missing.push("нет визуальной приёмки (Visual Gate): запусти browser-runner и `quality-gate visual`");
+		else if (record.status !== "PASS")
+			missing.push(
+				`VISUAL_GATE ${String(record.status ?? "?")}: комбинаций ${String(record.combos ?? 0)}/16, скриншотов ${String(record.shots ?? 0)}/48` +
+					(Array.isArray(record.reasons) && record.reasons.length > 0 ? ` — ${record.reasons[0]}` : ""),
+			);
+	}
 	// Провенанс вердикта: PASS обязан быть выдан запуском ревьюера или аттестатом.
 	// Без этого «reviewer → PASS» набирается в командной строке руками.
 	if (cert.review !== null && cert.review.verdict === "PASS") {
@@ -1400,6 +1501,27 @@ async function cmdRollback(argv: string[]): Promise<number> {
 	return 0;
 }
 
+/** Визуальная приёмка: проверяем пакет доверенного раннера, не доверяя словам. */
+async function cmdVisual(argv: string[]): Promise<number> {
+	const slug = argv[1];
+	if (!slug) throw new Error("нужен slug: quality-gate visual <slug>");
+	const { checkVisual, writeVisualRecord } = await import("./visual-gate.ts");
+	const contract = JSON.parse(await readFile(join(dirOf(slug), "contract.json"), "utf8")) as { visual?: { url?: string } | null };
+	const verdict = checkVisual({
+		cwd: process.cwd(),
+		slug,
+		publicKeyPath: argValue(argv, "--pub") ?? undefined,
+		expectedCommit: argValue(argv, "--commit") ?? undefined,
+		expectedUrl: contract.visual?.url,
+		expectedKeyId: contract.visual?.keyId,
+	});
+	writeVisualRecord(process.cwd(), slug, verdict);
+	console.log(`VISUAL_GATE: ${verdict.status} · комбинаций ${verdict.combos}/16, скриншотов ${verdict.shots}/48 · ${verdict.url}`);
+	for (const reason of verdict.reasons) console.log(`  ✘ ${reason}`);
+	if (verdict.status === "PASS") console.log(`  ✔ доказательства подписаны раннером, привязаны к commit ${verdict.commit.slice(0, 8)}`);
+	return verdict.status === "PASS" ? 0 : 1;
+}
+
 async function cmdVerify(argv: string[]): Promise<number> {
 	const slug = argv[1];
 	if (!slug) throw new Error("нужен slug: quality-gate verify <slug>");
@@ -1452,6 +1574,8 @@ async function main(argv: string[]): Promise<number> {
 			return cmdReview(argv);
 		case "verify":
 			return cmdVerify(argv);
+		case "visual":
+			return cmdVisual(argv);
 		case "attest":
 			return cmdAttest(argv);
 		case "snapshot":
@@ -1463,7 +1587,7 @@ async function main(argv: string[]): Promise<number> {
 		case "list":
 			return cmdList();
 		default:
-			console.error("команды: init | run | review | verify | attest | snapshot | rollback | report | list");
+			console.error("команды: init | run | review | visual | verify | attest | snapshot | rollback | report | list");
 			return 2;
 	}
 }
