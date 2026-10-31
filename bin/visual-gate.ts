@@ -317,13 +317,53 @@ async function analyzeWithVlm(png: Uint8Array): Promise<{ ok: boolean; verdict: 
 	return callVision(LOCAL_VLM_URL, LOCAL_VLM_MODEL, png, undefined);
 }
 
+const AUTO_DETAILS: DetailSpec[] = [
+	{ route: "agents", selector: ".ag-card", name: "agent-card" },
+	{ route: "goals", selector: ".go-card", name: "goal-card" },
+	{ route: "goals", selector: ".go-head", name: "go-head" },
+	{ route: "settings", selector: ".pk-fieldrow", name: "set-row" },
+	{ route: "memory", selector: ".mem-card", name: "mem-card" },
+	{ route: "projects", selector: ".pj-card", name: "project-card" },
+];
+
+/** Авторежим: план по умолчанию, токен берём из конфига шлюза и в репозиторий не кладём. */
+async function autoPlan(argv: string[]): Promise<Plan> {
+	const configPath = argValue(argv, "--config") ?? join(process.cwd(), "gateway", "config.json");
+	let token: string | undefined;
+	try {
+		const config = JSON.parse(await readFile(configPath, "utf8")) as { token?: unknown };
+		if (typeof config.token === "string") token = config.token;
+	} catch {
+		token = undefined;
+	}
+	const viewportsArg = argValue(argv, "--viewports");
+	const viewports = viewportsArg
+		? viewportsArg.split(",").map(pair => {
+				const [width, height] = pair.split("x").map(Number);
+				return { name: width < 600 ? "phone" : "desktop", width: width ?? 390, height: height ?? 844 };
+			})
+		: DEFAULT_VIEWPORTS;
+	const routesArg = argValue(argv, "--routes");
+	const routes = routesArg ? routesArg.split(",").map(item => item.trim()) : ["agents", "telegram", "projects", "activity", "memory", "settings", "goals"];
+	return {
+		url: argValue(argv, "--gateway") ?? "http://127.0.0.1:8088",
+		token,
+		routes,
+		viewports,
+		details: AUTO_DETAILS,
+	};
+}
+
 async function main(argv: string[]): Promise<number> {
 	const planArg = argValue(argv, "--plan");
-	const outArg = argValue(argv, "--out");
+	const outArg = argValue(argv, "--out") ?? (hasFlag(argv, "--auto") ? "/tmp/omp-visual-last" : null);
+	const auto = hasFlag(argv, "--auto");
 	const withVlm = !hasFlag(argv, "--no-vlm");
 	const plan: Plan = planArg
 		? (JSON.parse(await readFile(planArg, "utf8")) as Plan)
-		: {
+		: auto
+			? await autoPlan(argv)
+			: {
 				url: argValue(argv, "--url") ?? "http://127.0.0.1:8088",
 				token: argValue(argv, "--token") ?? undefined,
 				routes: (argValue(argv, "--routes") ?? "agents").split(",").map(item => item.trim()),

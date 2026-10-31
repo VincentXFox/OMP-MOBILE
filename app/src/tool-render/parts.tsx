@@ -237,7 +237,8 @@ export function ResultText({
 	return (
 		<Output
 			text={text}
-			maxLines={maxLines}
+			// Ошибки показываем компактно: четыре строки и «ещё N», а не стена красного текста.
+			maxLines={result?.isError === true ? 4 : maxLines}
 			lang={result?.isError ? null : lang}
 			error={result?.isError === true}
 			variant={variant ?? (lang ? "code" : "plain")}
