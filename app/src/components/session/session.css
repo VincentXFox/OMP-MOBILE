@@ -1203,22 +1203,6 @@
 }
 
 /* ---- agent drawer: transcript, controls, pinned chat row ---- */
-.ss-agent-transcript {
-	margin: 0;
-	flex: none;
-	max-height: 45vh;
-	overflow: auto;
-	background: var(--surface2);
-	border: 1px solid var(--border);
-	border-radius: 12px;
-	padding: 12px;
-	font-family: ui-monospace, "SF Mono", Menlo, monospace;
-	font-size: 0.75rem;
-	line-height: 1.45;
-	color: var(--fg);
-	white-space: pre-wrap;
-	word-break: break-word;
-}
 .ss-agent-transcript-error {
 	color: var(--err);
 }

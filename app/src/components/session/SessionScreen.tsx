@@ -307,7 +307,7 @@ function AgentChipsRow({
 	if (active.length === 0) {
 		const latest = subagents.reduce((a, b) => (b.lastActivity > a.lastActivity ? b : a));
 		const count = subagents.length;
-		const plural = count === 1 ? "субагент" : count < 5 ? "субагента" : "субагентов";
+		const plural = pluralRu(count, "субагент", "субагента", "субагентов");
 		// Все завершены: вместо голой строки текста — компактная карточка с итогом и переходом.
 		return (
 			<div className="ss-agent-row ss-agent-row--quiet">
@@ -366,7 +366,7 @@ function AgentDrawer({
 	const transcriptCursor = useRef<{ fromByte: number; carry: string }>({ fromByte: 0, carry: "" });
 	const [chatDraft, setChatDraft] = useState("");
 	const [confirmingKill, setConfirmingKill] = useState(false);
-	const preRef = useRef<HTMLPreElement | null>(null);
+	const bodyRef = useRef<HTMLDivElement | null>(null);
 
 	const loadTranscript = useCallback(async (silent = false) => {
 		if (!silent) setLoadingTranscript(true);
@@ -392,8 +392,9 @@ function AgentDrawer({
 		return () => window.clearInterval(timer);
 	}, [agent.status, loadTranscript]);
 
+	// Транскрипт дописывается каждые 3 с: держим прокрутку у конца, как в чате.
 	useEffect(() => {
-		const el = preRef.current;
+		const el = bodyRef.current;
 		if (el) el.scrollTop = el.scrollHeight;
 	}, [transcript]);
 
@@ -429,7 +430,7 @@ function AgentDrawer({
 						<X size={16} />
 					</button>
 				</div>
-				<div className="ss-agent-drawer-body">
+				<div className="ss-agent-drawer-body" ref={bodyRef}>
 					{liveLine !== null && (
 						<div className="ss-agent-progress-card">
 							<span className="ss-agent-progress-label">Сейчас:</span> {liveLine}

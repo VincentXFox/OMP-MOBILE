@@ -1,16 +1,19 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, Terminal, Wrench } from "lucide-react";
 import { pluralRu } from "../../lib/format";
-import { parseSubagentRows, previewLines, type SubRow } from "../../lib/subagent-view";
+import { PREVIEW_LIMIT, parseSubagentRows, previewLines, type SubRow } from "../../lib/subagent-view";
 
 function ResultRow({ row }: { row: SubRow }): ReactNode {
 	const [expanded, setExpanded] = useState(false);
 	const text = row.text ?? "";
-	const { lines, hidden } = previewLines(text, expanded);
+	const total = text.split("\n").length;
+	const { lines } = previewLines(text, expanded);
+	const canToggle = total > PREVIEW_LIMIT;
+	const hidden = Math.max(0, total - PREVIEW_LIMIT);
 	return (
 		<div className={`ss-sub-result${row.failed ? " ss-sub-result--failed" : ""}`}>
 			<pre>{lines.join("\n")}</pre>
-			{hidden > 0 && (
+			{canToggle && (
 				<button type="button" className="ss-sub-more" onClick={() => setExpanded(prev => !prev)}>
 					{expanded ? "свернуть" : `ещё ${hidden} ${pluralRu(hidden, "строка", "строки", "строк")}`}
 					<ChevronDown size={12} className={expanded ? "ss-sub-more-icon ss-sub-more-icon--open" : "ss-sub-more-icon"} />
@@ -62,16 +65,23 @@ export function SubagentConversation({ raw, empty }: { raw: string | null; empty
 	const [rawMode, setRawMode] = useState(false);
 	const rows = useMemo(() => (raw ? parseSubagentRows(raw) : []), [raw]);
 	if (!raw) return <>{empty ?? null}</>;
-	if (rows.length === 0) return <div className="ss-sub-empty">Пока ничего не пришло — сабагент ещё не начал.</div>;
+	const nothingParsed = rows.length === 0;
 	return (
 		<div className="ss-sub">
 			<div className="ss-sub-head">
-				<span className="ss-sub-count">{rows.length} {pluralRu(rows.length, "запись", "записи", "записей")}</span>
+				<span className="ss-sub-count">{nothingParsed ? "записей нет" : `${rows.length} ${pluralRu(rows.length, "запись", "записи", "записей")}`}</span>
 				<button type="button" className={`ss-sub-raw-toggle${rawMode ? " ss-sub-raw-toggle--on" : ""}`} onClick={() => setRawMode(prev => !prev)}>
 					{rawMode ? "Оформленный вид" : "Сырой текст"}
 				</button>
 			</div>
-			{rawMode ? <pre className="ss-sub-rawtext">{raw}</pre> : rows.map((row, index) => <Row key={index} row={row} />)}
+			{rawMode || nothingParsed ? (
+				<>
+					{nothingParsed && !rawMode && <div className="ss-sub-empty">Разобрать нечего — включи «Сырой текст».</div>}
+					<pre className="ss-sub-rawtext">{raw}</pre>
+				</>
+			) : (
+				rows.map((row, index) => <Row key={index} row={row} />)
+			)}
 		</div>
 	);
 }

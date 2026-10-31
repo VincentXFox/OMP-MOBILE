@@ -70,6 +70,19 @@ describe("parseSubagentRows", () => {
 		expect(preview.lines).toEqual(["первая", "вторая", "третья"]);
 	});
 
+	test("isError из сообщения помечает результат ошибкой", () => {
+		const raw = line({ type: "message", message: { role: "toolResult", isError: true, content: [{ type: "text", text: "обычный вывод без слова ошибка" }] } });
+		const rows = parseSubagentRows(raw);
+		expect(rows[0]?.failed).toBe(true);
+	});
+
+	test("exit code 10 не считается ошибкой, а exit code 1 — считается", () => {
+		const ok = parseSubagentRows(line({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "готово, exit code 10" }] } }));
+		const bad = parseSubagentRows(line({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "команда упала: exit code 1" }] } }));
+		expect(ok[0]?.failed).toBe(false);
+		expect(bad[0]?.failed).toBe(true);
+	});
+
 	test("превью сворачивает длинный результат до трёх строк", () => {
 		const text = ["a", "b", "c", "d", "e"].join("\n");
 		expect(previewLines(text, false)).toEqual({ lines: ["a", "b", "c"], hidden: 2 });

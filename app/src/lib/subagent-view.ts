@@ -23,6 +23,8 @@ export interface SubRow {
 const MAX_TEXT = 600;
 const MAX_ARG = 140;
 const MAX_RESULT = 1200;
+/** Сколько строк результата видно до «ещё N строк». */
+export const PREVIEW_LIMIT = 3;
 
 function cleanText(value: string): string {
 	return value.replace(/\r/g, "").trim();
@@ -59,7 +61,9 @@ function toolArg(name: string, args: Record<string, unknown>): string {
 }
 
 function looksFailed(text: string): boolean {
-	return /^(?:error\b|ошибка\b|failed\b|traceback\b|exception\b)/i.test(text.trim()) || text.includes("exit code 1");
+	const head = text.trim();
+	// Только настоящие признаки отказа: «exit code 10/127» не ошибка.
+	return /^(?:error\b|ошибка\b|failed\b|traceback\b|exception\b)/i.test(head) || /\bexit code 1\b(?!\d)/.test(head);
 }
 
 function blocksOf(content: unknown): { type: string; [key: string]: unknown }[] {
@@ -99,6 +103,7 @@ export function parseSubagentRows(raw: string): SubRow[] {
 		const message = event.message as { role?: unknown; content?: unknown } | undefined;
 		if (!message || typeof message !== "object") continue;
 		const role = typeof message.role === "string" ? message.role : "";
+		const isError = (message as { isError?: unknown }).isError === true;
 		const blocks = blocksOf(message.content);
 
 		if (role === "assistant") {
@@ -119,7 +124,7 @@ export function parseSubagentRows(raw: string): SubRow[] {
 					.map(block => (block.type === "text" ? String(block.text ?? "") : block.type === "image" ? "[изображение]" : ""))
 					.join("\n"),
 			);
-			if (text.length > 0) rows.push({ kind: "result", text: shortenLines(text, MAX_RESULT), failed: looksFailed(text) });
+			if (text.length > 0) rows.push({ kind: "result", text: shortenLines(text, MAX_RESULT), failed: isError || looksFailed(text) });
 		} else if (role === "user") {
 			const text = cleanText(blocks.filter(block => block.type === "text").map(block => String(block.text ?? "")).join("\n"));
 			if (!isNoise(text)) rows.push({ kind: "user", text: shorten(text, MAX_TEXT) });
@@ -133,7 +138,7 @@ export function parseSubagentRows(raw: string): SubRow[] {
 }
 
 /** Строки результата для показа: свёрнуто до трёх строк, пока не раскрыли. */
-export function previewLines(text: string, expanded: boolean, limit = 3): { lines: string[]; hidden: number } {
+export function previewLines(text: string, expanded: boolean, limit = PREVIEW_LIMIT): { lines: string[]; hidden: number } {
 	const lines = text.split("\n");
 	if (expanded || lines.length <= limit) return { lines, hidden: 0 };
 	return { lines: lines.slice(0, limit), hidden: lines.length - limit };
