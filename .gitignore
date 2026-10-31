@@ -34,3 +34,4 @@ gateway/runtime-manifest.json
 # внутренние рабочие заметки и рантайм-состояние: живут локально, публикуются отдельно
 .omp/
 gateway/agent-names.json
+.omp/visual/
