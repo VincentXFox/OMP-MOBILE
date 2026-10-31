@@ -3,7 +3,7 @@
  * instead of inventing new CSS — see tool-render.css for the `tv-` classes.
  */
 import type { ReactNode } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import type { ToolRenderHost, ToolResultImage, ToolResultLike } from "./types";
 import { getHljs, replaceTabs, resultImagesOf, resultTextOf, shortenPath, stripAnsi } from "./util";
@@ -151,6 +151,36 @@ export interface OutputProps {
  * Expandable text block — the workhorse for command output, file previews,
  * search results. Tabs are widened, ANSI escapes stripped.
  */
+/** Ошибка инструмента: максимум 4 визуальные строки, длинный текст раскрывается по тапу. */
+function ErrorOutput({ text }: { text: string }): ReactNode {
+	const [expanded, setExpanded] = useState(false);
+	const [overflows, setOverflows] = useState(false);
+	const ref = useRef<HTMLPreElement | null>(null);
+	const clean = useMemo(() => replaceTabs(stripAnsi(text)).replace(/\n+$/, ""), [text]);
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		setOverflows(el.scrollHeight > el.clientHeight + 2);
+	}, [clean, expanded]);
+	return (
+		<div className="tv-out">
+			<pre
+				ref={ref}
+				className={`tv-pre tv-pre--wrap tv-pre--error${expanded ? " tv-pre--error-open" : ""}`}
+			>
+				{clean}
+			</pre>
+			{overflows && !expanded && (
+				<div className="tv-out-foot">
+					<button type="button" className="tv-expand" onClick={() => setExpanded(true)}>
+						показать полностью
+					</button>
+				</div>
+			)}
+		</div>
+	);
+}
+
 export function Output({ text, maxLines = 10, lang, error, variant = "plain", title, bare }: OutputProps): ReactNode {
 	const [limit, setLimit] = useState<number | null>(null);
 	const clean = useMemo(() => replaceTabs(stripAnsi(text)).replace(/\n+$/, ""), [text]);
@@ -234,13 +264,14 @@ export function ResultText({
 }): ReactNode {
 	const text = resultTextOf(result).trim();
 	if (!text) return null;
+	if (result?.isError === true) return <ErrorOutput text={text} />;
 	return (
 		<Output
 			text={text}
-			// Ошибки показываем компактно: четыре строки и «ещё N», а не стена красного текста.
-			maxLines={result?.isError === true ? 4 : maxLines}
-			lang={result?.isError ? null : lang}
-			error={result?.isError === true}
+			maxLines={maxLines}
+			lang={lang}
+			// ошибки уходят в ErrorOutput выше, сюда попадает только успешный вывод
+			error={false}
 			variant={variant ?? (lang ? "code" : "plain")}
 			title={title}
 		/>

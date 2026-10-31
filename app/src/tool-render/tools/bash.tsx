@@ -66,7 +66,7 @@ function Body({ args, result }: ToolRenderProps): ReactNode {
 		<>
 			<div className="tv-cmd">
 				<span className="tv-cmd-prompt">$</span>
-				<span className="tv-cmd-text">
+				<span className="tv-cmd-text" title={command ?? undefined}>
 					{prefix && <span className="tv-cmd-env">{`${prefix} `}</span>}
 					{command ?? <InvalidArg what="command" />}
 				</span>

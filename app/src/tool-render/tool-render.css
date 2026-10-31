@@ -719,3 +719,28 @@
 		}
 	}
 }
+
+
+/* Ошибки инструментов: не стена красного текста — четыре визуальные строки. */
+.tv-pre--error {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 4;
+	overflow: hidden;
+}
+.tv-pre--error.tv-pre--error-open {
+	display: block;
+	-webkit-line-clamp: initial;
+	overflow: auto;
+	max-height: 40vh;
+}
+
+
+/* Длинная команда не раздувает карточку: 4 строки, полный текст — в копировании/подсказке. */
+.tv-cmd-text {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 4;
+	overflow: hidden;
+	overflow-wrap: anywhere;
+}
