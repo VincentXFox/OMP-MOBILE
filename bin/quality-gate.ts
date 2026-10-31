@@ -360,12 +360,23 @@ async function execCheck(spec: CheckSpec, logDir: string): Promise<CheckResult> 
 
 function git(args: string[]): string {
 	// Синхронно: снимок базовой линии и список файлов читаются сразу, а не по событию close.
+	// Таймаут обязателен: без него зависший git блокирует весь прогон, и промис тут не поможет.
 	try {
-		const result = Bun.spawnSync(["git", ...args], { cwd: process.cwd() });
+		const result = Bun.spawnSync(["git", ...args], { cwd: process.cwd(), timeout: 20_000 });
 		return result.stdout.toString().trim();
 	} catch {
 		return "";
 	}
+}
+
+/**
+ * Три состояния вместо двух: «репозитория нет» и «git не ответил» — разные вещи.
+ * Если второе принять за первое, проверка диффа молча пропустится и даст ложный PASS.
+ */
+function gitTreeState(): "yes" | "no" | "hung" {
+	const probe = Bun.spawnSync(["git", "rev-parse", "--is-inside-work-tree"], { cwd: process.cwd(), timeout: 20_000 });
+	if (probe.exitCode === null) return "hung";
+	return probe.stdout.toString().trim() === "true" ? "yes" : "no";
 }
 
 function gitOr(args: string[], fallback = "нет git"): string {
@@ -439,16 +450,38 @@ function hashFile(path: string): ArtifactHash | null {
 }
 
 /** Изменённые строки по файлам: отслеженные (diff) и новые (untracked), без исключённых путей. */
+/**
+ * git в каталоге без репозитория иногда завершается раньше, чем мы подпишемся на
+ * событие close, и тогда промис не разрешается никогда: прогон висит без вывода.
+ * Ожидание ограничено, дальше работаем с тем, что успели собрать.
+ */
+function settleWithin(ms: number): Promise<void> {
+	const { promise, resolve } = Promise.withResolvers<void>();
+	setTimeout(resolve, ms);
+	return promise;
+}
+
 async function collectChanges(exemptPaths: readonly string[]): Promise<Map<string, string[]>> {
 	const exempt = new Set(exemptPaths.map((item) => item.trim()).filter(Boolean));
 	const changes = new Map<string, string[]>();
-	const diff = spawn("git", ["diff", "--unified=0", "HEAD"], { cwd: process.cwd() });
+	// Вне рабочего дерева git не отвечает на diff: процесс висит до таймаута и гибнет по SIGTERM.
+	const tree = gitTreeState();
+	if (tree === "hung") throw new Error("git не ответил за 20 с: изменения не проверены");
+	if (tree === "no") return changes;
+	const diff = spawn("git", ["diff", "--unified=0", "HEAD"], { cwd: process.cwd(), timeout: 20_000 });
 	let diffText = "";
+	let truncated = false;
 	const { promise, resolve: resolveDiff } = Promise.withResolvers<void>();
 	diff.stdout.on("data", (chunk: Buffer) => (diffText += chunk.toString()));
-	diff.on("close", () => resolveDiff());
+	// Сигнал в close означает, что процесс убит по таймауту, а не доработал сам.
+	diff.on("close", (_code, signal) => {
+		if (signal) truncated = true;
+		resolveDiff();
+	});
 	diff.on("error", () => resolveDiff());
-	await promise;
+	await Promise.race([promise, settleWithin(25_000).then(() => { truncated = true; })]);
+	// Обрывок диффа выглядел бы как «секретов нет» — это ложный PASS. Лучше упасть.
+	if (truncated) throw new Error("git diff не завершился за 25 с: дифф проверен не полностью");
 	let file = "";
 	for (const line of diffText.split("\n")) {
 		const header = /^diff --git a\/(.+) b\/(.+)$/u.exec(line);
@@ -1218,13 +1251,24 @@ function subjectHash(cert: { artifacts?: ArtifactHash[]; checks?: { cmd?: string
 
 /** Отпечаток рабочего дерева: ревью, выданное на другой дифф, недействительно. */
 async function diffHashNow(): Promise<string> {
-	const diff = spawn("git", ["diff", "HEAD"], { cwd: process.cwd() });
 	let text = "";
-	const { promise, resolve: resolveDiff } = Promise.withResolvers<void>();
-	diff.stdout.on("data", (chunk: Buffer) => (text += chunk.toString()));
-	diff.on("close", () => resolveDiff());
-	diff.on("error", () => resolveDiff());
-	await promise;
+	// Вне рабочего дерева diff не отвечает: процесс гибнет по таймауту, отпечаток был бы ложным.
+	const tree = gitTreeState();
+	if (tree === "hung") throw new Error("git не ответил за 20 с: отпечаток диффа достоверно не снят");
+	if (tree === "yes") {
+		const diff = spawn("git", ["diff", "HEAD"], { cwd: process.cwd(), timeout: 20_000 });
+		let truncated = false;
+		const { promise, resolve: resolveDiff } = Promise.withResolvers<void>();
+		diff.stdout.on("data", (chunk: Buffer) => (text += chunk.toString()));
+		diff.on("close", (_code, signal) => {
+			if (signal) truncated = true;
+			resolveDiff();
+		});
+		diff.on("error", () => resolveDiff());
+		await Promise.race([promise, settleWithin(25_000).then(() => { truncated = true; })]);
+		// Отпечаток по обрывку зависит от точки обрезки: ревью и verify разошлись бы ложно.
+		if (truncated) throw new Error("git diff не завершился за 25 с: отпечаток диффа достоверно не снят");
+	}
 	// Собственные артефакты приёмки не считаются правкой кода: иначе каждый прогон
 	// обесценивает собственное ревью и приёмка не может закрыться.
 	let withoutGate = "";

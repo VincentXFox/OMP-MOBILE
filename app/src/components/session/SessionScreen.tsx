@@ -23,6 +23,8 @@ import {
 	Square,
 	Terminal,
 	TriangleAlert,
+	Users,
+	ChevronRight,
 	X,
 } from "lucide-react";
 import type { ClipboardEvent, CSSProperties, ReactNode } from "react";
@@ -39,6 +41,8 @@ import { useGuestSnapshot } from "../../lib/use-guest";
 import { ConfirmSheet } from "../shell/ConfirmSheet";
 import { ModelPickerSheet } from "../shell/ModelPickerSheet";
 import { FilesScreen } from "../files/FilesScreen";
+import { ContextBar } from "./ContextBar";
+import { SubagentConversation } from "./SubagentConversation";
 import { TodoBar } from "./TodoBar";
 import { VoiceRecorder } from "../shell/VoiceRecorder";
 import { TerminalScreen } from "../terminal/TerminalScreen";
@@ -302,14 +306,18 @@ function AgentChipsRow({
 	const active = subagents.filter(a => a.status === "running");
 	if (active.length === 0) {
 		const latest = subagents.reduce((a, b) => (b.lastActivity > a.lastActivity ? b : a));
+		const count = subagents.length;
+		const plural = count === 1 ? "субагент" : count < 5 ? "субагента" : "субагентов";
+		// Все завершены: вместо голой строки текста — компактная карточка с итогом и переходом.
 		return (
 			<div className="ss-agent-row ss-agent-row--quiet">
-				<button
-					type="button"
-					className="ss-agent-chip ss-agent-chip--summary"
-					onClick={() => onOpen(latest.id)}
-				>
-					{subagents.length} сабагентов
+				<button type="button" className="ss-agent-summary" onClick={() => onOpen(latest.id)}>
+					<Users size={14} className="ss-agent-summary-icon" aria-hidden="true" />
+					<span className="ss-agent-summary-text">
+						{count} {plural}
+					</span>
+					<span className="ss-agent-summary-state">все завершены</span>
+					<ChevronRight size={14} className="ss-agent-summary-chevron" aria-hidden="true" />
 				</button>
 			</div>
 		);
@@ -416,7 +424,7 @@ function AgentDrawer({
 				<div className="ss-agent-drawer-handle" />
 				<div className="ss-agent-drawer-head">
 					<strong>{agent.displayName}</strong>
-					<span className={`ss-agent-pill ss-agent-pill--${agent.status}`}>{agent.status}</span>
+					<span className={`ss-agent-pill ss-agent-pill--${agent.status}`}>{agent.status === "running" ? "работает" : agent.status === "aborted" ? "остановлен" : agent.status === "idle" ? "ждёт" : agent.status === "parked" ? "отложен" : agent.status}</span>
 					<button type="button" className="ss-icon-btn" onClick={onClose} aria-label="Закрыть">
 						<X size={16} />
 					</button>
@@ -447,11 +455,10 @@ function AgentDrawer({
 						onConfirm={kill}
 						onCancel={() => setConfirmingKill(false)}
 					/>
-					{transcript !== null && (
-						<pre ref={preRef} className="ss-agent-transcript">
-							{transcript}
-						</pre>
-					)}
+					<SubagentConversation
+						raw={transcript}
+						empty={<div className="ss-sub-empty">Транскрипт не загружен — нажми «Транскрипт» выше.</div>}
+					/>
 					{transcriptError != null && <div className="ss-agent-line ss-agent-transcript-error">{transcriptError}</div>}
 				</div>
 				<div className="ss-agent-chat">
@@ -1559,6 +1566,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 				style={{ "--ss-kb": `${kbInset}px` } as CSSProperties}
 			>
 				{todoBoard !== null && <TodoBar board={todoBoard} />}
+				<ContextBar usage={snap.state?.contextUsage ?? null} />
 				{!composerActive && (
 					<div className="ss-offline-note">Не в сети — отправим при подключении</div>
 				)}

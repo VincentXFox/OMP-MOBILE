@@ -116,14 +116,15 @@ describe("quality-gate", () => {
 		expect(before.err).toContain("независимая проверка");
 		const review = await gate(cwd, ["review", "risk", "--spawn", "--review-timeout", "20"], passingReviewer(cwd, "перепроверил выводы"));
 		expect(review.code).toBe(0);
+		// Аттестат выдаёт только независимый сервис: без него приёмка не закрывается (интеграция — verifier.test.ts).
+		const withoutAttest = await gate(cwd, ["verify", "risk"]);
+		expect(withoutAttest.code).toBe(1);
+		expect(withoutAttest.err).toContain("аттестац");
+		// Верификатор может отклонить прогон по своей политике (ключ, видимость временного каталога).
+		// Тогда приёмка обязана остаться непройденной, а отказ — явным, без молчаливого PASS.
 		const attest = await gate(cwd, ["attest", "risk"]);
-		if (attest.code === 0) {
-			const after = await gate(cwd, ["verify", "risk"]);
-			expect(after.code).toBe(0);
-		} else {
-			// Верификатор может отклонить прогон по своей политике (ключ, видимость
-			// временного каталога из его scope). Тогда приёмка обязана остаться
-			// непройденной, а отказ — быть явным, без молчаливого PASS.
+		if (attest.code === 0) expect((await gate(cwd, ["verify", "risk"])).code).toBe(0);
+		else {
 			expect(`${attest.err}${attest.out}`.trim().length).toBeGreaterThan(0);
 			expect((await gate(cwd, ["verify", "risk"])).code).toBe(1);
 		}
@@ -379,7 +380,7 @@ describe("quality-gate", () => {
 
 	test("негативный сценарий проходит, когда код совпал с ожиданием", async () => {
 		const cwd = repo();
-		await gate(cwd, ["init", "neg", "--task", "t", "--risk", "high", "--ac", "AC-01: файла нет — команда падает", "--check", "нет::test -f missing.txt", "--expect", "нет=1", "--covers", "нет=AC-01", "--adversarial", "отрицательный сценарий подделан::проверил на реальном отсутствии файла::код 1 как ожидалось", "--artifact", "readme.md", "--residual-none", "охват — отсутствие файла"]);
+		await gate(cwd, ["init", "neg", "--task", "t", "--risk", "normal", "--ac", "AC-01: файла нет — команда падает", "--check", "нет::test -f missing.txt", "--expect", "нет=1", "--covers", "нет=AC-01", "--adversarial", "отрицательный сценарий подделан::проверил на реальном отсутствии файла::код 1 как ожидалось", "--artifact", "readme.md", "--residual-none", "охват — отсутствие файла"]);
 		const run = await gate(cwd, ["run", "neg"]);
 		expect(run.code).toBe(0);
 		await gate(cwd, ["review", "neg", "--spawn", "--review-timeout", "20"], passingReviewer(cwd, "негатив ожидаем"));
