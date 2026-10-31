@@ -28,12 +28,7 @@ export function TodoBar({ board }: { board: TodoBoard }): ReactNode {
 				<span className="ss-todo-bar-progress" aria-hidden="true">
 					<span className="ss-todo-bar-progress-fill" style={{ width: `${doneShare}%` }} />
 				</span>
-				{allDone ? (
-					<span className="ss-todo-bar-done">
-						<Check size={14} />
-						Все пункты выполнены
-					</span>
-				) : null}
+				{allDone ? <Check size={14} className="ss-todo-bar-check" aria-label="Все пункты выполнены" /> : null}
 				<ChevronDown size={16} className={`ss-todo-bar-chevron${open ? " ss-todo-bar-chevron--open" : ""}`} />
 			</button>
 			{open && (

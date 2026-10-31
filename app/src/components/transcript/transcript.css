@@ -583,9 +583,9 @@
 	align-items: center;
 	gap: 10px;
 	width: 100%;
-	min-height: 44px;
-	padding: 0 12px;
-	border: 1px solid var(--border);
+	min-height: 40px;
+	padding: 0 10px;
+	border: none;
 	border-radius: 12px;
 	background: var(--surface2);
 	color: var(--fg-muted);

@@ -246,6 +246,9 @@ function noticeRu(message: string): string {
 		.replace(/\bguest joined the collab session\b/i, "Участник подключился к сессии")
 		.replace(/\bguest left the collab session\b/i, "Участник отключился от сессии")
 		.replace(/\bhost joined the collab session\b/i, "Хост подключился к сессии")
+		// Гость по имени: «VincentFox joined the collab session» → «VincentFox подключился к сессии».
+		.replace(/^(.+?) joined the collab session$/i, "$1 подключился к сессии")
+		.replace(/^(.+?) left the collab session$/i, "$1 отключился от сессии")
 		.replace(/\bhost left the collab session\b/i, "Хост отключился от сессии");
 }
 
