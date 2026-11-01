@@ -75,8 +75,10 @@ interface Report {
 	consoleErrors: string[];
 }
 
+// Три состояния: телефон, узкий/планшет и ПК — иначе проверена половина дизайна.
 const DEFAULT_VIEWPORTS: ViewportSpec[] = [
 	{ name: "phone", width: 390, height: 844 },
+	{ name: "tablet", width: 768, height: 1024 },
 	{ name: "desktop", width: 1280, height: 800 },
 ];
 
@@ -342,7 +344,7 @@ async function autoPlan(argv: string[]): Promise<Plan> {
 	const viewports = viewportsArg
 		? viewportsArg.split(",").map(pair => {
 				const [width, height] = pair.split("x").map(Number);
-				return { name: width < 600 ? "phone" : "desktop", width: width ?? 390, height: height ?? 844 };
+				return { name: width < 600 ? "phone" : width < 1100 ? "tablet" : "desktop", width: width ?? 390, height: height ?? 844 };
 			})
 		: DEFAULT_VIEWPORTS;
 	const schemesArg = argValue(argv, "--schemes");
