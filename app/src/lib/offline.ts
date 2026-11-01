@@ -35,6 +35,16 @@ export interface QueuedPrompt {
 /** Последняя отметка «показана копия»: key → время получения копии. */
 const staleMarks = new Map<string, number>();
 
+/** Записать копию явно (реестр агентов обновляется опросом, а не запросом экрана). */
+export async function cacheJson(key: string, body: unknown): Promise<void> {
+	if (sizeOf(body) > MAX_BODY_BYTES) return;
+	try {
+		await store().put(key, { body, at: Date.now() });
+	} catch {
+		// Хранилище недоступно — копии просто не будет.
+	}
+}
+
 /** Время копии для ключа, если последний успешный ответ пришёл из кэша. */
 export function staleMark(key: string): number | null {
 	return staleMarks.get(key) ?? null;
@@ -218,7 +228,25 @@ export interface Loaded<T> {
  * `at !== null` значит, что показана копия, снятая в это время — включая копию
  * из кэша service worker: он отдаёт её с заголовком `X-Pocket-Cache-At`.
  */
-export async function cachedJsonMeta<T>(key: string, load: () => Promise<Loaded<T>>): Promise<{ value: T; at: number | null }> {
+export async function cachedJsonMeta<T>(
+	key: string,
+	load: () => Promise<Loaded<T>>,
+	onFresh?: (value: T) => void,
+): Promise<{ value: T; at: number | null }> {
+	// Сначала копия, потом сеть: показ не ждёт канала. Устаревшая копия
+	// обновляется в фоне, и оболочка получает новую через `onFresh`.
+	const cached = await readCached<T>(key);
+	if (cached !== null && onFresh !== undefined) {
+		void revalidate(key, load, onFresh);
+		staleMarks.set(key, cached.at);
+		return { value: cached.body as T, at: cached.at };
+	}
+	if (cached !== null) {
+		// Без подписчика обновление всё равно нужно: результат ляжет в кэш.
+		void revalidate(key, load);
+		staleMarks.set(key, cached.at);
+		return { value: cached.body as T, at: cached.at };
+	}
 	try {
 		const loaded = await load();
 		if (loaded.staleAt !== null) {
@@ -243,9 +271,50 @@ export async function cachedJsonMeta<T>(key: string, load: () => Promise<Loaded<
 	}
 }
 
-/** Запрос с кэшем для обычного загрузчика (свежий ответ либо копия из браузера). */
-export function cachedJson<T>(key: string, load: () => Promise<T>): Promise<{ value: T; at: number | null }> {
-	return cachedJsonMeta<T>(key, async () => ({ value: await load(), staleAt: null }));
+/** Фоновое обновление: свежий ответ перекрывает копию и уходит подписчику. */
+async function revalidate<T>(key: string, load: () => Promise<Loaded<T>>, onFresh?: (value: T) => void): Promise<void> {
+	try {
+		const loaded = await load();
+		const known = await readCached<T>(key);
+		if (loaded.staleAt !== null) {
+			// Копия из service worker: принимаем, только если она новее нашей.
+			if (known !== null && loaded.staleAt <= known.at) return;
+			staleMarks.set(key, loaded.staleAt);
+			return;
+		}
+		if (sizeOf(loaded.value) > MAX_BODY_BYTES) return;
+		await store().put(key, { body: loaded.value, at: Date.now() });
+		await store().prune();
+		staleMarks.delete(key);
+		onFresh?.(loaded.value);
+	} catch {
+		// Сеть так и не ответила — показываем то, что уже на экране.
+	}
+}
+
+/**
+ * Сеть-первый вариант: показ ждёт ответ, копия — только когда сеть упала.
+ * Так ведут себя экраны, которым нужны актуальные данные без подписчика;
+ * мгновенный показ — это {@link cachedJsonMeta} с `onFresh`.
+ */
+export async function cachedJson<T>(key: string, load: () => Promise<T>): Promise<{ value: T; at: number | null }> {
+	try {
+		const value = await load();
+		if (sizeOf(value) <= MAX_BODY_BYTES) {
+			try {
+				await store().put(key, { body: value, at: Date.now() });
+			} catch {
+				// Хранилище недоступно — кэш просто не ведётся.
+			}
+		}
+		staleMarks.delete(key);
+		return { value, at: null };
+	} catch (error) {
+		const cached = await readCached<T>(key);
+		if (cached === null) throw error;
+		staleMarks.set(key, cached.at);
+		return { value: cached.body as T, at: cached.at };
+	}
 }
 
 /** Промпт, отправленный без связи: переживёт перезагрузку страницы. */

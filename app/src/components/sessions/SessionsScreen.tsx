@@ -69,7 +69,12 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 
 	const reload = useCallback(async (): Promise<void> => {
 		try {
-			const list = await fetchSessions();
+			// Показ из копии мгновенный; свежий список придёт подписчиком и
+			// молча заменит копию — ждать канал не нужно.
+			const list = await fetchSessions(undefined, fresh => {
+				setSessions(fresh);
+				setStaleAt(staleMark("sessions"));
+			});
 			setSessions(list);
 			setError(null);
 			setStaleAt(staleMark("sessions"));

@@ -54,6 +54,57 @@ describe("кэш ответов шлюза", () => {
 	});
 });
 
+describe("показ из копии без ожидания сети", () => {
+	test("копия отдаётся сразу, свежий ответ приходит подписчику", async () => {
+		__setBackend(memoryStoreForTests());
+		await cachedJson("sessions", async () => ({ sessions: ["old"] }));
+		let release!: () => void;
+		const gate = new Promise<void>(resolve => {
+			release = resolve;
+		});
+		const fresh: string[] = [];
+		const result = await cachedJsonMeta<{ sessions: string[] }>(
+			"sessions",
+			async () => {
+				await gate;
+				return { value: { sessions: ["new"] }, staleAt: null };
+			},
+			value => fresh.push(...value.sessions),
+		);
+		// Сеть ещё молчит, а показ уже есть:
+		expect(result.value).toEqual({ sessions: ["old"] });
+		expect(result.at).not.toBeNull();
+		expect(fresh).toEqual([]);
+		release();
+		await new Promise(resolve => setTimeout(resolve, 20));
+		expect(fresh).toEqual(["new"]);
+		expect((await readCached<{ sessions: string[] }>("sessions"))?.body).toEqual({ sessions: ["new"] });
+	});
+
+	test("нет копии — запрос ждёт сеть", async () => {
+		__setBackend(memoryStoreForTests());
+		const result = await cachedJsonMeta<{ sessions: string[] }>("sessions", async () => ({
+			value: { sessions: ["fresh"] },
+			staleAt: null,
+		}));
+		expect(result.value).toEqual({ sessions: ["fresh"] });
+		expect(result.at).toBeNull();
+	});
+
+	test("фоновое обновление не подменяет копию более старой копией service worker", async () => {
+		__setBackend(memoryStoreForTests());
+		await cachedJson("sessions", async () => ({ sessions: ["mine"] }));
+		const mineAt = (await readCached<{ sessions: string[] }>("sessions"))?.at ?? 0;
+		await cachedJsonMeta<{ sessions: string[] }>(
+			"sessions",
+			async () => ({ value: { sessions: ["sw-old"] }, staleAt: mineAt - 10_000 }),
+			() => {},
+		);
+		await new Promise(resolve => setTimeout(resolve, 20));
+		expect((await readCached<{ sessions: string[] }>("sessions"))?.body).toEqual({ sessions: ["mine"] });
+	});
+});
+
 describe("копия из кэша service worker", () => {
 	test("время копии приходит из заголовка и видно оболочке", async () => {
 		__setBackend(memoryStoreForTests());

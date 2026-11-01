@@ -8,6 +8,7 @@ import { ProjectsScreen } from "./components/projects/ProjectsScreen";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
 import { SettingsScreen } from "./components/settings/SettingsScreen";
 import { SessionScreen } from "./components/session/SessionScreen";
+import { cacheJson, readCached } from "./lib/offline";
 import { SuperScreen } from "./components/super/SuperScreen";
 import { TelegramScreen } from "./components/telegram/TelegramScreen";
 import { UpdatesScreen } from "./components/updates/UpdatesScreen";
@@ -184,6 +185,15 @@ export function App(): ReactNode {
 		let alive = true;
 		let timer: number | null = null;
 		let lastActive = getActiveBase();
+		// Первый экран не ждёт сеть: показываем последний известный реестр из
+		// копии, живость при этом остаётся честной (индикатор ждёт первого ответа).
+		void readCached<{ hosts: unknown }>("hosts").then(cached => {
+			if (!alive || cached === null) return;
+			const rows = (cached.body as { hosts?: unknown }).hosts;
+			if (Array.isArray(rows) && rows.length > 0) {
+				setHosts(previous => (previous !== null && previous.length > 0 ? previous : (rows as HostInfo[])));
+			}
+		});
 		const poll = async (): Promise<void> => {
 			if (typeof navigator !== "undefined" && navigator.onLine === false) {
 				setNetState("offline");

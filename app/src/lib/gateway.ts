@@ -438,9 +438,14 @@ export async function remapSession(instanceId: string, signal?: AbortSignal): Pr
  * при живом шлюзе отдаётся свежий ответ, при упавшей сети — кэш с отметкой
  * `pocket:stale` (оболочка показывает, от какого времени данные).
  */
-export async function fetchSessions(signal?: AbortSignal): Promise<SessionSummary[]> {
-	const { value } = await cachedJsonMeta<{ sessions: SessionSummary[] }>("sessions", () =>
-		requestMeta<{ sessions: SessionSummary[] }>("/api/sessions", { signal }),
+export async function fetchSessions(
+	signal?: AbortSignal,
+	onFresh?: (sessions: SessionSummary[]) => void,
+): Promise<SessionSummary[]> {
+	const { value } = await cachedJsonMeta<{ sessions: SessionSummary[] }>(
+		"sessions",
+		() => requestMeta<{ sessions: SessionSummary[] }>("/api/sessions", { signal }),
+		onFresh === undefined ? undefined : fresh => onFresh(fresh.sessions),
 	);
 	return Array.isArray(value.sessions) ? value.sessions : [];
 }
@@ -910,6 +915,7 @@ export async function fetchSessionTail(
 	target: { path?: string | null; id?: string | null },
 	limit = 80,
 	signal?: AbortSignal,
+	onFresh?: (entries: SessionEntry[]) => void,
 ): Promise<SessionEntry[]> {
 	const params = new URLSearchParams({ limit: String(limit) });
 	if (target.path !== null && target.path !== undefined && target.path !== "") params.set("path", target.path);
@@ -917,8 +923,10 @@ export async function fetchSessionTail(
 	else return [];
 	// Хвост транскрипта тоже переживает обрыв: ключ включает limit и адресата.
 	const key = `tail:${params.toString()}`;
-	const { value } = await cachedJsonMeta<{ entries?: unknown[] }>(key, () =>
-		requestMeta<{ entries?: unknown[] }>(`/api/sessions/tail?${params.toString()}`, { signal }),
+	const { value } = await cachedJsonMeta<{ entries?: unknown[] }>(
+		key,
+		() => requestMeta<{ entries?: unknown[] }>(`/api/sessions/tail?${params.toString()}`, { signal }),
+		undefined,
 	);
 	return Array.isArray(value.entries) ? (value.entries as SessionEntry[]) : [];
 }
