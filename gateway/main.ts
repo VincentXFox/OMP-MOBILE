@@ -102,7 +102,10 @@ const MIME_BY_EXT: Record<string, string> = {
 };
 
 function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
 }
 
 async function readJson<T>(req: Request): Promise<T | null> {
@@ -1302,6 +1305,32 @@ function withCors(req: Request, res: Response): Response {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
+/** Порог сжатия: мелочь гонять через gzip дороже, чем отдать как есть. */
+const GZIP_MIN_BYTES = 1024;
+
+/**
+ * Сжатие ответов API. Мобильный канал с потерями: список сессий весит ~150 КБ,
+ * после gzip — ~15 КБ, что на плохой сети решает. Тело буферизуем только выше
+ * порога; потоковые ответы (SSE, вложения) не трогаем.
+ */
+async function withCompression(req: Request, res: Response): Promise<Response> {
+  const type = res.headers.get("content-type") ?? "";
+  const compressible = type.startsWith("application/json") || type.startsWith("text/") || type.startsWith("application/javascript");
+  if (!compressible || res.body === null) return res;
+  if (!(req.headers.get("accept-encoding") ?? "").includes("gzip")) return res;
+  if (res.headers.get("content-encoding") !== null) return res;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.byteLength < GZIP_MIN_BYTES) {
+    return new Response(bytes, { status: res.status, statusText: res.statusText, headers: res.headers });
+  }
+  const packed = Bun.gzipSync(bytes);
+  const headers = new Headers(res.headers);
+  headers.set("content-encoding", "gzip");
+  headers.set("vary", "accept-encoding");
+  headers.set("content-length", String(packed.byteLength));
+  return new Response(packed, { status: res.status, statusText: res.statusText, headers });
+}
+
 const server = Bun.serve({
   port: config.port,
   hostname: config.host,
@@ -1314,6 +1343,7 @@ const server = Bun.serve({
     } catch (err) {
       res = json(502, { error: err instanceof Error ? err.message : String(err) });
     }
+    res = await withCompression(req, res);
     console.log(`${req.method} ${url.pathname} ${res.status} ${Math.round(performance.now() - started)}ms`);
     return withCors(req, res);
   },

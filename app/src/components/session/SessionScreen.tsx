@@ -33,6 +33,7 @@ import type { GuestClient, GuestSnapshot, Notice } from "../../lib/client";
 import { agentName } from "../../lib/agent-name";
 import type { AgentChatSettings, HostInfo, ProjectFileEntry } from "../../lib/gateway";
 import { readTail, writeTail } from "../../lib/tail-cache";
+import { queuePrompt, queuedCount as readOutboxCount, takeQueuedPrompts } from "../../lib/offline";
 import { fetchSessionTail, applyAgentSettings, fetchAgentSettings, fetchHosts, fetchModels, getTerminal, listProjectFiles, readProjectFile, renameAgent, stopAgent, uploadAttachment } from "../../lib/gateway";
 import { basename, pluralRu, relTime } from "../../lib/format";
 import { todoBoardFromEntries } from "../../lib/todo-board";
@@ -874,6 +875,35 @@ function endedReasonText(reason: string): string {
 export function SessionScreen(props: { client: GuestClient; onLeave: () => void; host?: HostInfo; onReopen?: (instanceId: string) => void }): ReactNode {
 	const { client, onLeave, host, onReopen } = props;
 	const snap = useGuestSnapshot(client);
+	// Очередь промптов привязана к агенту: разные сессии не смешиваются.
+	const queueKey = host === undefined ? "default" : host.instanceId;
+	const [pendingPrompts, setPendingPrompts] = useState(0);
+
+	// Связь вернулась — отправляем то, что накопилось без сети (в порядке набора).
+	useEffect(() => {
+		if (snap.phase !== "live") return;
+		let alive = true;
+		void (async () => {
+			const items = await takeQueuedPrompts(queueKey);
+			if (!alive || items.length === 0) return;
+			for (const item of items) client.sendPrompt(item.text);
+			setPendingPrompts(0);
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [snap.phase, queueKey, client]);
+
+	// Сколько промптов ждёт отправки — видно в полосе над полем ввода.
+	useEffect(() => {
+		let alive = true;
+		void readOutboxCount(queueKey).then(count => {
+			if (alive) setPendingPrompts(count);
+		});
+		return () => {
+			alive = false;
+		};
+	}, [queueKey, snap.phase]);
 
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const scrollElRef = useRef<HTMLElement | null>(null);
@@ -1107,14 +1137,26 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		const fullText = [text, ...links, ...textFiles.map(textFileBlock)]
 			.filter(part => part.length > 0)
 			.join("\n\n");
-		if (images.length > 0) client.sendPromptWithImages(fullText, images);
+		// Разрыв сети: текст кладём в браузерную очередь (переживает перезагрузку),
+		// а не в буфер сокета — иначе промпт теряется при закрытии вкладки и может
+		// уйти дважды. Вложения без сети уходят прежним путём через буфер сокета.
+		const hasAttachments = images.length > 0 || textFiles.length > 0 || binaries.length > 0;
+		if (!isLive && !hasAttachments) {
+			const id = await queuePrompt(queueKey, fullText);
+			if (id === null) {
+				// Хранилище недоступно — короткий разрыв отработает буфер сокета.
+				client.sendPrompt(fullText);
+			} else {
+				setPendingPrompts(prev => prev + 1);
+			}
+		} else if (images.length > 0) client.sendPromptWithImages(fullText, images);
 		else client.sendPrompt(fullText);
 		setDraft("");
 		setImages([]);
 		setTextFiles([]);
 		setBinaries([]);
 		tailLock.current = true;
-	}, [client, draft, images, textFiles, binaries, composerActive, readOnly]);
+	}, [client, draft, images, textFiles, binaries, composerActive, readOnly, isLive, queueKey]);
 
 	const pickFiles = useCallback(async (files: FileList | File[] | null) => {
 		if (!files || files.length === 0) return;
@@ -1571,7 +1613,12 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 			>
 				{todoBoard !== null && <TodoBar board={todoBoard} />}
 				<ContextBar usage={snap.state?.contextUsage ?? null} />
-				{!composerActive && (
+				{pendingPrompts > 0 && (
+					<div className="ss-offline-note">
+						{pendingPrompts === 1 ? "Промпт в очереди" : `Промптов в очереди: ${pendingPrompts}`} — уйдёт при подключении
+					</div>
+				)}
+				{!composerActive && pendingPrompts === 0 && (
 					<div className="ss-offline-note">Не в сети — отправим при подключении</div>
 				)}
 				{queuedCount > 0 && (

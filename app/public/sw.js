@@ -4,6 +4,24 @@
 // навигация — network-first с откатом в кэш.
 
 const SHELL_CACHE = "pocket-shell";
+// Ответы шлюза, которые меняются медленно. Живость (/api/hosts) сюда не входит:
+// индикатор связи должен падать честно, а не показывать старую копию.
+const API_CACHE = "pocket-api";
+const API_CACHE_PATHS = [
+	"/api/sessions",
+	"/api/sessions/tail",
+	"/api/prompts",
+	"/api/crew",
+	"/api/models",
+	"/api/tasks",
+	"/api/activity",
+];
+/** Тяжёлые ответы в кэш не кладём: место на телефоне не бесконечное. */
+const API_MAX_BYTES = 1_500_000;
+
+function isApiCacheable(url) {
+	return API_CACHE_PATHS.some(path => url.pathname === path || url.pathname.startsWith(`${path}/`) || url.pathname.startsWith(`${path}?`));
+}
 
 // Хэшированные имена ассетов: 8 символов [a-z0-9] + расширение
 // (bun-хэш: g9pm4d2p.js, av4mkawg.css, …).
@@ -70,7 +88,7 @@ self.addEventListener("install", (event) => {
 // shell (у hashed-ассетов после билда сменились имена).
 async function pruneShell() {
 	const names = await caches.keys();
-	await Promise.all(names.filter((n) => n !== SHELL_CACHE).map((n) => caches.delete(n)));
+	await Promise.all(names.filter((n) => n !== SHELL_CACHE && n !== API_CACHE).map((n) => caches.delete(n)));
 	const cache = await caches.open(SHELL_CACHE);
 	const keys = await cache.keys();
 	await Promise.all(
@@ -98,8 +116,47 @@ self.addEventListener("fetch", (event) => {
 	if (req.method !== "GET") return;
 	const url = new URL(req.url);
 	if (url.origin !== self.location.origin) return;
-	// API и websocket не перехватываем: оффлайн-состояния рисует UI.
-	if (url.pathname.startsWith("/api/") || url.pathname === "/api" || url.pathname.startsWith("/ws")) return;
+	// Живость шлюза и всё, что не входит в список контента, не трогаем:
+	// оффлайн-состояние рисует UI, а /api/health обязан отвечать честно.
+	if (url.pathname.startsWith("/ws")) return;
+	if (url.pathname.startsWith("/api/") || url.pathname === "/api") {
+		if (!isApiCacheable(url)) return;
+		event.respondWith(
+			(async () => {
+				const cache = await caches.open(API_CACHE);
+				try {
+					const res = await fetch(req);
+					if (res.ok) {
+						const body = await res.clone().arrayBuffer();
+						if (body.byteLength <= API_MAX_BYTES) {
+							// Время снятия копии храним в самом ответе: клиент покажет
+							// «копия от HH:MM», а не выдаст старые данные за свежие.
+							const headers = new Headers(res.headers);
+							headers.set("X-Pocket-Cache-At", String(Date.now()));
+							await cache.put(req, new Response(body, { status: res.status, headers }));
+						} else {
+							await cache.delete(req);
+						}
+					}
+					return res;
+				} catch (e) {
+					const hit = await cache.match(req);
+					if (hit === undefined) {
+						return new Response(JSON.stringify({ error: "нет связи и нет кэша" }), {
+							status: 503,
+							headers: { "Content-Type": "application/json", "X-Pocket-Cache": "miss" },
+						});
+					}
+					const headers = new Headers(hit.headers);
+					headers.set("X-Pocket-Cache", "stale");
+					if (!headers.has("X-Pocket-Cache-At")) headers.set("X-Pocket-Cache-At", String(Date.now()));
+					const body = await hit.arrayBuffer();
+					return new Response(body, { status: 200, headers });
+				}
+			})(),
+		);
+		return;
+	}
 	// Всё остальное незнакомое — пропускаем, чтобы случайно не закэшировать.
 	const isHashed = HASHED_RE.test(url.pathname);
 	const isNavigation = req.mode === "navigate";

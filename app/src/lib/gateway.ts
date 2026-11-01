@@ -1,3 +1,4 @@
+import { cachedJsonMeta, type Loaded } from "./offline";
 import type { SessionEntry } from "@oh-my-pi/pi-wire";
 
 export interface HostInfo {
@@ -226,7 +227,10 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
 	const signal = typeof AbortSignal.any === "function" && init?.signal
 		? AbortSignal.any([init.signal, timeout])
 		: (init?.signal ?? timeout);
-	return fetch(url, { ...init, headers: authHeaders(init?.headers), signal });
+	// Данные шлюза кэширует только приложение (IndexedDB) и service worker —
+	// они знают время копии. Кэш браузера отдал бы старый ответ без отметки,
+	// и UI выдал бы его за свежий.
+	return fetch(url, { ...init, headers: authHeaders(init?.headers), signal, cache: "no-store" });
 }
 
 /**
@@ -259,6 +263,21 @@ async function fetchWithFailover(path: string, init?: RequestInit): Promise<Resp
 		}
 	}
 	throw lastErr ?? new GatewayError(0, "нет доступных адресов шлюза");
+}
+
+/**
+ * Ответ вместе с признаком копии: service worker отдаёт из своего кэша
+ * (`X-Pocket-Cache: stale`) и указывает время снятия — приложение обязано
+ * показать это время, а не выдавать старые данные за свежие.
+ */
+async function requestMeta<T>(path: string, init?: RequestInit): Promise<Loaded<T>> {
+	const res = await fetchWithFailover(path, init);
+	if (res.status === 401) throw new GatewayError(401, "Требуется токен доступа");
+	if (!res.ok) throw await errorFromResponse(res);
+	const value = (await res.json()) as T;
+	const at = Number(res.headers.get("X-Pocket-Cache-At"));
+	const stale = res.headers.get("X-Pocket-Cache") === "stale" && Number.isFinite(at) && at > 0;
+	return { value, staleAt: stale ? at : null };
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -414,9 +433,16 @@ export async function remapSession(instanceId: string, signal?: AbortSignal): Pr
 	}
 }
 
+/**
+ * Список сессий. Последняя удачная копия лежит в браузере (`lib/offline`):
+ * при живом шлюзе отдаётся свежий ответ, при упавшей сети — кэш с отметкой
+ * `pocket:stale` (оболочка показывает, от какого времени данные).
+ */
 export async function fetchSessions(signal?: AbortSignal): Promise<SessionSummary[]> {
-	const data = await request<{ sessions: SessionSummary[] }>("/api/sessions", { signal });
-	return Array.isArray(data.sessions) ? data.sessions : [];
+	const { value } = await cachedJsonMeta<{ sessions: SessionSummary[] }>("sessions", () =>
+		requestMeta<{ sessions: SessionSummary[] }>("/api/sessions", { signal }),
+	);
+	return Array.isArray(value.sessions) ? value.sessions : [];
 }
 
 /* ---- лента активности по сессиям ---- */
@@ -889,8 +915,12 @@ export async function fetchSessionTail(
 	if (target.path !== null && target.path !== undefined && target.path !== "") params.set("path", target.path);
 	else if (target.id !== null && target.id !== undefined && target.id !== "") params.set("id", target.id);
 	else return [];
-	const data = await request<{ entries?: unknown[] }>(`/api/sessions/tail?${params.toString()}`, { signal });
-	return Array.isArray(data.entries) ? (data.entries as SessionEntry[]) : [];
+	// Хвост транскрипта тоже переживает обрыв: ключ включает limit и адресата.
+	const key = `tail:${params.toString()}`;
+	const { value } = await cachedJsonMeta<{ entries?: unknown[] }>(key, () =>
+		requestMeta<{ entries?: unknown[] }>(`/api/sessions/tail?${params.toString()}`, { signal }),
+	);
+	return Array.isArray(value.entries) ? (value.entries as SessionEntry[]) : [];
 }
 
 export function fetchPromptDoc(id: string): Promise<PromptDocBody> {

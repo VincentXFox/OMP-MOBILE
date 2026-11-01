@@ -3,6 +3,7 @@ import { Check, Pencil, X } from "lucide-react";
 import type { SessionStatus, SessionSummary } from "../../lib/gateway";
 import { fetchSessions, renameSession, resumeSession } from "../../lib/gateway";
 import { basename, relTime } from "../../lib/format";
+import { staleMark } from "../../lib/offline";
 import "./sessions.css";
 
 const STATUS_LABEL: Record<SessionStatus, string> = {
@@ -63,12 +64,15 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 	const [renameDraft, setRenameDraft] = useState("");
 	const [renamingBusy, setRenamingBusy] = useState(false);
 	const [renameError, setRenameError] = useState<string | null>(null);
+	// Список показан из кэша: сеть упала, но последняя удачная копия осталась.
+	const [staleAt, setStaleAt] = useState<number | null>(null);
 
 	const reload = useCallback(async (): Promise<void> => {
 		try {
 			const list = await fetchSessions();
 			setSessions(list);
 			setError(null);
+			setStaleAt(staleMark("sessions"));
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		}
@@ -154,6 +158,16 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 
 	return (
 		<div className="sess-groups">
+			{staleAt !== null && (
+				<div className="sess-stale-note" role="status">
+					Нет связи — показана копия от{" "}
+					{new Date(staleAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+					{" · "}
+					<button type="button" className="pk-btn pk-btn--ghost" onClick={() => void reload()}>
+						Обновить
+					</button>
+				</div>
+			)}
 			{error != null && (
 				<div className="pk-form-error sess-resume-error" role="alert">
 					{error}{" "}
