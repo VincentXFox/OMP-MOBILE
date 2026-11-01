@@ -998,7 +998,11 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		};
 	}, [cacheId, snap.entries.length]);
 
-	const previewing = snap.entries.length === 0 && preview !== null;
+	// Пока снапшот не доехал целиком, показываем кэш. Иначе первая же порция
+	// кадров подменяла разговор более коротким куском — «история мигала».
+	const snapshotComplete = snap.phase === "live" && snap.entries.length > 0;
+	const previewing = !snapshotComplete && preview !== null;
+	const shownEntries = snapshotComplete ? snap.entries : (preview ?? snap.entries);
 
 	// Метки для замера «снимок сессии должен быть мгновенным»: видно, за сколько
 	// показался хвост и когда доехала полная история (performance.getEntriesByType("mark")).
@@ -1615,7 +1619,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 						</div>
 					)}
 					<Transcript
-						entries={snap.entries.length > 0 ? snap.entries : (preview ?? [])}
+						entries={shownEntries}
 						stream={snap.stream}
 						streamDone={snap.streamDone}
 						activeTools={snap.activeTools}
