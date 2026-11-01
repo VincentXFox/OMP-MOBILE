@@ -41,6 +41,8 @@ interface DetailSpec {
 interface Plan {
 	url: string;
 	token?: string;
+	/** Сырой заголовок Cookie: страницы за входом (деск Frappe) без него не открыть. */
+	cookies?: string;
 	routes: string[];
 	viewports: ViewportSpec[];
 	details?: DetailSpec[];
@@ -343,6 +345,10 @@ async function autoPlan(argv: string[]): Promise<Plan> {
 				return { name: width < 600 ? "phone" : "desktop", width: width ?? 390, height: height ?? 844 };
 			})
 		: DEFAULT_VIEWPORTS;
+	const schemesArg = argValue(argv, "--schemes");
+	const schemes: Scheme[] | undefined = schemesArg
+		? schemesArg.split(",").map(item => item.trim()).filter((item): item is Scheme => item === "dark" || item === "light")
+		: undefined;
 	const routesArg = argValue(argv, "--routes");
 	const routes = routesArg ? routesArg.split(",").map(item => item.trim()) : ["agents", "telegram", "projects", "activity", "memory", "settings", "goals"];
 	return {
@@ -351,6 +357,7 @@ async function autoPlan(argv: string[]): Promise<Plan> {
 		routes,
 		viewports,
 		details: AUTO_DETAILS,
+		schemes,
 	};
 }
 
@@ -389,6 +396,10 @@ async function main(argv: string[]): Promise<number> {
 		await cdp.send("Page.enable");
 		await cdp.send("Runtime.enable");
 		await cdp.send("Log.enable");
+		if (plan.cookies) {
+			await cdp.send("Network.enable");
+			await cdp.send("Network.setExtraHTTPHeaders", { headers: { Cookie: plan.cookies } });
+		}
 		cdp.on("Runtime.consoleAPICalled", params => {
 			const entry = params as { type?: string; args?: { value?: unknown }[] };
 			if (entry.type === "error") report.consoleErrors.push(String(entry.args?.[0]?.value ?? "").slice(0, 200));
@@ -401,6 +412,10 @@ async function main(argv: string[]): Promise<number> {
 			await new Promise(resolve => setTimeout(resolve, 1200));
 		}
 
+		const schemes: Scheme[] = plan.schemes ?? ["dark", "light"];
+		for (const scheme of schemes) {
+		// Тема — не вкус, а состояние: эмулируем системную настройку перед снимками.
+		await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
 		for (const viewport of plan.viewports) {
 			await cdp.send("Emulation.setDeviceMetricsOverride", {
 				width: viewport.width,
@@ -439,7 +454,7 @@ async function main(argv: string[]): Promise<number> {
 					const geometry = await runGeometry();
 					const shot = (await cdp.send("Page.captureScreenshot", { format: "png" })) as { data: string };
 					const bytes = Buffer.from(shot.data, "base64");
-					const name = `${route}-${viewport.name}-view${positionIndex}.png`;
+					const name = `${route}-${viewport.name}-${scheme}-view${positionIndex}.png`;
 					await writeFile(join(outDir, "shots", name), bytes);
 					report.shots.push({
 						name,
@@ -488,7 +503,7 @@ async function main(argv: string[]): Promise<number> {
 						const bytes = Buffer.from(shot.data, "base64");
 						if (bytes.length < 2_000) continue;
 						const safe = (detail.name ?? detail.selector).replace(/[^\w.-]+/g, "_").slice(0, 40);
-						const name = `${route}-${viewport.name}-${safe}-${index}.png`;
+						const name = `${route}-${viewport.name}-${scheme}-${safe}-${index}.png`;
 						await writeFile(join(outDir, "shots", name), bytes);
 						report.shots.push({
 							name,
@@ -505,6 +520,7 @@ async function main(argv: string[]): Promise<number> {
 					}
 				}
 			}
+		}
 		}
 		cdp.close();
 	} finally {

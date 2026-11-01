@@ -19,3 +19,9 @@ CHROME_PATH=/usr/bin/google-chrome bun unslop/scripts/story.mjs unslop-story/sto
 Проверка до/после — нашим движком: `bun ~/omp-mobile/bin/visual-gate.ts run --auto` (снимки экранов и деталей, разбор vision-моделью и геометрией, код 1 при дефектах).
 
 Атрибуция и текст лицензии лежат рядом со скилом: `~/skills/unslop/LICENSE`, `CITATION.cff`, `README.md`.
+
+## Доработки unslop для OMP
+
+- **Шаг 0 «Разведка платформы»** (`unslop/references/platforms.md`): определить платформу по файлам, найти точку расширения, зафиксировать `PLATFORM / EXTENSION POINT / ASSET PIPELINE / CACHE RESET`. Есть отдельный разбор Frappe/ERPNext: `apps/<custom_app>/hooks.py` (`app_include_css`, `web_include_css`, `website_context`), DocType `Website Theme`, фикстуры, `bench build` + `bench --site <site> clear-cache`; ядро `apps/frappe` не трогается.
+- **Светлая и тёмная тема** (`unslop/references/themes.md`): семантические токены вместо hex, отдельное значение акцента на тему, контраст 4.5:1 в обеих, тени только на светлой, проверка обеих тем в браузере.
+- `visual-gate` умеет снимать обе темы: `--schemes dark,light` (эмуляция `prefers-color-scheme`), имена снимков содержат тему.
