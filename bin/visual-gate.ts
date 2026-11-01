@@ -46,6 +46,8 @@ interface Plan {
 	routes: string[];
 	viewports: ViewportSpec[];
 	details?: DetailSpec[];
+	/** Каркас платформы (хлебные крошки, шапка) — вне зоны правки: не считаем его дефекты. */
+	exclude?: string[];
 }
 
 interface GeometryFinding {
@@ -72,6 +74,7 @@ interface Report {
 	url: string;
 	shots: Shot[];
 	defects: { shot: string; source: "geometry" | "vlm"; detail: string }[];
+	excluded?: number;
 	consoleErrors: string[];
 }
 
@@ -203,8 +206,12 @@ class Cdp {
 }
 
 /** В странице: то, что видно только глазами — меряем кодом. */
-const GEOMETRY_SCRIPT = `(() => {
+const geometryScript = (exclude: string[]): string => `(() => {
 	const vw = innerWidth, vh = innerHeight;
+	const EXCLUDE = ${JSON.stringify(exclude)};
+	const excludedNodes = new Set();
+	for (const selector of EXCLUDE) { try { document.querySelectorAll(selector).forEach(node => excludedNodes.add(node)); } catch (e) {} }
+	const isExcluded = (el) => { for (let node = el; node && node !== document.body; node = node.parentElement) if (excludedNodes.has(node)) return true; return false; };
 	const findings = [];
 	const desc = el => {
 		const cls = typeof el.className === "string" ? el.className.trim().split(/\\s+/).slice(0, 2).join(".") : "";
@@ -224,14 +231,14 @@ const GEOMETRY_SCRIPT = `(() => {
 	}
 	for (const el of Array.from(document.querySelectorAll("body *"))) {
 		const st = getComputedStyle(el);
-		if (st.display === "none" || st.visibility === "hidden" || st.position === "fixed" || inRail(el)) continue;
+		if (st.display === "none" || st.visibility === "hidden" || st.position === "fixed" || inRail(el) || isExcluded(el)) continue;
 		const r = el.getBoundingClientRect();
 		if (r.width === 0 || r.height === 0) continue;
 		if (r.right > vw + 2) findings.push({ kind: "clipped", detail: desc(el) + " выходит за экран на " + Math.round(r.right - vw) + "px" });
 	}
 	const interactive = Array.from(document.querySelectorAll("button, a, input, select, textarea, [role=button]")).filter(el => {
 		const st = getComputedStyle(el);
-		return st.display !== "none" && st.visibility !== "hidden" && el.offsetParent !== null;
+		return st.display !== "none" && st.visibility !== "hidden" && el.offsetParent !== null && !isExcluded(el);
 	});
 	for (const el of interactive) {
 		const r = el.getBoundingClientRect();
@@ -250,7 +257,7 @@ const GEOMETRY_SCRIPT = `(() => {
 		}
 		if (r.height < 28 || r.width < 24) findings.push({ kind: "tiny", detail: desc(el) + " цель " + Math.round(r.width) + "×" + Math.round(r.height) });
 	}
-	return JSON.stringify(findings.slice(0, 12));
+	return JSON.stringify({ findings: findings.slice(0, 12), excluded: excludedNodes.size });
 })()`;
 
 const VLM_PROMPT = `Ты придирчивый UI-ревьюер. На снимке окна мобильного веб-приложения (это вид при прокрутке).
@@ -360,6 +367,7 @@ async function autoPlan(argv: string[]): Promise<Plan> {
 		viewports,
 		details: AUTO_DETAILS,
 		schemes,
+		exclude: (argValue(argv, "--exclude") ?? "").split(",").map(item => item.trim()).filter(Boolean),
 	};
 }
 
@@ -377,6 +385,7 @@ async function main(argv: string[]): Promise<number> {
 				token: argValue(argv, "--token") ?? undefined,
 				routes: (argValue(argv, "--routes") ?? "agents").split(",").map(item => item.trim()),
 				viewports: DEFAULT_VIEWPORTS,
+				exclude: (argValue(argv, "--exclude") ?? "").split(",").map(item => item.trim()).filter(Boolean),
 			};
 	const outDir = outArg ?? join(process.cwd(), ".omp", "visual", `run-${Date.now()}`);
 	await mkdir(join(outDir, "shots"), { recursive: true });
@@ -389,7 +398,7 @@ async function main(argv: string[]): Promise<number> {
 		["--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, "about:blank"],
 		{ stdio: "ignore" },
 	);
-	const report: Report = { startedAt: new Date().toISOString(), finishedAt: "", url: plan.url, shots: [], defects: [], consoleErrors: [] };
+	const report: Report = { startedAt: new Date().toISOString(), finishedAt: "", url: plan.url, shots: [], defects: [], consoleErrors: [], excluded: 0 };
 	try {
 		await waitForDevtools(port);
 		const target = await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT" }).then(response => response.json() as Promise<{ webSocketDebuggerUrl: string }>);
@@ -431,13 +440,14 @@ async function main(argv: string[]): Promise<number> {
 				await new Promise(resolve => setTimeout(resolve, 1500));
 
 				/** Замеры в текущем положении прокрутки. */
-				const runGeometry = async (): Promise<GeometryFinding[]> => {
+				const runGeometry = async (): Promise<{ findings: GeometryFinding[]; excluded: number }> => {
 					const raw = (await cdp.send<{ result?: { value?: string } }>("Runtime.evaluate", {
-						expression: GEOMETRY_SCRIPT,
+						expression: geometryScript(plan.exclude ?? []),
 						returnByValue: true,
 					})) as { result?: { value?: string } };
-					return JSON.parse(raw.result?.value ?? "[]") as GeometryFinding[];
-				};
+					const parsed = JSON.parse(raw.result?.value ?? "{}") as { findings?: GeometryFinding[]; excluded?: number };
+					return { findings: parsed.findings ?? [], excluded: parsed.excluded ?? 0 };
+					};
 
 				// Общий план — тремя реальными видами (верх/середина/низ), как их видит
 				// человек при прокрутке. Фиксированные бары остаются на месте и не
@@ -453,7 +463,9 @@ async function main(argv: string[]): Promise<number> {
 				for (const [positionIndex, position] of scrollPositions.entries()) {
 					await cdp.send("Runtime.evaluate", { expression: `window.scrollTo(0, ${position})` });
 					await new Promise(resolve => setTimeout(resolve, 300));
-					const geometry = await runGeometry();
+					const measured = await runGeometry();
+					const geometry = measured.findings;
+					report.excluded = Math.max(report.excluded ?? 0, measured.excluded);
 					const shot = (await cdp.send("Page.captureScreenshot", { format: "png" })) as { data: string };
 					const bytes = Buffer.from(shot.data, "base64");
 					const name = `${route}-${viewport.name}-${scheme}-view${positionIndex}.png`;
@@ -550,7 +562,7 @@ async function main(argv: string[]): Promise<number> {
 		...report.defects.map(item => `- ${item.shot}: ${item.detail}`),
 	].join("\n");
 	await writeFile(join(outDir, "report.md"), `${md}\n`, "utf8");
-	console.log(`снимков: ${report.shots.length}, дефектов: ${report.defects.length} → ${outDir}`);
+	console.log(`снимков: ${report.shots.length}, дефектов в зоне правки: ${report.defects.length}${report.excluded ? `, исключено каркаса: ${report.excluded}` : ""} → ${outDir}`);
 	for (const item of report.defects.slice(0, 12)) console.log(`  ✗ ${item.shot}: ${item.detail.slice(0, 160)}`);
 	return report.defects.length === 0 ? 0 : 1;
 }
