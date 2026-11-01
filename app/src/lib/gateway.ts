@@ -796,7 +796,15 @@ export async function graphRebuild(): Promise<GraphRebuildResult> {
 	};
 }
 
+/** Ссылки на комнаты, выданные в этой сессии страницы: повторное открытие
+ *  агента не должно ждать шлюз и spawn `omp collab link`. */
+const mintedLinks = new Map<string, { url: string; at: number }>();
+const MINT_TTL_MS = 10 * 60_000;
+
 export async function mintLink(id: string, view: boolean): Promise<string> {
+	const key = `${id}:${view}`;
+	const known = mintedLinks.get(key);
+	if (known !== undefined && Date.now() - known.at < MINT_TTL_MS) return known.url;
 	const data = await request<{ url: string }>(`/api/hosts/${encodeURIComponent(id)}/link`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },

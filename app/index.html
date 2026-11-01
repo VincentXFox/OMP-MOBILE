@@ -21,7 +21,33 @@
 		<link rel="apple-touch-icon" sizes="180x180" href="./public/favicon-180x180.png" />
 	</head>
 	<body>
-		<div id="root"></div>
+		<div id="root">
+			<!-- Статичная оболочка: видна с первого кадра, до загрузки React.
+			     Заменяется приложением при монтировании (#root очищается). -->
+			<style>
+				#root:empty { display: none; }
+				.boot { display: flex; min-height: 100vh; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #101114; color: #e8e9ec; }
+				@media (prefers-color-scheme: light) { .boot { background: #f7f8fa; color: #1b1d21; } .boot-card { background: #fff; border-color: #e3e6e8; } .boot-line { background: #e6e8ec; } }
+				html[data-theme="light"] .boot { background: #f7f8fa; color: #1b1d21; }
+				html[data-theme="light"] .boot-card { background: #fff; border-color: #e3e6e8; }
+				html[data-theme="light"] .boot-line { background: #e6e8ec; }
+				.boot-header { padding: 18px 16px 10px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+				.boot-list { display: flex; flex-direction: column; gap: 10px; padding: 8px 16px 24px; }
+				.boot-card { height: 76px; border-radius: 14px; border: 1px solid #23252b; background: #17181c; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 0 14px; }
+				.boot-line { height: 12px; border-radius: 6px; background: #23252b; }
+				.boot-line--short { width: 45%; }
+				.boot-nav { margin-top: auto; display: flex; gap: 18px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid #23252b; opacity: .45; font-size: 11px; }
+			</style>
+			<div class="boot" aria-hidden="true">
+				<div class="boot-header">OMP Pocket</div>
+				<div class="boot-list">
+					<div class="boot-card"><div class="boot-line"></div><div class="boot-line boot-line--short"></div></div>
+					<div class="boot-card"><div class="boot-line"></div><div class="boot-line boot-line--short"></div></div>
+					<div class="boot-card"><div class="boot-line"></div><div class="boot-line boot-line--short"></div></div>
+				</div>
+				<div class="boot-nav"><span>Агенты</span><span>Сессии</span><span>Проекты</span><span>Активность</span><span>Память</span></div>
+			</div>
+		</div>
 		<script>
 			(function () {
 				try {

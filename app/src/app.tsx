@@ -1,19 +1,19 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Bot, Folder, Settings, Activity, Brain, Send, UsersRound, Target } from "lucide-react";
 import { AgentsScreen } from "./components/agents/AgentsScreen";
-import { ActivityScreen } from "./components/activity/ActivityScreen";
+const ActivityScreen = lazy(() => import("./components/activity/ActivityScreen").then(m => ({ default: m.ActivityScreen })));
 // Тяжёлые экраны грузятся отдельными чанками: первый экран не должен ждать
 // KaTeX, граф памяти и рендереры инструментов.
 const MemoryScreen = lazy(() => import("./components/memory/MemoryScreen").then(m => ({ default: m.MemoryScreen })));
-import { GoalsScreen } from "./components/goals/GoalsScreen";
-import { ProjectsScreen } from "./components/projects/ProjectsScreen";
+const GoalsScreen = lazy(() => import("./components/goals/GoalsScreen").then(m => ({ default: m.GoalsScreen })));
+const ProjectsScreen = lazy(() => import("./components/projects/ProjectsScreen").then(m => ({ default: m.ProjectsScreen })));
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
 const SettingsScreen = lazy(() => import("./components/settings/SettingsScreen").then(m => ({ default: m.SettingsScreen })));
 const SessionScreen = lazy(() => import("./components/session/SessionScreen").then(m => ({ default: m.SessionScreen })));
 import { cacheJson, readCached } from "./lib/offline";
 const SuperScreen = lazy(() => import("./components/super/SuperScreen").then(m => ({ default: m.SuperScreen })));
 const TelegramScreen = lazy(() => import("./components/telegram/TelegramScreen").then(m => ({ default: m.TelegramScreen })));
-import { UpdatesScreen } from "./components/updates/UpdatesScreen";
+const UpdatesScreen = lazy(() => import("./components/updates/UpdatesScreen").then(m => ({ default: m.UpdatesScreen })));
 import type { ActivityRow, HostInfo } from "./lib/gateway";
 import { fetchHosts, fetchSessions, GatewayError, getActiveBase, mintLink, remapSession, resumeSession, setToken } from "./lib/gateway";
 import { markOpened } from "./lib/agent-prefs";

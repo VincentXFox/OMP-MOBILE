@@ -101,6 +101,10 @@ const MIME_BY_EXT: Record<string, string> = {
   ".webp": "image/webp",
 };
 
+/** Выданные ссылки на комнаты: instanceId → ссылка. Агент живёт дольше TTL. */
+const LINK_TTL_MS = 10 * 60_000;
+const linkCache = new Map<string, { url: string; at: number }>();
+
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -705,9 +709,18 @@ async function route(req: Request, url: URL): Promise<Response> {
   const linkMatch = /^\/api\/hosts\/([^/]+)\/link$/.exec(url.pathname);
   if (linkMatch && req.method === "POST") {
     const body = (await readJson<{ view?: boolean }>(req)) ?? {};
-    const result = await mintLink(decodeURIComponent(linkMatch[1]), body.view === true);
+    const id = decodeURIComponent(linkMatch[1]);
+    const view = body.view === true;
+    // Ссылка на комнату живёт, пока живёт агент: повторная выдача — это спавн
+    // `omp collab link` (300–650 мс), из-за которого открытие чата ждало.
+    const cached = linkCache.get(`${id}:${view}`);
+    if (cached !== undefined && Date.now() - cached.at < LINK_TTL_MS) {
+      return json(200, { url: cached.url, cached: true });
+    }
+    const result = await mintLink(id, view);
     if (result.stale) return json(409, { error: "stale_generation" });
     if (result.notFound) return json(404, { error: "host not found" });
+    linkCache.set(`${id}:${view}`, { url: result.url, at: Date.now() });
     return json(200, { url: result.url });
   }
 
