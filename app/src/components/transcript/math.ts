@@ -5,7 +5,6 @@ import {
 	mathSpanInContext,
 	mathStartIndex,
 } from "@oh-my-pi/pi-utils/math-delimiters";
-import { renderToString } from "katex";
 import { escapeHtml } from "../../lib/format";
 
 /**
@@ -17,28 +16,21 @@ function typesettable(span: MathSpan): boolean {
 	return !span.body.includes("`");
 }
 
+/**
+ * Разметка формулы без KaTeX: исходник в `data-tex`, а сам KaTeX грузится
+ * отдельным чанком и набирает формулу, когда она реально встретилась
+ * (`math-typeset.ts`). Иначе его 300+ КБ ехали при каждом открытии чата,
+ * хотя формулы есть далеко не в каждой сессии.
+ */
 function renderMath(token: Tokens.Generic): string | false {
 	if (token.type !== "math" || typeof token.text !== "string" || typeof token.display !== "boolean") return false;
-	try {
-		const math = renderToString(token.text, {
-			displayMode: token.display,
-			// KaTeX's HTML output needs katex.min.css, which bundles to ~940 KB
-			// gzipped here because Bun inlines its 60 @font-face sources.
-			output: "mathml",
-			throwOnError: false,
-			// `trust: false` refuses \href, \htmlClass, \includegraphics.
-			strict: false,
-			trust: false,
-		});
-		// A display equation gets a wrapper to scroll in (`.tr-math`), because
-		// scrolling the `math` element itself traps a few pixels of vertical scroll:
-		// its ink — fraction bars, radical overlines — overflows its own box.
-		return token.display ? `<span class="tr-math">${math}</span>` : math;
-	} catch {
-		// KaTeX threw outside its own error handling (e.g. macro expansion limit):
-		// show the source rather than let one span blank the whole message.
-		return escapeHtml(typeof token.raw === "string" ? token.raw : token.text);
-	}
+	const source = escapeHtml(token.text);
+	const attrs = `data-tex="${source}" data-display="${token.display ? "1" : "0"}"`;
+	// Класс `.tr-math` даёт горизонтальную прокрутку длинной формуле: у самого
+	// math-элемента чернила (дроби, радикалы) выходят за его рамку.
+	return token.display
+		? `<span class="tr-math tr-math-pending" ${attrs}>${source}</span>`
+		: `<span class="tr-math-pending" ${attrs}>${source}</span>`;
 }
 
 /**

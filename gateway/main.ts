@@ -574,7 +574,15 @@ async function route(req: Request, url: URL): Promise<Response> {
         desk: desk === null ? null : { slug: desk.slug, role: desk.role, dir: desk.dir },
       };
     });
-    return json(200, { ...out, hosts });
+    // Дельта по версии: реестр опрашивается каждые 5 с, и без изменений
+    // отдаём 30 КБ впустую — на мобильной сети это лишний трафик и батарея.
+    const body = JSON.stringify({ ...out, hosts });
+    const version = Bun.hash(body).toString(36);
+    if (url.searchParams.get("since") === version) return json(200, { version, unchanged: true });
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": "application/json", "cache-control": "no-store", "x-pocket-hosts-version": version },
+    });
   }
 
   // Штат: кто за что отвечает. Заголовки участников берём из реестра хостов,

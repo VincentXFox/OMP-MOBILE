@@ -307,6 +307,25 @@ export async function fetchHosts(signal?: AbortSignal): Promise<HostInfo[]> {
 	return Array.isArray(data.hosts) ? data.hosts : [];
 }
 
+/**
+ * Опрос реестра дельтой: `hosts === null` значит «с прошлого раза не изменилось»,
+ * иначе приходит новая версия. Реестр опрашивается каждые 5 с — без дельты это
+ * 30 КБ каждый раз даже когда ничего не произошло.
+ */
+export async function fetchHostsDelta(
+	since: string | null,
+	signal?: AbortSignal,
+): Promise<{ hosts: HostInfo[] | null; version: string | null }> {
+	const params = since === null ? "" : `?since=${encodeURIComponent(since)}`;
+	const res = await fetchWithFailover(`/api/hosts${params}`, { signal });
+	if (res.status === 401) throw new GatewayError(401, "Требуется токен доступа");
+	if (!res.ok) throw await errorFromResponse(res);
+	const version = res.headers.get("X-Pocket-Hosts-Version");
+	const data = (await res.json()) as { hosts?: HostInfo[]; unchanged?: boolean };
+	if (data.unchanged === true) return { hosts: null, version: version ?? since };
+	return { hosts: Array.isArray(data.hosts) ? data.hosts : [], version };
+}
+
 /** Переименовать агента (видно в списках приложения). */
 export function renameAgent(instanceId: string, name: string): Promise<void> {
 	return request<void>(`/api/agents/${encodeURIComponent(instanceId)}/rename`, {

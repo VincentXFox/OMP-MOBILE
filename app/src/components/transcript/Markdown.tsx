@@ -2,9 +2,10 @@ import type { Token, Tokens } from "@oh-my-pi/pi-utils/marked";
 import { Marked, Parser } from "@oh-my-pi/pi-utils/marked";
 import { listMayContinueAt } from "@oh-my-pi/pi-utils/marked-list";
 import type { ReactNode } from "react";
-import { memo, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { escapeHtml } from "../../lib/format";
 import { mathExtension } from "./math";
+import { typesetPending } from "./math-typeset";
 
 function unescapeHtml(raw: string): string {
 	const parseCodePoint = (value: number): string => {
@@ -154,7 +155,12 @@ function handleCodeCopy(container: HTMLElement, event: Event): void {
 
 export const Markdown = memo(function Markdown({ text }: { text: string }): ReactNode {
 	const html = useMemo(() => renderMarkdown(text), [text]);
-	return <div className="tr-md" dangerouslySetInnerHTML={{ __html: html }} onClick={e => handleCodeCopy(e.currentTarget, e.nativeEvent)} />;
+	const ref = useRef<HTMLDivElement | null>(null);
+	// Формулы набираются после появления в DOM и только если они есть.
+	useEffect(() => {
+		void typesetPending(ref.current);
+	}, [html]);
+	return <div ref={ref} className="tr-md" dangerouslySetInnerHTML={{ __html: html }} onClick={e => handleCodeCopy(e.currentTarget, e.nativeEvent)} />;
 });
 
 /**
@@ -266,5 +272,9 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({ text }: { tex
 		prefixRef.current = rendered.prefix;
 		return rendered.html;
 	}, [text]);
-	return <div className="tr-md" dangerouslySetInnerHTML={{ __html: html }} onClick={e => handleCodeCopy(e.currentTarget, e.nativeEvent)} />;
+	const ref = useRef<HTMLDivElement | null>(null);
+	useEffect(() => {
+		void typesetPending(ref.current);
+	}, [html]);
+	return <div ref={ref} className="tr-md" dangerouslySetInnerHTML={{ __html: html }} onClick={e => handleCodeCopy(e.currentTarget, e.nativeEvent)} />;
 });

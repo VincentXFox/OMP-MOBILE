@@ -1012,14 +1012,14 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		if (snap.phase === "live" && snap.entries.length > 0) performance.mark("pocket:chat:snapshot");
 	}, [snap.phase, snap.entries.length]);
 
-	// Снапшот доехал — кладём его в браузерную копию (последние 400 записей).
+	// Снапшот доехал — кладём его в браузерную копию (последние 1200 записей).
 	const lastSnapshotWrite = useRef(0);
 	useEffect(() => {
 		if (snap.phase !== "live" || cacheId === null || snap.entries.length === 0) return;
 		const now = Date.now();
 		if (now - lastSnapshotWrite.current < 10_000) return;
 		lastSnapshotWrite.current = now;
-		void cacheJson(`snapshot:${cacheId}`, snap.entries.slice(-400));
+		void cacheJson(`snapshot:${cacheId}`, snap.entries.slice(-1200));
 	}, [snap.phase, cacheId, snap.entries]);
 
 	// Автопереподключение: агент умер/перезапустился (сбой питания, апдейт) —

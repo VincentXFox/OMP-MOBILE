@@ -11,12 +11,12 @@ import { SessionsScreen } from "./components/sessions/SessionsScreen";
 const SettingsScreen = lazy(() => import("./components/settings/SettingsScreen").then(m => ({ default: m.SettingsScreen })));
 const SessionScreen = lazy(() => import("./components/session/SessionScreen").then(m => ({ default: m.SessionScreen })));
 import { cacheJson, readCached } from "./lib/offline";
-import { writeTail } from "./lib/tail-cache";
+import { lastOpenedSessionId, writeTail } from "./lib/tail-cache";
 const SuperScreen = lazy(() => import("./components/super/SuperScreen").then(m => ({ default: m.SuperScreen })));
 const TelegramScreen = lazy(() => import("./components/telegram/TelegramScreen").then(m => ({ default: m.TelegramScreen })));
 const UpdatesScreen = lazy(() => import("./components/updates/UpdatesScreen").then(m => ({ default: m.UpdatesScreen })));
 import type { ActivityRow, HostInfo } from "./lib/gateway";
-import { fetchHosts, fetchSessions, fetchSessionTail, GatewayError, getActiveBase, mintLink, remapSession, resumeSession, setToken } from "./lib/gateway";
+import { fetchHosts, fetchHostsDelta, fetchSessions, fetchSessionTail, GatewayError, getActiveBase, mintLink, remapSession, resumeSession, setToken } from "./lib/gateway";
 import { markOpened } from "./lib/agent-prefs";
 import { GuestClient } from "./lib/client";
 import { rebaseCollabLink } from "./lib/link";
@@ -100,6 +100,8 @@ export function App(): ReactNode {
 	);
 	// Немедленный опрос реестра из UI (кнопка «Повторить») — без ожидания 5 с.
 	const pollRef = useRef<() => void>(() => {});
+	/** Версия реестра для дельты: приходит заголовком и в теле ответа. */
+	const hostsVersion = useRef<string | null>(null);
 	/** Прогрев хвостов первых агентов в простое: 4 запроса по 40 записей. */
 	const warmedRef = useRef<Set<string>>(new Set());
 	const warmTails = useCallback((list: HostInfo[]) => {
@@ -122,6 +124,23 @@ export function App(): ReactNode {
 	// из IndexedDB, а сеть догружает свежую в фоне. Экран получает готовое.
 	useEffect(() => {
 		void fetchSessions(undefined, () => {});
+	}, []);
+
+	// «Продолжить вчерашнее»: хвост последней открытой сессии подтягиваем сразу,
+	// не дожидаясь реестра агентов — вход в неё будет мгновенным.
+	useEffect(() => {
+		const last = lastOpenedSessionId();
+		if (last === null) return;
+		const idle = typeof requestIdleCallback === "function" ? requestIdleCallback : (cb: () => void) => window.setTimeout(cb, 300);
+		idle(() => {
+			void fetchSessionTail({ id: last }, 120)
+				.then(entries => {
+					if (entries.length > 0) writeTail(last, entries);
+				})
+				.catch(() => {
+					// прогрев не обязателен
+				});
+		});
 	}, []);
 	// Screens that must survive tab switches stay mounted (hidden) once visited.
 	const [keepAliveVisited, setKeepAliveVisited] = useState<Set<string>>(
@@ -226,11 +245,14 @@ export function App(): ReactNode {
 				return;
 			}
 			try {
-				const list = await fetchHosts();
+				const delta = await fetchHostsDelta(hostsVersion.current);
 				if (!alive) return;
+				hostsVersion.current = delta.version;
+				setNetState("online");
+				if (delta.hosts === null) return; // реестр не менялся: только версия
+				const list = delta.hosts;
 				setHosts(list);
 				setHostsError(null);
-				setNetState("online");
 				// победил другой кандидат — перечитываем реестр немедленно, не ждём 5 с
 				const active = getActiveBase();
 				if (active !== lastActive) {

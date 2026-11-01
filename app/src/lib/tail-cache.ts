@@ -53,6 +53,15 @@ function writeOrder(store: Storage, order: readonly string[]): void {
 	}
 }
 
+/** Последняя открытая сессия: её хвост греем сразу при старте приложения. */
+export function lastOpenedSessionId(): string | null {
+	const store = storage();
+	if (store === null) return null;
+	const order = readOrder(store);
+	const last = order[order.length - 1];
+	return last === undefined || last === "" ? null : last;
+}
+
 /** Прочитать хвост: null означает «кеша нет», а не ошибку. */
 export function readTail(sessionId: string | null): SessionEntry[] | null {
 	if (sessionId === null || sessionId === "") return null;
