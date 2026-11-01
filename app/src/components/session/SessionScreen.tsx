@@ -33,7 +33,7 @@ import type { GuestClient, GuestSnapshot, Notice } from "../../lib/client";
 import { agentName } from "../../lib/agent-name";
 import type { AgentChatSettings, HostInfo, ProjectFileEntry } from "../../lib/gateway";
 import { readTail, writeTail } from "../../lib/tail-cache";
-import { queuePrompt, queuedCount as readOutboxCount, takeQueuedPrompts } from "../../lib/offline";
+import { cacheJson, queuePrompt, queuedCount as readOutboxCount, readCached, takeQueuedPrompts } from "../../lib/offline";
 import { fetchSessionTail, applyAgentSettings, fetchAgentSettings, fetchHosts, fetchModels, getTerminal, listProjectFiles, readProjectFile, renameAgent, stopAgent, uploadAttachment } from "../../lib/gateway";
 import { basename, pluralRu, relTime } from "../../lib/format";
 import { todoBoardFromEntries } from "../../lib/todo-board";
@@ -951,9 +951,9 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		if (sessionFile === null && cacheId === null) return;
 		let alive = true;
 		const controller = new AbortController();
-		// 40 записей: хвост должен приехать одним коротким ответом даже на мобильном
-		// канале (80 записей с крупными tool-результатами — это уже ~250 КБ).
-		fetchSessionTail({ path: sessionFile, id: cacheId }, 40, controller.signal)
+		// 120 записей: этого хватает, чтобы читать и листать разговор, пока полный
+		// снапшот едет через релей секундами. Ответ сжат на шлюзе (gzip).
+		fetchSessionTail({ path: sessionFile, id: cacheId }, 120, controller.signal)
 			.then(entries => {
 				if (!alive || entries.length === 0) return;
 				setPreview(entries);
@@ -981,7 +981,46 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		writeTail(cacheId, snap.entries);
 	}, [cacheId, snap.entries]);
 
+	// Копия последнего снапшота в IndexedDB: повторное открытие показывает
+	// разговор сразу, не дожидаясь кадров через релей (у больших сессий — секунды).
+	useEffect(() => {
+		if (snap.entries.length > 0 || cacheId === null) return;
+		let alive = true;
+		void readCached<readonly SessionEntry[]>(`snapshot:${cacheId}`).then(cached => {
+			if (!alive || cached === null) return;
+			const entries = cached.body;
+			if (!Array.isArray(entries) || entries.length === 0) return;
+			setPreview(previous => (previous !== null && previous.length >= entries.length ? previous : entries));
+			setPreviewSource("cache");
+		});
+		return () => {
+			alive = false;
+		};
+	}, [cacheId, snap.entries.length]);
+
 	const previewing = snap.entries.length === 0 && preview !== null;
+
+	// Метки для замера «снимок сессии должен быть мгновенным»: видно, за сколько
+	// показался хвост и когда доехала полная история (performance.getEntriesByType("mark")).
+	useEffect(() => {
+		performance.mark("pocket:chat:open");
+	}, []);
+	useEffect(() => {
+		if (preview !== null && snap.entries.length === 0) performance.mark("pocket:chat:preview");
+	}, [preview, snap.entries.length]);
+	useEffect(() => {
+		if (snap.phase === "live" && snap.entries.length > 0) performance.mark("pocket:chat:snapshot");
+	}, [snap.phase, snap.entries.length]);
+
+	// Снапшот доехал — кладём его в браузерную копию (последние 400 записей).
+	const lastSnapshotWrite = useRef(0);
+	useEffect(() => {
+		if (snap.phase !== "live" || cacheId === null || snap.entries.length === 0) return;
+		const now = Date.now();
+		if (now - lastSnapshotWrite.current < 10_000) return;
+		lastSnapshotWrite.current = now;
+		void cacheJson(`snapshot:${cacheId}`, snap.entries.slice(-400));
+	}, [snap.phase, cacheId, snap.entries]);
 
 	// Автопереподключение: агент умер/перезапустился (сбой питания, апдейт) —
 	// ищем живой хост с той же сессией и молча открываем его, чат сам вернётся.
@@ -1571,8 +1610,8 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 					{previewing && (
 						<div className="ss-preview-note" role="status">
 							{previewSource === "cache"
-								? "Последние сообщения из кеша · обновляю…"
-								: "Показаны последние сообщения · догружаю полную историю…"}
+								? "Последние сообщения из кеша · история догружается"
+								: "Показаны последние сообщения · история догружается"}
 						</div>
 					)}
 					<Transcript
@@ -1598,7 +1637,7 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 					</div>
 				)}
 				{snap.phase === "connecting" && <div className="ss-phase-banner">Подключение…</div>}
-				{snap.phase === "waiting" && (
+				{snap.phase === "waiting" && !previewing && (
 					<div className="ss-phase-banner">
 						{snap.loading !== null
 							? `Загрузка сессии: ${snap.loading.received} / ${snap.loading.total}`

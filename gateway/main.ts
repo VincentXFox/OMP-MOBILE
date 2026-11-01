@@ -2,6 +2,8 @@ import { extname, join, normalize } from "node:path";
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { loadConfig } from "./config.ts";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { listHosts, mintLink } from "./hosts.ts";
 import type { OmpHostsOutput } from "./hosts.ts";
 import { resumeAgent, startAgent, stopAgent } from "./agents.ts";
@@ -1318,6 +1320,8 @@ function withCors(req: Request, res: Response): Response {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
+const gzipAsync = promisify(gzip);
+
 /** Порог сжатия: мелочь гонять через gzip дороже, чем отдать как есть. */
 const GZIP_MIN_BYTES = 1024;
 
@@ -1328,6 +1332,8 @@ const GZIP_MIN_BYTES = 1024;
  */
 async function withCompression(req: Request, res: Response): Promise<Response> {
   const type = res.headers.get("content-type") ?? "";
+  // SSE и произвольный поток не буферизуем: сжатие убило бы доставку по частям.
+  if (type.startsWith("text/event-stream")) return res;
   const compressible = type.startsWith("application/json") || type.startsWith("text/") || type.startsWith("application/javascript");
   if (!compressible || res.body === null) return res;
   if (!(req.headers.get("accept-encoding") ?? "").includes("gzip")) return res;
@@ -1336,7 +1342,9 @@ async function withCompression(req: Request, res: Response): Promise<Response> {
   if (bytes.byteLength < GZIP_MIN_BYTES) {
     return new Response(bytes, { status: res.status, statusText: res.statusText, headers: res.headers });
   }
-  const packed = Bun.gzipSync(bytes);
+  // Асинхронный gzip из node:zlib: синхронный блокировал бы event loop, а через
+  // него же идут кадры коллаб-снапшота — как раз то, что открывается в чате.
+  const packed = await gzipAsync(bytes);
   const headers = new Headers(res.headers);
   headers.set("content-encoding", "gzip");
   headers.set("vary", "accept-encoding");

@@ -16,8 +16,10 @@ import type { SessionEntry } from "@oh-my-pi/pi-wire";
 
 const KEY_PREFIX = "ompPocket.tail.v1.";
 const ORDER_KEY = "ompPocket.tail.v1.order";
-const MAX_SESSIONS = 6;
-const MAX_BYTES = 300_000;
+const MAX_SESSIONS = 12;
+/** Сколько записей храним на сессию: этого хватает, чтобы открыть чат и читать. */
+const MAX_ENTRIES = 160;
+const MAX_BYTES = 1_200_000;
 
 interface CachedTail {
 	at: number;
@@ -81,7 +83,7 @@ export function writeTail(sessionId: string | null, entries: readonly SessionEnt
 	if (store === null) return;
 	let payload: string;
 	try {
-		payload = JSON.stringify({ at: Date.now(), entries: entries.slice(-40) } satisfies CachedTail);
+		payload = JSON.stringify({ at: Date.now(), entries: entries.slice(-MAX_ENTRIES) } satisfies CachedTail);
 	} catch {
 		return;
 	}

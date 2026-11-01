@@ -11,11 +11,12 @@ import { SessionsScreen } from "./components/sessions/SessionsScreen";
 const SettingsScreen = lazy(() => import("./components/settings/SettingsScreen").then(m => ({ default: m.SettingsScreen })));
 const SessionScreen = lazy(() => import("./components/session/SessionScreen").then(m => ({ default: m.SessionScreen })));
 import { cacheJson, readCached } from "./lib/offline";
+import { writeTail } from "./lib/tail-cache";
 const SuperScreen = lazy(() => import("./components/super/SuperScreen").then(m => ({ default: m.SuperScreen })));
 const TelegramScreen = lazy(() => import("./components/telegram/TelegramScreen").then(m => ({ default: m.TelegramScreen })));
 const UpdatesScreen = lazy(() => import("./components/updates/UpdatesScreen").then(m => ({ default: m.UpdatesScreen })));
 import type { ActivityRow, HostInfo } from "./lib/gateway";
-import { fetchHosts, fetchSessions, GatewayError, getActiveBase, mintLink, remapSession, resumeSession, setToken } from "./lib/gateway";
+import { fetchHosts, fetchSessions, fetchSessionTail, GatewayError, getActiveBase, mintLink, remapSession, resumeSession, setToken } from "./lib/gateway";
 import { markOpened } from "./lib/agent-prefs";
 import { GuestClient } from "./lib/client";
 import { rebaseCollabLink } from "./lib/link";
@@ -99,6 +100,24 @@ export function App(): ReactNode {
 	);
 	// Немедленный опрос реестра из UI (кнопка «Повторить») — без ожидания 5 с.
 	const pollRef = useRef<() => void>(() => {});
+	/** Прогрев хвостов первых агентов в простое: 4 запроса по 40 записей. */
+	const warmedRef = useRef<Set<string>>(new Set());
+	const warmTails = useCallback((list: HostInfo[]) => {
+		const idle = typeof requestIdleCallback === "function" ? requestIdleCallback : (cb: () => void) => window.setTimeout(cb, 400);
+		idle(() => {
+			for (const host of list.slice(0, 4)) {
+				if (typeof host.sessionId !== "string" || warmedRef.current.has(host.sessionId)) continue;
+				warmedRef.current.add(host.sessionId);
+				void fetchSessionTail({ id: host.sessionId }, 120)
+					.then(entries => {
+						if (entries.length > 0) writeTail(host.sessionId, entries);
+					})
+					.catch(() => {
+						// прогрев не обязателен: открытие просто пойдёт обычным путём
+					});
+			}
+		});
+	}, []);
 	// Прогрев данных на старте: пока React монтируется, копия сессий уже читается
 	// из IndexedDB, а сеть догружает свежую в фоне. Экран получает готовое.
 	useEffect(() => {
