@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Pencil, X } from "lucide-react";
 import type { SessionStatus, SessionSummary } from "../../lib/gateway";
 import { fetchSessions, renameSession, resumeSession } from "../../lib/gateway";
@@ -16,6 +16,8 @@ const STATUS_LABEL: Record<SessionStatus, string> = {
 };
 
 const DEAD: ReadonlySet<SessionStatus> = new Set(["interrupted", "aborted", "error"]);
+/** Сколько карточек рисуем за раз; остальное — по мере прокрутки. */
+const STEP_ROWS = 40;
 
 interface SessionGroup {
 	key: string;
@@ -66,6 +68,10 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 	const [renameError, setRenameError] = useState<string | null>(null);
 	// Список показан из кэша: сеть упала, но последняя удачная копия осталась.
 	const [staleAt, setStaleAt] = useState<number | null>(null);
+	// 370 карточек разом — это заметная работа на телефоне. Рисуем первые
+	// STEP, остальные добавляем по прокрутке: список открывается сразу.
+	const [shown, setShown] = useState(STEP_ROWS);
+	const sentinelRef = useRef<HTMLDivElement | null>(null);
 
 	const reload = useCallback(async (): Promise<void> => {
 		try {
@@ -125,7 +131,23 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 		[renamingBusy, renameDraft, reload],
 	);
 
-	const groups = useMemo(() => (sessions ? groupSessions(sessions) : []), [sessions]);
+	const visible = useMemo(
+		() => (sessions === null ? null : sessions.slice(0, shown)),
+		[sessions, shown],
+	);
+	const groups = useMemo<SessionGroup[]>(() => (visible === null ? [] : groupSessions(visible)), [visible]);
+	const hasMore = sessions !== null && visible !== null && visible.length < sessions.length;
+
+	// Догрузка по появлению хвостового маркера: без кнопок и без лишних перерисовок.
+	useEffect(() => {
+		const el = sentinelRef.current;
+		if (el === null || !hasMore) return;
+		const observer = new IntersectionObserver(entries => {
+			if (entries.some(entry => entry.isIntersecting)) setShown(prev => prev + STEP_ROWS);
+		}, { rootMargin: "600px 0px" });
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, [hasMore, shown]);
 
 	// Ошибка не должна стирать уже загруженный список: показываем её баннером
 	// с повтором, а данные остаются на экране.
@@ -273,6 +295,11 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 					</div>
 				</section>
 			))}
+			{hasMore && (
+				<div ref={sentinelRef} className="sess-more">
+					Показано {visible?.length ?? 0} из {sessions?.length ?? 0}
+				</div>
+			)}
 			{renameError != null && <div className="pk-form-error sess-resume-error">{renameError}</div>}
 		</div>
 	);

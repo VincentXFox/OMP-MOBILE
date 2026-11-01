@@ -1,19 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Bot, Folder, Settings, Activity, Brain, Send, UsersRound, Target } from "lucide-react";
 import { AgentsScreen } from "./components/agents/AgentsScreen";
 import { ActivityScreen } from "./components/activity/ActivityScreen";
-import { MemoryScreen } from "./components/memory/MemoryScreen";
+// Тяжёлые экраны грузятся отдельными чанками: первый экран не должен ждать
+// KaTeX, граф памяти и рендереры инструментов.
+const MemoryScreen = lazy(() => import("./components/memory/MemoryScreen").then(m => ({ default: m.MemoryScreen })));
 import { GoalsScreen } from "./components/goals/GoalsScreen";
 import { ProjectsScreen } from "./components/projects/ProjectsScreen";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
-import { SettingsScreen } from "./components/settings/SettingsScreen";
-import { SessionScreen } from "./components/session/SessionScreen";
+const SettingsScreen = lazy(() => import("./components/settings/SettingsScreen").then(m => ({ default: m.SettingsScreen })));
+const SessionScreen = lazy(() => import("./components/session/SessionScreen").then(m => ({ default: m.SessionScreen })));
 import { cacheJson, readCached } from "./lib/offline";
-import { SuperScreen } from "./components/super/SuperScreen";
-import { TelegramScreen } from "./components/telegram/TelegramScreen";
+const SuperScreen = lazy(() => import("./components/super/SuperScreen").then(m => ({ default: m.SuperScreen })));
+const TelegramScreen = lazy(() => import("./components/telegram/TelegramScreen").then(m => ({ default: m.TelegramScreen })));
 import { UpdatesScreen } from "./components/updates/UpdatesScreen";
 import type { ActivityRow, HostInfo } from "./lib/gateway";
-import { fetchHosts, GatewayError, getActiveBase, mintLink, remapSession, resumeSession, setToken } from "./lib/gateway";
+import { fetchHosts, fetchSessions, GatewayError, getActiveBase, mintLink, remapSession, resumeSession, setToken } from "./lib/gateway";
 import { markOpened } from "./lib/agent-prefs";
 import { GuestClient } from "./lib/client";
 import { rebaseCollabLink } from "./lib/link";
@@ -97,6 +99,11 @@ export function App(): ReactNode {
 	);
 	// Немедленный опрос реестра из UI (кнопка «Повторить») — без ожидания 5 с.
 	const pollRef = useRef<() => void>(() => {});
+	// Прогрев данных на старте: пока React монтируется, копия сессий уже читается
+	// из IndexedDB, а сеть догружает свежую в фоне. Экран получает готовое.
+	useEffect(() => {
+		void fetchSessions(undefined, () => {});
+	}, []);
 	// Screens that must survive tab switches stay mounted (hidden) once visited.
 	const [keepAliveVisited, setKeepAliveVisited] = useState<Set<string>>(
 		() => new Set(screen === "settings" || screen === "memory" ? [screen] : []),
@@ -545,7 +552,7 @@ export function App(): ReactNode {
 			)}
 			<main className="pk-main">
 				<div className="pk-content">
-					{body}
+					<Suspense fallback={<div className="pk-loading-line">Загрузка…</div>}>{body}</Suspense>
 					{keepAlive("memory", <MemoryScreen />)}
 					{keepAlive("settings", <SettingsScreen onOpenUpdates={() => goto("updates")} onOpenGoals={() => goto("goals")} />)}
 				</div>

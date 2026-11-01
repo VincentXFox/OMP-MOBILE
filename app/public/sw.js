@@ -43,6 +43,14 @@ const CORE_URLS = [
 	"/favicon-maskable-512x512.png",
 ];
 
+/** Копия оболочки со временем получения: по нему решается, пора ли обновлять. */
+async function stamped(res) {
+	const headers = new Headers(res.headers);
+	headers.set("x-pocket-fetched-at", String(Date.now()));
+	const body = await res.arrayBuffer();
+	return new Response(body, { status: res.status, statusText: res.statusText, headers });
+}
+
 async function cacheAdd(cache, url) {
 	// minfresh: не брать ассет из HTTP-кэша браузера — кладём честный сетевой ответ.
 	try {
@@ -52,33 +60,15 @@ async function cacheAdd(cache, url) {
 	}
 }
 
-// index.html при каждом билде получает новые hashed-имена: парсим DOM
-// живой страницы (script[src], link[href]) и кэшируем то, что похоже на ассет.
-async function precacheShell() {
-	const cache = await caches.open(SHELL_CACHE);
-	const urls = new Set(CORE_URLS);
-	try {
-		const html = await fetch("/", { cache: "no-cache" }).then((r) => r.text());
-		const doc = new DOMParser().parseFromString(html, "text/html");
-		const seen = new Set();
-		for (const el of doc.querySelectorAll("script[src], link[href]")) {
-			const raw = el.getAttribute("src") || el.getAttribute("href") || "";
-			if (!raw || seen.has(raw)) continue;
-			seen.add(raw);
-			const abs = new URL(raw, self.registration.scope);
-			if (abs.origin !== self.location.origin) continue;
-			if (HASHED_RE.test(abs.pathname)) urls.add(abs.pathname + abs.search);
-		}
-	} catch (e) {
-		// Нет сети / нет index — precache ограничится ядром.
-	}
-	await Promise.all([...urls].map((u) => cacheAdd(cache, u)));
-}
-
+// Ассеты сборки здесь не прекачатся: hashed-имена меняются каждый билд, а
+// браузер и так запрашивает их сразу — обработчик fetch кладёт их в кэш при
+// первом обращении. Установка воркера от этого перестала быть тяжёлой: на
+// мобильной сети прекач всех чанков держал первый запуск секундами.
 self.addEventListener("install", (event) => {
 	event.waitUntil(
 		(async () => {
-			await precacheShell();
+			const cache = await caches.open(SHELL_CACHE);
+			await Promise.all(CORE_URLS.map(url => cacheAdd(cache, url)));
 			await self.skipWaiting();
 		})(),
 	);
@@ -178,23 +168,36 @@ self.addEventListener("fetch", (event) => {
 		return;
 	}
 
-	// Навигация / index: network-first, при ошибке сети — shell из кэша.
+	// Навигация / index: кэш сразу, сеть — в фоне (stale-while-revalidate).
+	// Иначе каждое открытие ждёт полный round trip до шлюза: на мобильной сети
+	// это те самые секунды «подгрузки». Свежая оболочка подтягивается не чаще
+	// раза в минуту; хэшированные ассеты нового билда берутся из сети сейчас же.
 	event.respondWith(
 		(async () => {
+			const cache = await caches.open(SHELL_CACHE);
+			const cached = (await cache.match("/")) || (await cache.match(req));
+			if (cached !== undefined) return cached;
 			try {
 				const res = await fetch(req);
-				if (res.ok && isIndex) {
-					const cache = await caches.open(SHELL_CACHE);
-					await cache.put("/", res.clone());
-				}
+				if (res.ok && isIndex) await cache.put("/", await stamped(res));
 				return res;
 			} catch (e) {
-				const cache = await caches.open(SHELL_CACHE);
-				return (
-					(await cache.match("/")) ||
-					(await cache.match(req)) ||
-					new Response("Offline", { status: 503, statusText: "Offline" })
-				);
+				return new Response("Offline", { status: 503, statusText: "Offline" });
+			}
+		})(),
+	);
+	event.waitUntil(
+		(async () => {
+			if (!isIndex) return;
+			const cache = await caches.open(SHELL_CACHE);
+			const cached = await cache.match("/");
+			const fetchedAt = Number(cached?.headers.get("x-pocket-fetched-at") ?? 0);
+			if (cached !== undefined && Date.now() - fetchedAt < 60_000) return;
+			try {
+				const res = await fetch(req, { cache: "no-store" });
+				if (res.ok) await cache.put("/", await stamped(res));
+			} catch (e) {
+				// Сети нет — остаёмся на копии.
 			}
 		})(),
 	);
