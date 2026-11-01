@@ -38,11 +38,12 @@
 	flex-direction: column;
 	gap: 4px;
 	max-width: 220px;
-	padding: 10px 12px;
+	min-height: var(--control-h);
+	padding: 8px 12px;
 	text-align: left;
 	background: var(--surface);
 	border: 1px solid var(--hairline);
-	border-radius: var(--radius-sm);
+	border-radius: var(--btn-radius);
 	color: var(--fg-muted);
 }
 
@@ -93,6 +94,7 @@
 	display: flex;
 	align-items: baseline;
 	gap: 12px;
+	min-height: var(--control-h);
 	padding-bottom: 8px;
 	border-bottom: 1px solid var(--hairline);
 }

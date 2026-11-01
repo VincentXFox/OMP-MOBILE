@@ -10,19 +10,21 @@
 	align-items: center;
 	justify-content: space-between;
 	gap: 12px;
+	min-height: var(--control-h);
 }
 
 .go-title {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	font-weight: 650;
-	font-size: 17px;
+	font-weight: var(--weight-semibold, 600);
+	font-size: 20px;
+	line-height: 1.2;
 }
 
 .go-count {
-	padding: 1px 8px;
-	border-radius: 999px;
+	padding: 2px 8px;
+	border-radius: var(--btn-radius);
 	background: var(--surface-2, rgba(127, 127, 127, 0.14));
 	color: var(--muted, #7b8794);
 	font-size: 13px;
@@ -38,9 +40,9 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 34px;
-	height: 34px;
-	border-radius: 10px;
+	width: var(--control-h);
+	height: var(--control-h);
+	border-radius: var(--btn-radius);
 	border: 1px solid var(--border, rgba(127, 127, 127, 0.24));
 	background: transparent;
 	color: inherit;
@@ -50,12 +52,15 @@
 .go-ghost {
 	display: inline-flex;
 	align-items: center;
+	justify-content: center;
 	gap: 6px;
-	border-radius: 10px;
-	padding: 8px 12px;
+	min-height: var(--control-h);
+	border-radius: var(--btn-radius);
+	padding: 0 16px;
 	font-size: 14px;
 	font-weight: 600;
 	border: 1px solid transparent;
+	box-shadow: none;
 }
 
 .go-primary {
@@ -78,14 +83,20 @@
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
-	padding: 10px 12px;
-	border-radius: 10px;
+	padding: 8px 12px;
+	border-radius: var(--btn-radius);
 	font-size: 14px;
 	background: color-mix(in srgb, var(--error, #c0392b) 14%, transparent);
 	color: var(--error, #c0392b);
 }
 
 .go-error button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--control-h);
+	height: var(--control-h);
+	border-radius: var(--btn-radius);
 	background: transparent;
 	color: inherit;
 	border: none;
@@ -94,25 +105,27 @@
 .go-form {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 8px;
 	padding: 12px;
-	border-radius: 12px;
+	border-radius: var(--radius-lg);
 	border: 1px solid var(--border, rgba(127, 127, 127, 0.2));
 }
 
 .go-label {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 8px;
 	font-size: 13px;
 	color: var(--muted, #7b8794);
 }
 
 .go-label textarea,
 .go-label input {
+	box-sizing: border-box;
 	width: 100%;
-	padding: 9px 10px;
-	border-radius: 9px;
+	min-height: var(--control-h);
+	padding: 12px;
+	border-radius: var(--btn-radius);
 	border: 1px solid var(--border, rgba(127, 127, 127, 0.24));
 	background: var(--surface-1, rgba(127, 127, 127, 0.06));
 	color: inherit;
@@ -128,8 +141,8 @@
 }
 
 .go-empty {
-	padding: 18px 14px;
-	border-radius: 12px;
+	padding: 16px;
+	border-radius: var(--radius-lg);
 	border: 1px dashed var(--border, rgba(127, 127, 127, 0.3));
 	color: var(--muted, #7b8794);
 	font-size: 14px;
@@ -139,7 +152,7 @@
 .go-list {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 8px;
 }
 
 .go-card {
@@ -147,7 +160,7 @@
 	flex-direction: column;
 	gap: 8px;
 	padding: 12px;
-	border-radius: 12px;
+	border-radius: var(--radius-lg);
 	border: 1px solid var(--border, rgba(127, 127, 127, 0.2));
 	background: var(--surface-1, rgba(127, 127, 127, 0.05));
 	text-align: left;
@@ -166,8 +179,8 @@
 }
 
 .go-badge {
-	padding: 2px 9px;
-	border-radius: 999px;
+	padding: 2px 8px;
+	border-radius: var(--btn-radius);
 	font-size: 12px;
 	font-weight: 600;
 	background: rgba(74, 108, 247, 0.14);
@@ -202,7 +215,7 @@
 
 .go-bar {
 	height: 6px;
-	border-radius: 999px;
+	border-radius: 3px;
 	background: rgba(127, 127, 127, 0.18);
 	overflow: hidden;
 }
@@ -211,7 +224,7 @@
 	display: block;
 	height: 100%;
 	background: var(--accent, #4a6cf7);
-	border-radius: 999px;
+	border-radius: 3px;
 	transition: width 240ms ease;
 }
 
@@ -223,9 +236,9 @@
 .go-detail {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 8px;
 	padding: 12px;
-	border-radius: 12px;
+	border-radius: var(--radius-lg);
 	border: 1px solid var(--border, rgba(127, 127, 127, 0.2));
 }
 
@@ -233,7 +246,7 @@
 	display: flex;
 	align-items: flex-start;
 	justify-content: space-between;
-	gap: 10px;
+	gap: 8px;
 }
 
 .go-detail-head h3 {
@@ -243,8 +256,8 @@
 }
 
 .go-result {
-	padding: 9px 11px;
-	border-radius: 9px;
+	padding: 8px 12px;
+	border-radius: var(--btn-radius);
 	font-size: 13px;
 	line-height: 1.4;
 }
@@ -266,7 +279,7 @@
 }
 
 .go-sub {
-	margin: 6px 0 0;
+	margin: 16px 0 0;
 	font-size: 13px;
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
@@ -334,7 +347,7 @@
 	list-style: none;
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 8px;
 	font-size: 13px;
 }
 
@@ -362,8 +375,8 @@
 
 .go-report {
 	margin: 0;
-	padding: 10px;
-	border-radius: 9px;
+	padding: 12px;
+	border-radius: var(--btn-radius);
 	background: rgba(127, 127, 127, 0.08);
 	font-size: 12px;
 	white-space: pre-wrap;

@@ -3,7 +3,7 @@
 .vc-root {
 	display: inline-flex;
 	align-items: center;
-	gap: 2px;
+	gap: 4px;
 	flex: none;
 	min-width: 0;
 }
@@ -16,7 +16,8 @@
 	min-width: 0;
 }
 
-/* Round mic button — 44px tap target in every phase. */
+/* Round mic button — 44px tap target in every phase.
+ * Единственный круг-действие: транспорт записи. */
 .vc-anchor {
 	position: relative;
 	display: inline-flex;
@@ -27,12 +28,12 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: var(--tap);
-	height: var(--tap);
+	width: var(--control-h);
+	height: var(--control-h);
 	color: var(--fg-muted);
 	background: transparent;
 	border: 0;
-	border-radius: var(--radius-pill);
+	border-radius: 50%;
 	cursor: pointer;
 	touch-action: manipulation;
 	-webkit-user-select: none;
@@ -102,18 +103,18 @@
 	letter-spacing: -0.01em;
 }
 
-/* Small cancel X next to the timer. */
+/* Small cancel X next to the timer — иконочная кнопка 44×44, радиус 10. */
 .vc-cancel {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 32px;
-	height: 32px;
+	width: var(--control-h);
+	height: var(--control-h);
 	flex: none;
 	color: var(--fg-muted);
 	background: transparent;
 	border: 0;
-	border-radius: var(--radius-pill);
+	border-radius: var(--btn-radius);
 	cursor: pointer;
 	transition: background-color var(--speed) var(--ease-out);
 }
@@ -142,8 +143,8 @@
 
 /* Processing: spinner circle instead of the button + label on the left. */
 .vc-spinner {
-	width: var(--tap);
-	height: var(--tap);
+	width: var(--control-h);
+	height: var(--control-h);
 	flex: none;
 	border-radius: 50%;
 	border: 3px solid var(--hairline);
@@ -172,7 +173,7 @@
 	-webkit-backdrop-filter: blur(24px) saturate(160%);
 	backdrop-filter: blur(24px) saturate(160%);
 	border: 0.5px solid var(--border);
-	border-radius: var(--radius);
+	border-radius: var(--btn-radius);
 	animation: vc-in 200ms cubic-bezier(0.32, 0.72, 0, 1);
 	z-index: 30;
 	white-space: normal;
@@ -190,7 +191,7 @@
 	font-family: var(--font-ui);
 	font-size: 0.8125rem;
 	line-height: 18px;
-	border-radius: var(--radius);
+	border-radius: var(--btn-radius);
 	animation: vc-in 200ms cubic-bezier(0.32, 0.72, 0, 1);
 	z-index: 30;
 	pointer-events: none;

@@ -48,12 +48,12 @@
 .pk-chip.su-pick-chip {
 	display: block;
 	cursor: pointer;
-	/* Тап-цель: выбор агента — основное действие, ≥48px. */
-	min-height: 48px;
+	/* Чип выбора агента: тап-цель — глобальные 44 (36 + зона 44 у .pk-chip). */
+	min-height: var(--control-h);
 	min-width: 0;
 	max-width: 100%;
 	padding: 0 12px;
-	border-radius: var(--radius-sm);
+	border-radius: var(--btn-radius);
 	text-align: left;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -69,13 +69,17 @@
 .su-all {
 	align-self: flex-end;
 	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	font-size: var(--text-subhead);
 	color: var(--accent-text);
 	background: none;
 	border: none;
 	padding: 0 8px;
-	/* Тап-цель: основное действие, ≥48px. */
-	min-height: 48px;
+	min-height: var(--control-h);
+	min-width: var(--control-h);
+	border-radius: var(--btn-radius);
 	cursor: pointer;
 }
 
@@ -90,8 +94,8 @@
 	align-items: center;
 	justify-content: center;
 	gap: 8px;
-	/* Единственный primary на экране: акцентная заливка, 48px, semibold. */
-	min-height: 48px;
+	/* Единственный primary на экране: акцентная заливка, 44px, semibold. */
+	min-height: var(--control-h);
 	font-weight: var(--weight-semibold);
 }
 
@@ -110,7 +114,7 @@
 
 .su-mode {
 	cursor: pointer;
-	min-height: 44px;
+	min-height: var(--control-h);
 	padding: 0 16px;
 	flex: 1;
 	justify-content: center;
@@ -125,10 +129,10 @@
 .su-plan-item {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
-	padding: 10px;
+	gap: 8px;
+	padding: 12px;
 	border: 1px solid var(--border);
-	border-radius: 12px;
+	border-radius: var(--radius-lg);
 }
 
 .su-plan-head {
@@ -193,8 +197,8 @@
 	color: var(--fg);
 	cursor: pointer;
 	text-align: left;
-	/* Тап-цель: раскрытие карточки — основное действие, ≥48px. */
-	min-height: 48px;
+	/* Раскрытие карточки — основное действие, 44px. */
+	min-height: var(--control-h);
 }
 
 .su-name {
@@ -334,7 +338,7 @@
 	padding: 12px;
 	background: var(--bg-inset);
 	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
+	border-radius: var(--btn-radius);
 	font-family: var(--font-mono);
 	font-size: var(--text-caption);
 	line-height: 1.45;
@@ -354,8 +358,8 @@
 	align-self: flex-start;
 	font-size: var(--text-subhead);
 	padding: 0 16px;
-	/* Вторичное действие, тап-цель var(--tap). */
-	min-height: var(--tap);
+	/* Вторичное действие, тап-цель var(--control-h). */
+	min-height: var(--control-h);
 }
 
 .su-orphans {
@@ -378,7 +382,7 @@
 	align-items: center;
 	gap: 8px;
 	padding: 0 4px;
-	min-height: 44px;
+	min-height: var(--control-h);
 }
 
 .su-tasks-title {
@@ -392,14 +396,15 @@
 	color: var(--muted);
 }
 
-/* Тап-цель 44px: раскрытие формы — частое действие, но не primary. */
+/* Раскрытие формы — частое действие, но не primary; тап-цель 44. */
 .su-tasks-new {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
 	margin-left: auto;
-	min-height: 44px;
+	min-height: var(--control-h);
 	padding: 0 8px;
+	border-radius: var(--btn-radius);
 	background: none;
 	border: none;
 	color: var(--accent-text);
@@ -410,7 +415,7 @@
 .su-task {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 8px;
 	cursor: default;
 }
 
@@ -435,8 +440,8 @@
 .su-tst {
 	font-size: var(--text-footnote);
 	font-weight: var(--weight-semibold);
-	border-radius: var(--radius-pill);
-	padding: 2px 10px;
+	border-radius: var(--btn-radius);
+	padding: 2px 8px;
 	border: 1px solid var(--border);
 	color: var(--muted);
 	background: var(--surface2);
@@ -509,9 +514,9 @@
 	flex-direction: column;
 	gap: 4px;
 	margin-top: 4px;
-	padding: 10px;
+	padding: 12px;
 	border: 1px solid var(--warning);
-	border-radius: 12px;
+	border-radius: var(--radius-lg);
 	background: var(--warning-muted);
 }
 
@@ -543,7 +548,7 @@
 	gap: 6px;
 	font-size: var(--text-subhead);
 	padding: 0 16px;
-	min-height: 44px;
+	min-height: var(--control-h);
 }
 
 .su-task-btn--cancel {

@@ -285,13 +285,14 @@
 	.pk-content .ag-modes {
 		overflow: visible;
 		flex-wrap: wrap;
-		gap: 6px;
+		gap: 8px;
 	}
 
 	.pk-content .pk-chip {
 		padding: 4px 10px;
 		font-size: 0.8125rem;
-		border-radius: 8px;
+		/* Радиус — общий язык контролов: 8px на десктопе ломал его. */
+		border-radius: var(--btn-radius, 10px);
 	}
 
 	.pk-content .ag-sec-head {

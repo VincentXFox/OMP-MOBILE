@@ -19,7 +19,7 @@
 	position: sticky;
 	top: 0;
 	z-index: calc(var(--z-nav) + 5);
-	padding: 10px 16px;
+	padding: 8px 16px;
 	background: var(--warn-muted, rgba(255, 178, 36, 0.14));
 	color: var(--warning);
 	font-size: 0.8125rem;
@@ -32,8 +32,9 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	gap: 12px;
-	padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
+	gap: 8px;
+	min-height: calc(env(safe-area-inset-top) + var(--topbar-h));
+	padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
 	background: var(--glass);
 	backdrop-filter: var(--blur-strong, blur(20px) saturate(160%));
 	-webkit-backdrop-filter: var(--blur-strong, blur(20px) saturate(160%));
@@ -43,7 +44,8 @@
 }
 
 .pk-header-title {
-	font-size: var(--text-title);
+	font-size: 1.25rem;
+	line-height: 32px;
 	font-weight: var(--weight-semibold);
 	letter-spacing: var(--tracking-tight);
 	text-align: center;
@@ -86,7 +88,9 @@
 }
 
 .pk-net-retry {
+	position: relative;
 	flex: none;
+	min-height: 0;
 	padding: 4px 2px;
 	border: none;
 	background: none;
@@ -96,6 +100,13 @@
 	cursor: pointer;
 }
 
+/* видимая строка остаётся низкой, невидимая зона нажатия доходит до 44 */
+.pk-net-retry::before {
+	content: "";
+	position: absolute;
+	inset: -12px -6px;
+}
+
 /* bottom nav */
 .pk-nav {
 	position: fixed;
@@ -103,7 +114,8 @@
 	right: 0;
 	bottom: 0;
 	height: calc(var(--nav-h) + env(safe-area-inset-bottom));
-	padding-bottom: env(safe-area-inset-bottom);
+	padding: 0 4px env(safe-area-inset-bottom);
+	gap: 4px;
 	display: flex;
 	overflow-x: auto;
 	overflow-y: hidden;
@@ -127,7 +139,7 @@
 	align-items: center;
 	justify-content: center;
 	gap: 2px;
-	font-size: 0.6875rem;
+	font-size: 11px;
 	line-height: 1.1;
 	white-space: nowrap;
 	overflow: hidden;
@@ -146,6 +158,8 @@
 
 .pk-nav-item svg {
 	flex-shrink: 0;
+	width: 22px;
+	height: 22px;
 }
 
 .pk-nav-item--on svg {
@@ -172,33 +186,36 @@
 	opacity: 0.8;
 }
 
-/* 44px round icon button for header actions */
+/* квадратная иконочная кнопка 44×44, радиус 10 — не круг */
 .pk-icon-btn {
 	position: absolute;
 	right: 12px;
-	top: calc(env(safe-area-inset-top) + 8px);
-	width: var(--tap);
-	height: var(--tap);
+	top: calc(env(safe-area-inset-top) + 6px);
+	box-sizing: border-box;
+	width: var(--control-h);
+	height: var(--control-h);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	flex-shrink: 0;
+	padding: 0;
 	color: var(--fg);
-	background: var(--surface);
-	border-radius: var(--radius-sm);
+	background: none;
+	border: 1px solid var(--border);
+	border-radius: var(--btn-radius);
 	transition: background var(--speed-fast) var(--ease-ios), transform 180ms var(--ease-ios);
 }
 
 .pk-icon-btn:active {
 	transform: scale(0.94);
-	background: var(--surface2);
+	background: var(--hover);
 }
 
 /* cards */
 .pk-list {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 8px;
 	max-width: 640px;
 	margin: 0 auto;
 }
@@ -235,7 +252,7 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 10px;
+	gap: 8px;
 }
 
 .pk-host-title {
@@ -260,7 +277,7 @@
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	margin-top: 10px;
+	margin-top: 8px;
 	font-size: 0.8125rem;
 	color: var(--muted);
 }
@@ -270,14 +287,14 @@
 	color: var(--fg-tertiary);
 }
 
-/* pills / chips / dots */
+/* badges / chips / dots */
 .pk-pill {
 	flex-shrink: 0;
 	font-size: 0.6875rem;
 	font-weight: 600;
 	color: var(--accent-text);
 	background: var(--accent-muted);
-	border-radius: var(--radius-pill);
+	border-radius: var(--btn-radius);
 	padding: 3px 9px;
 	white-space: nowrap;
 }
@@ -286,19 +303,30 @@
 	display: flex;
 	flex-wrap: wrap;
 	gap: 6px;
-	margin-top: 10px;
+	margin-top: 8px;
 }
 
 .pk-chip {
+	position: relative;
+	box-sizing: border-box;
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
+	min-height: var(--control-h-sm);
 	font-size: 0.75rem;
 	color: var(--muted);
 	background: var(--surface2);
 	border: 1px solid var(--border);
-	border-radius: var(--radius-pill);
+	border-radius: var(--btn-radius);
 	padding: 4px 10px;
+}
+
+/* видимая высота 36, невидимая зона нажатия — 44 */
+.pk-chip::before {
+	content: "";
+	position: absolute;
+	inset: -4px 0;
+	border-radius: var(--btn-radius);
 }
 
 /* выбранное состояние: раньше .pk-chip--on не существовало и выбранное
@@ -341,7 +369,7 @@
 .pk-row {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
 	width: 100%;
 	text-align: left;
 	background: var(--surface);
@@ -384,7 +412,7 @@
 /* settings */
 .pk-section {
 	max-width: 640px;
-	margin: 0 auto 18px;
+	margin: 0 auto 16px;
 }
 
 .pk-section-title {
@@ -403,7 +431,7 @@
 	padding: 8px 16px;
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 8px;
 }
 
 .pk-field {
@@ -419,19 +447,20 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 10px;
-	min-height: 34px;
+	gap: 8px;
+	min-height: 36px;
 	font-size: 0.875rem;
 }
 
 .pk-input {
+	box-sizing: border-box;
 	background: var(--bg-inset);
 	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
+	border-radius: var(--btn-radius);
 	color: var(--fg);
 	padding: 10px 12px;
 	font-size: 0.9375rem;
-	min-height: var(--tap);
+	min-height: var(--control-h);
 	transition: border-color var(--speed-fast) var(--ease-ios), box-shadow var(--speed-fast) var(--ease-ios);
 }
 
@@ -442,13 +471,16 @@
 }
 
 .pk-btn {
+	box-sizing: border-box;
 	background: var(--accent);
 	color: var(--accent-fg);
-	border-radius: var(--radius-sm);
-	font-weight: 600;
+	border: 1px solid transparent;
+	border-radius: var(--btn-radius);
+	font-weight: var(--weight-semibold);
 	font-size: 0.9375rem;
-	padding: 10px 18px;
-	min-height: var(--tap);
+	padding: 10px 16px;
+	min-height: var(--control-h);
+	box-shadow: none;
 	transition:
 		transform 180ms var(--ease-ios),
 		opacity var(--speed-fast) var(--ease-ios),
@@ -471,21 +503,35 @@
 .pk-btn--primary {
 	background: var(--accent);
 	color: var(--accent-fg);
-	min-height: 48px;
+	min-height: var(--control-h);
 	font-size: 0.9375rem;
 	font-weight: var(--weight-semibold);
 }
 
+/* secondary: прозрачный фон + хайрлайн, никаких теней */
 .pk-btn--ghost {
 	background: none;
-	color: var(--accent-text);
-	border: 1px solid var(--border-strong);
+	color: var(--fg);
+	border: 1px solid var(--border);
 }
 
+.pk-btn--ghost:active {
+	background: var(--hover);
+}
+
+/* компактная кнопка (внутри листов): 36 видимо, 44 зона нажатия */
 .pk-btn--sm {
-	min-height: 44px;
+	position: relative;
+	min-height: var(--control-h-sm);
 	padding: 6px 12px;
 	font-size: 0.8125rem;
+}
+
+.pk-btn--sm::before {
+	content: "";
+	position: absolute;
+	inset: -4px 0;
+	border-radius: var(--btn-radius);
 }
 
 .pk-check {
@@ -505,22 +551,22 @@
 	color: var(--muted);
 }
 
-/* segmented control */
+/* segmented control: трек — контейнер (10 + 4 inset = 14), сегмент — кнопка (ровно 10) */
 .pk-segmented {
 	display: flex;
 	background: var(--bg-inset);
-	border-radius: var(--radius);
+	border-radius: calc(var(--btn-radius) + 4px);
 	padding: 4px;
 	gap: 2px;
 }
 
 .pk-segment {
 	flex: 1;
-	border-radius: calc(var(--radius) - 4px);
+	border-radius: var(--btn-radius);
 	font-size: var(--text-subhead);
 	color: var(--muted);
 	background: none;
-	min-height: 44px;
+	min-height: var(--control-h);
 	transition:
 		color var(--speed-fast) var(--ease-ios),
 		background var(--speed-fast) var(--ease-ios),
@@ -537,18 +583,31 @@
 	background: var(--surface);
 	color: var(--fg);
 	font-weight: 600;
-	box-shadow: inset 0 0 0 1px var(--border);
+	outline: 1px solid var(--border);
+	outline-offset: -1px;
 }
 
 /* misc */
 .pk-filter {
+	position: relative;
 	align-self: flex-start;
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
 	font-size: 0.8125rem;
 	color: var(--accent-text);
 	background: var(--accent-muted);
-	border-radius: var(--radius-pill);
+	border-radius: var(--btn-radius);
 	padding: 6px 14px;
-	min-height: 0;
+	min-height: var(--control-h-sm);
+}
+
+/* видимая высота 36, невидимая зона нажатия — 44 */
+.pk-filter::before {
+	content: "";
+	position: absolute;
+	inset: -4px 0;
+	border-radius: var(--btn-radius);
 }
 
 .pk-empty {
@@ -590,14 +649,16 @@
 	z-index: var(--z-nav);
 	width: 56px;
 	height: 56px;
-	border-radius: var(--radius-lg);
+	border-radius: var(--btn-radius);
 	border: none;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	color: var(--accent-fg);
 	background: var(--accent);
-	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-fg) 14%, transparent);
+	outline: 1px solid color-mix(in srgb, var(--accent-fg) 14%, transparent);
+	outline-offset: -1px;
+	box-shadow: none;
 	cursor: pointer;
 	transition: transform 220ms var(--ease-ios);
 }
@@ -635,12 +696,12 @@
 	gap: 12px;
 	outline: none;
 }
-/* grabber: single class, 36×4 (alias kept for existing markup) */
+/* grabber: single class, 36×4 — физическая пилюля (исключение из правила 10px) */
 .pk-sheet-handle,
 .pk-sheet-grabber {
 	width: 36px;
 	height: 4px;
-	border-radius: 2px;
+	border-radius: var(--radius-pill);
 	background: var(--border-strong);
 	margin: 4px auto 0;
 }
@@ -662,7 +723,8 @@
 	color: var(--fg);
 	background: var(--bg-inset);
 	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
+	border-radius: var(--btn-radius);
+	min-height: var(--control-h);
 }
 .pk-field-input::placeholder {
 	color: var(--fg-tertiary);
@@ -675,18 +737,20 @@
 	word-break: break-word;
 }
 .pk-sheet-submit {
-	padding: 13px;
+	box-sizing: border-box;
+	padding: 12px;
 	font-size: 0.9375rem;
 	font-weight: var(--weight-semibold);
 	color: var(--accent-fg);
 	background: var(--accent);
 	border: none;
-	border-radius: var(--radius-sm);
+	border-radius: var(--btn-radius);
 	cursor: pointer;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	min-height: 48px;
+	min-height: var(--control-h);
+	box-shadow: none;
 }
 .pk-sheet-submit:disabled {
 	opacity: 0.5;
@@ -733,7 +797,7 @@
 	font-size: 0.78125rem;
 	background: var(--bg-inset);
 	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
+	border-radius: var(--btn-radius);
 	padding: 10px 12px;
 	white-space: pre-wrap;
 	word-break: break-word;
@@ -743,11 +807,11 @@
 }
 .pk-confirm-actions {
 	display: flex;
-	gap: 10px;
+	gap: 8px;
 }
 .pk-confirm-actions .pk-btn {
 	flex: 1;
-	min-height: 48px;
+	min-height: var(--control-h);
 }
 
 /* ── Toast ────────────────────────────────────────────────────────── */

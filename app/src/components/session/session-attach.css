@@ -49,10 +49,10 @@
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	min-height: var(--tap);
+	min-height: var(--control-h, 44px);
 	padding: 0 16px;
 	border: none;
-	border-radius: 14px;
+	border-radius: var(--btn-radius, 10px);
 	background: var(--surface2);
 	color: var(--fg);
 	font-size: var(--text-body);
@@ -90,8 +90,9 @@
 .sa-chip-row {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 6px;
-	padding: 0 16px 6px;
+	gap: 8px;
+	/* The composer zone owns the inset and the 8px stack gap. */
+	padding: 0;
 }
 
 .sa-chip {
@@ -100,8 +101,8 @@
 	gap: 5px;
 	max-width: 220px;
 	padding: 4px 4px 4px 10px;
-	border: 1px solid var(--hairline);
-	border-radius: var(--radius-pill);
+	border: 1px solid var(--border);
+	border-radius: var(--btn-radius, 10px);
 	background: var(--surface2);
 	font-size: var(--text-footnote);
 	color: var(--fg);
@@ -116,17 +117,27 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+/* Nested control: 28px visual (10 − 4), 44px hit area via the halo. */
 .sa-chip-x {
+	position: relative;
 	flex: none;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 22px;
-	height: 22px;
-	border-radius: var(--radius-pill);
+	width: 28px;
+	height: 28px;
+	/* base.css gives every button min-height: 44px — the chip stays compact;
+	   the halo below keeps the 44px target. */
+	min-height: 0;
+	border-radius: 6px;
 	background: var(--hover);
 	color: var(--fg-muted);
 	transition: background var(--speed-fast) var(--ease-ios);
+}
+.sa-chip-x::after {
+	content: "";
+	position: absolute;
+	inset: -8px;
 }
 .sa-chip-x:active {
 	background: var(--error-muted);

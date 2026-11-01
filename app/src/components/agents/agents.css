@@ -9,10 +9,17 @@
 	padding-bottom: 124px;
 }
 
+/* Шаг списка — 8 у всех карточек, как в сессиях: один ритм на две ведомости. */
+.pk-list.ag-list {
+	gap: 8px;
+}
+
 /* FAB above nav with breathing room; bumped specificity so this wins
- * over the pocket.css default regardless of bundle order. */
+ * over the pocket.css default regardless of bundle order. Радиус — общий для
+ * всех кнопок (FAB остаётся крупным: это главное действие экрана). */
 .pk-main .pk-fab {
-	bottom: calc(var(--nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 16px);
+	bottom: calc(var(--nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 16px);
+	border-radius: var(--btn-radius);
 }
 
 /* ── Host card hierarchy: name → status → meta ────────────────────── */
@@ -159,7 +166,7 @@
 	padding: 8px 8px 8px 12px;
 	background: var(--surface);
 	border: 1px solid var(--warning);
-	border-radius: var(--radius-lg, 16px);
+	border-radius: var(--radius);
 	font-size: 0.8125rem;
 	color: var(--fg-secondary, var(--muted));
 }
@@ -176,7 +183,7 @@
 
 .ag-retry {
 	flex-shrink: 0;
-	min-height: 44px;
+	min-height: var(--control-h);
 	font-size: 0.8125rem;
 	padding: 0 16px;
 }
@@ -243,14 +250,14 @@
 	justify-content: center;
 	gap: 8px;
 	padding: 0 12px;
-	min-height: 44px;
+	min-height: var(--control-h);
 	flex-shrink: 0;
 	font-size: 0.8125rem;
 	font-weight: var(--weight-semibold, 600);
 	color: var(--accent-text);
 	background: var(--bg-inset);
 	border: 1px solid var(--border);
-	border-radius: var(--radius-lg);
+	border-radius: var(--btn-radius);
 	cursor: pointer;
 	white-space: nowrap;
 }
@@ -275,12 +282,12 @@
 .pk-host--opening .pk-dot--success,
 .pk-host--opening .pk-dot--muted,
 .pk-host--opening .pk-dot--warning {
-	animation: ag-opening-pulse 1s ease-in-out infinite;
+	animation: ag-opening-pulse 1s ease-in-out infinite alternate;
 }
 
 @keyframes ag-opening-pulse {
-	0%, 100% { opacity: 1; }
-	50% { opacity: 0.35; }
+	from { opacity: 1; }
+	to { opacity: 0.35; }
 }
 
 /* Пикер поверх формы нового агента */
@@ -301,15 +308,28 @@
 	display: none;
 }
 .ag-crumb {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
 	flex-shrink: 0;
-	padding: 4px 8px;
-	min-height: 32px;
+	padding: 0 8px;
+	min-width: var(--control-h);
+	min-height: var(--control-h-sm);
+	box-sizing: border-box;
+	justify-content: center;
 	font-size: 0.8125rem;
 	color: var(--accent-text);
 	background: none;
 	border: none;
-	border-radius: var(--radius-sm, 8px);
+	border-radius: var(--btn-radius);
 	cursor: pointer;
+}
+/* Крошка живёт внутри листа: 36 нарисовано, невидимая зона доводит тап до 44. */
+.ag-crumb::before {
+	content: "";
+	position: absolute;
+	inset: -4px;
+	border-radius: var(--btn-radius);
 }
 .ag-crumb--current {
 	color: var(--fg);
@@ -337,7 +357,7 @@
 	gap: 12px;
 	width: 100%;
 	padding: 12px;
-	min-height: 44px;
+	min-height: var(--control-h);
 	box-sizing: border-box;
 	font-size: 0.9375rem;
 	color: var(--fg);
@@ -382,7 +402,7 @@
 	justify-content: center;
 	gap: 8px;
 	padding: 24px 12px;
-	min-height: 44px;
+	min-height: var(--control-h);
 	font-size: 0.875rem;
 	color: var(--fg-secondary, var(--muted));
 }
@@ -443,7 +463,7 @@
 }
 
 .ag-dead-resume {
-	min-height: 48px;
+	min-height: var(--control-h);
 	width: 100%;
 	justify-content: center;
 	display: flex;
@@ -451,7 +471,7 @@
 }
 
 .ag-dead-close {
-	min-height: 44px;
+	min-height: var(--control-h);
 	width: 100%;
 	justify-content: center;
 	display: flex;
@@ -475,7 +495,7 @@
 	flex-direction: column;
 	gap: 8px;
 	margin: -16px -16px 0;
-	padding: 16px 16px 12px;
+	padding: 12px 16px 8px;
 	background: var(--bg);
 	border-bottom: 1px solid var(--hairline, var(--border));
 }
@@ -495,8 +515,8 @@
 
 .ag-search-input {
 	width: 100%;
-	min-height: var(--tap, 44px);
-	padding: 0 40px 0 32px;
+	min-height: var(--control-h);
+	padding: 0 var(--control-h) 0 32px;
 	font: inherit;
 	font-size: 0.9375rem;
 	color: var(--fg);
@@ -504,7 +524,7 @@
 	border: 1px solid var(--border);
 	/* Поле — врезка в прибор, а не капсула: скругление как у карточки минус
 	   поле, а не «таблетка». */
-	border-radius: var(--radius-sm);
+	border-radius: var(--btn-radius);
 	appearance: none;
 	-webkit-appearance: none;
 }
@@ -520,22 +540,24 @@
 
 .ag-search-clear {
 	position: absolute;
-	right: 4px;
-	width: 36px;
-	height: 36px;
+	right: 0;
+	width: var(--control-h);
+	height: var(--control-h);
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	padding: 0;
 	background: none;
 	border: none;
-	/* внутренний радиус = внешний − отступ (10 − 4) */
-	border-radius: 6px;
+	/* иконочная кнопка: тот же квадрат и радиус, что у .pk-icon-btn */
+	border-radius: var(--btn-radius);
 	color: var(--fg-tertiary, var(--muted));
 }
 
 .ag-summary {
 	padding-left: 4px;
 	font-size: 0.75rem;
+	font-variant-numeric: tabular-nums;
 	color: var(--fg-tertiary, var(--muted));
 }
 
@@ -544,7 +566,9 @@
 .ag-sec {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	/* Заголовок секции ближе своим строкам (4), чем предыдущей секции
+	   (gap списка 8): группа читается как одно целое. */
+	gap: 4px;
 }
 
 .ag-sec-body {
@@ -558,10 +582,11 @@
 	align-items: center;
 	gap: 8px;
 	width: 100%;
-	min-height: var(--tap, 44px);
+	min-height: var(--control-h);
 	padding: 0 4px;
 	background: none;
 	border: none;
+	border-radius: var(--btn-radius);
 	color: var(--fg-secondary, var(--muted));
 	font: inherit;
 	font-size: 0.8125rem;
@@ -602,6 +627,8 @@
 	align-items: stretch;
 	padding: 0;
 	overflow: hidden;
+	/* Карточка та же, что строка сессии: 12, чтобы списки не спорили. */
+	border-radius: var(--radius);
 }
 
 /* Кромка карточки — тихий хайрлайн, а не цветной ярлык проекта: проект назван
@@ -656,12 +683,15 @@
 
 .ag-pin {
 	flex: 0 0 auto;
-	width: var(--tap, 44px);
+	align-self: center;
+	width: var(--control-h);
+	height: var(--control-h);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	background: none;
 	border: none;
+	border-radius: var(--btn-radius);
 	color: var(--fg-tertiary, var(--muted));
 	transition: color var(--speed-fast, 150ms) var(--ease-ios, ease), transform 160ms var(--ease-ios, ease);
 }
@@ -702,6 +732,7 @@
 	display: flex;
 	flex-direction: column;
 	align-items: stretch;
+	border-radius: var(--radius);
 }
 
 .ag-hit-head {
@@ -793,7 +824,9 @@
 	gap: 4px;
 }
 
-/* Чипы режимов вне липкой шапки: прокручиваются вместе со списком. */
+/* Чипы режимов вне липкой шапки: прокручиваются вместе со списком.
+ * Высоту и радиус чипу даёт pocket.css (36 + зона 44, --btn-radius):
+ * свой размер тут разошёлся бы с остальными экранами. */
 .ag-modes-row {
 	padding-top: 8px;
 	margin-bottom: 0;

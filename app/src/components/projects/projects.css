@@ -4,9 +4,9 @@
 .pj-screen {
 	display: flex;
 	flex-direction: column;
-	gap: var(--sp-4);
+	gap: var(--sp-3);
 	width: 100%;
-	padding: var(--sp-2) 0 var(--sp-5);
+	padding: var(--sp-2) 0 var(--sp-4);
 	box-sizing: border-box;
 }
 
@@ -18,13 +18,13 @@
 }
 
 .pj-tabs .pk-segment {
-	min-height: 44px;
+	min-height: var(--control-h);
 }
 
 .pj-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
-	gap: var(--sp-3);
+	gap: var(--sp-2);
 	width: 100%;
 	max-width: 640px;
 	margin: 0 auto;
@@ -81,7 +81,7 @@
 	justify-content: center;
 	width: 32px;
 	height: 32px;
-	border-radius: var(--radius-sm);
+	border-radius: var(--btn-radius);
 	background: var(--surface2);
 	border: 1px solid var(--hairline);
 	color: var(--accent-text);
@@ -171,7 +171,8 @@
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	margin: 0 4px 8px;
+	margin: 12px 4px 8px;
+	min-height: var(--control-h);
 }
 
 .wf-title {
@@ -188,7 +189,7 @@
 .wf-badge {
 	margin-left: auto;
 	padding: 2px 8px;
-	border-radius: 8px;
+	border-radius: var(--btn-radius);
 	font-size: 11px;
 	border: 1px solid var(--hairline);
 	font-variant-numeric: tabular-nums;
@@ -231,7 +232,7 @@
 
 .wf-card {
 	border: 1px solid var(--hairline);
-	border-radius: 12px;
+	border-radius: var(--radius-lg);
 	background: var(--surface);
 	padding: 12px;
 }
@@ -253,7 +254,7 @@
 	font: inherit;
 	text-align: left;
 	cursor: pointer;
-	min-height: 24px;
+	min-height: var(--control-h);
 }
 
 .wf-dot {
@@ -333,10 +334,13 @@
 
 /* Chip: neutral surface tag, never an accent wash. */
 .wf-chip {
-	font-size: 10px;
-	line-height: 16px;
-	padding: 0 6px;
-	border-radius: 4px;
+	display: inline-flex;
+	align-items: center;
+	min-height: 20px;
+	font-size: 11px;
+	line-height: 18px;
+	padding: 0 8px;
+	border-radius: var(--btn-radius);
 	background: var(--surface2);
 	border: 1px solid var(--hairline);
 	color: var(--fg-muted);

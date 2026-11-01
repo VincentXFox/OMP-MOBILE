@@ -351,7 +351,7 @@
 	bottom: 16px;
 	width: var(--tap);
 	height: var(--tap);
-	border-radius: 50%;
+	border-radius: var(--btn-radius, 10px);
 	border: 1px solid var(--border-strong);
 	background: var(--bg-overlay);
 	color: var(--fg);
@@ -360,6 +360,10 @@
 	justify-content: center;
 	cursor: pointer;
 	z-index: 5;
+}
+.ss-jump:active {
+	transform: scale(0.98);
+	opacity: 1;
 }
 
 .ss-phase-banner {
@@ -400,9 +404,13 @@
 }
 
 /* ---- composer ---- */
-/* Glass bar over the transcript: iOS material, hairline separation. */
+/* Glass bar over the transcript: iOS material, hairline separation.
+   Полоса над вводом — плотная стопка: 8px между блоками, 12px по краям. */
 .ss-composer-zone {
 	flex: none;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
 	background: var(--glass);
 	backdrop-filter: var(--blur-surface);
 	-webkit-backdrop-filter: var(--blur-surface);
@@ -411,16 +419,18 @@
 	padding: 8px 12px calc(8px + var(--ss-kb, 0px) + env(safe-area-inset-bottom, 0px));
 	transition: padding 120ms var(--ease-out);
 }
+/* Blocks of the strip are spaced by the zone gap only: each block drops its
+   own bottom padding so the stack gap stays exactly 8px. */
 .ss-offline-note {
-	padding: 0 4px 6px;
+	padding: 0;
 	font-size: 0.75rem;
 	color: var(--warn);
 	text-align: center;
 }
 .ss-queued-row {
 	display: flex;
-	gap: 6px;
-	padding-bottom: 6px;
+	gap: 8px;
+	padding: 0;
 	overflow-x: auto;
 	scrollbar-width: none;
 }
@@ -429,7 +439,7 @@
 	align-items: center;
 	gap: 4px;
 	padding: 4px 12px;
-	border-radius: 8px;
+	border-radius: var(--btn-radius, 10px);
 	background: var(--surface2);
 	border: 1px solid var(--hairline);
 	color: var(--accent-text);
@@ -440,20 +450,20 @@
 
 /* ---- липкий туду-бар над композером ---- */
 .ss-todo {
-	padding-bottom: 4px;
+	padding-bottom: 0;
 }
 
 .ss-todo-bar {
 	display: flex;
 	align-items: center;
-	gap: 12px;
+	gap: 8px;
 	width: 100%;
-	min-height: 44px;
-	padding: 4px;
+	min-height: var(--tap);
+	padding: 0;
 	border: none;
 	background: none;
 	color: var(--fg);
-	font-size: 0.875rem;
+	font-size: 0.75rem;
 	text-align: left;
 }
 
@@ -488,7 +498,7 @@
 	display: block;
 	height: 100%;
 	border-radius: 2px;
-	background: var(--success);
+	background: var(--accent);
 	transition: width 200ms var(--ease-out);
 }
 
@@ -581,12 +591,16 @@
 	gap: 8px;
 	background: var(--surface2);
 	border: 1px solid var(--hairline);
-	border-radius: var(--radius-lg);
-	padding: 8px 12px;
-	transition: border-color var(--speed-fast) var(--ease-ios);
+	border-radius: 12px;
+	padding: 12px;
+	transition:
+		border-color var(--speed-fast) var(--ease-ios),
+		box-shadow var(--speed-fast) var(--ease-ios);
 }
+/* Focus lives on the card: one thin ring instead of an inner outline. */
 .ss-composer:focus-within {
 	border-color: var(--border-strong);
+	box-shadow: 0 0 0 3px var(--ring-soft);
 }
 .ss-composer-controls {
 	display: flex;
@@ -609,21 +623,26 @@
 	min-width: 0;
 	resize: none;
 	border: none;
-	border-radius: 10px;
+	border-radius: var(--btn-radius, 10px);
 	background: none;
 	color: var(--fg);
 	font: inherit;
 	font-size: 0.9375rem;
 	line-height: 20px;
-	padding: 4px 8px;
+	/* JS держит LINE = 20 и PAD = 8, поэтому вертикаль здесь кратна строке:
+	   строка 20 + 12/12 даёт поле 44+. */
+	padding: 12px 0;
+	min-height: var(--tap);
 	max-height: 132px;
 	transition: none;
 }
 .ss-input:focus {
 	outline: none;
 }
+/* Disabled reads as a muted surface, never as a half-transparent control. */
 .ss-input:disabled {
-	opacity: 0.5;
+	opacity: 1;
+	color: var(--fg-muted);
 }
 /* Placeholder must read as one truncated line, never wrap+clip. */
 .ss-input::placeholder {
@@ -638,10 +657,11 @@
 		font-size: 1rem;
 	}
 }
+/* Primary action: accent square, 44×44, one radius with every other button. */
 .ss-send {
-	width: 48px;
-	height: 48px;
-	border-radius: 50%;
+	width: var(--tap);
+	height: var(--tap);
+	border-radius: var(--btn-radius, 10px);
 	animation: ss-send-in 150ms cubic-bezier(0.32, 0.72, 0, 1);
 	border: none;
 	background: var(--accent);
@@ -652,8 +672,14 @@
 	cursor: pointer;
 	flex: none;
 }
+.ss-send:active:not(:disabled) {
+	transform: scale(0.98);
+	opacity: 1;
+}
 .ss-send:disabled {
-	opacity: 0.35;
+	opacity: 1;
+	background: var(--hover);
+	color: var(--fg-faint);
 	cursor: default;
 }
 
@@ -1126,13 +1152,13 @@
 .ss-attach-row {
 	display: flex;
 	gap: 8px;
-	padding: 0 2px;
+	padding: 0;
 }
 .ss-attach-thumb {
 	position: relative;
 	width: 64px;
 	height: 64px;
-	border-radius: var(--radius-lg, 10px);
+	border-radius: var(--btn-radius, 10px);
 	overflow: hidden;
 	border: 1px solid var(--hairline);
 	flex-shrink: 0;
@@ -1149,6 +1175,8 @@
 	right: 2px;
 	width: 20px;
 	height: 20px;
+	/* base.css min-height: 44px would overflow the 64px thumb. */
+	min-height: 0;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -1156,7 +1184,8 @@
 	color: var(--fg-inverse);
 	background: rgb(0 0 0 / 0.6);
 	border: none;
-	border-radius: 50%;
+	/* Nested inside the 10px thumb: 10 − 4 = 6, never a circle. */
+	border-radius: 6px;
 	cursor: pointer;
 }
 /* Invisible halo: 20px visual cross, 44px coarse tap target. */
@@ -1166,16 +1195,60 @@
 	inset: -12px;
 }
 .ss-attach-error {
-	padding: 0 16px 6px;
+	padding: 0;
 	font-size: 0.75rem;
 	color: var(--warn);
 }
+/* Secondary composer button: 44×44, transparent fill, hairline edge. */
 .ss-attach {
 	flex-shrink: 0;
+	width: var(--tap);
+	height: var(--tap);
+	border: 1px solid var(--border);
+	border-radius: var(--btn-radius, 10px);
+	background: transparent;
 	color: var(--fg-muted);
 }
+.ss-attach:active:not(:disabled) {
+	transform: scale(0.98);
+	opacity: 1;
+	background: var(--hover);
+}
 .ss-attach:disabled {
-	opacity: 0.35;
+	opacity: 1;
+	color: var(--fg-faint);
+	border-color: var(--hairline);
+}
+
+/* Mic sits in the same row as send/attach: same square, same radius.
+   Circles stay only for the live-recording dot and the processing spinner.
+   `.ss-composer .vc-anchor` outranks voice.css in either load order. */
+.ss-composer .vc-anchor .vc-mic {
+	width: var(--tap);
+	height: var(--tap);
+	border: 1px solid var(--border);
+	border-radius: var(--btn-radius, 10px);
+	background: transparent;
+	color: var(--fg-muted);
+}
+.ss-composer .vc-anchor .vc-mic:hover {
+	color: var(--fg);
+	background: var(--hover);
+}
+.ss-composer .vc-anchor .vc-mic:active {
+	transform: scale(0.98);
+}
+.ss-composer .vc-anchor .vc-mic:disabled {
+	opacity: 1;
+	color: var(--fg-faint);
+	border-color: var(--hairline);
+}
+/* Recording keeps its error fill — the only filled state in this row. */
+.ss-composer .vc-anchor .vc-mic-live,
+.ss-composer .vc-anchor .vc-mic-live:hover {
+	color: var(--fg-inverse);
+	background: var(--error);
+	border-color: var(--error);
 }
 
 /* ---- agent drawer: transcript, controls, pinned chat row ---- */
@@ -1223,13 +1296,16 @@
 	width: 44px;
 	height: 44px;
 	border: none;
-	border-radius: 50%;
+	/* Одна отправка — один вид: как в основном композере (квадрат 10). */
+	border-radius: var(--btn-radius, 10px);
 	background: var(--accent);
 	color: var(--accent-fg);
 	cursor: pointer;
 }
 .ss-agent-send:disabled {
-	opacity: 0.4;
+	opacity: 1;
+	background: var(--hover);
+	color: var(--fg-faint);
 	cursor: default;
 }
 
@@ -1325,15 +1401,26 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	padding: 4px 12px;
-	border: 1px solid var(--hairline);
-	border-radius: 8px;
-	background: var(--surface2);
+	border: 1px solid var(--border);
+	border-radius: var(--btn-radius, 10px);
+	background: transparent;
 	color: var(--fg-muted);
 	font-family: var(--font-ui);
 	font-size: var(--text-footnote);
 	font-weight: 500;
 	touch-action: manipulation;
 	-webkit-tap-highlight-color: transparent;
+}
+
+/* Чип ведёт себя как вторичная кнопка: та же палитра, то же нажатие. */
+.ss-model-chip:hover {
+	color: var(--fg);
+	border-color: var(--border-strong);
+}
+.ss-model-chip:active {
+	transform: scale(0.98);
+	opacity: 1;
+	background: var(--hover);
 }
 
 /* Пикер файлов проекта (attach sheet). */
@@ -1371,10 +1458,10 @@
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 4px 4px 4px 2px;
+	padding: 0;
 	border: none;
 	background: none;
-	font-size: var(--text-footnote, 0.78rem);
+	font-size: 0.75rem;
 	color: var(--fg-tertiary);
 	flex: none;
 }
@@ -1399,17 +1486,19 @@
 }
 .ss-ctx-track {
 	flex: 1;
-	height: 2px;
-	border-radius: 1px;
-	background: var(--surface2, rgba(127, 127, 127, 0.18));
+	/* Полоса прогресса — один вид на экране: как у задачи (3px, скругление 2). */
+	height: 3px;
+	border-radius: 2px;
+	background: var(--hairline);
 	overflow: hidden;
 	min-width: 40px;
 }
 .ss-ctx-fill {
 	display: block;
 	height: 100%;
-	border-radius: 1px;
-	background: var(--live, #3aa76d);
+	border-radius: 2px;
+	/* Прогресс — это акцент, а не «хорошо»: зелёный оставлен статусам. */
+	background: var(--accent);
 	transition: width 240ms ease, background 240ms ease;
 }
 .ss-ctx--warn .ss-ctx-fill { background: var(--warn, #d9a520); }

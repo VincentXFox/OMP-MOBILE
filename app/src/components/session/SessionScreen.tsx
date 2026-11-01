@@ -1135,7 +1135,9 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 		const el = taRef.current;
 		if (!el) return;
 		const LINE = 20;
-		const PAD = 8; // padding 4px сверху и снизу
+		// Поле ввода теперь с отступами 12px сверху и снизу (было 4): без этого
+		// шестая строка уезжала под скролл внутри поля.
+		const PAD = 32;
 		const MAX_ROWS = 6;
 		el.style.height = "auto";
 		const lines = Math.max(1, Math.ceil((el.scrollHeight - PAD) / LINE));

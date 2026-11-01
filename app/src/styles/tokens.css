@@ -116,16 +116,25 @@
 	--tracking-tight: -0.02em;
 	--tracking-caps: 0.06em;
 
-	/* ---- radii: 12 chips/inputs · 16 cards · 20 sheets · 999 pills ---- */
+	/* ---- radii: 10 controls · 12 rows · 16 cards · 24 sheets ---- */
 	--radius-sm: 10px;
 	--radius: 0.75rem;
 	--radius-lg: 1rem;
 	--radius-xl: 24px;
+	/* physical pill: ONLY the toggle track and the sheet grabber may use it */
 	--radius-pill: 999px;
 
+	/* ---- control language: one radius, one height ----
+	 * every rectangular button, chip and field is a 10px rectangle;
+	 * 999px/50% are reserved for physical pills, status dots, spinners
+	 * and the voice transport button. */
+	--btn-radius: 10px;
+	--control-h: 44px;
+	--control-h-sm: 36px;
+
 	/* ---- layout ---- */
-	--nav-h: 64px;
-	--topbar-h: 52px;
+	--nav-h: 56px;
+	--topbar-h: 56px;
 	--tap: 44px;
 
 	/* ---- motion ---- */
