@@ -14,8 +14,8 @@
 	--border: rgba(255, 255, 255, 0.10);
 	--fg: #E8E9EC;
 	--muted: #9A9DA6;
-	--accent: #5267E8;
-	--accent-text: #9BAAFF;
+	--accent: #C9822B;
+	--accent-text: #E3B264;
 	--success: #34C77B;
 	--warning: #E8A33D;
 	--error: #E5544B;
@@ -34,7 +34,7 @@
 
 	/* interaction states */
 	--hover: rgba(255, 255, 255, 0.06);
-	--selected: rgba(82, 103, 232, 0.16);
+	--selected: rgba(201, 130, 43, 0.18);
 
 	/* text */
 	--fg-muted: var(--muted);
@@ -42,13 +42,14 @@
 	--fg-inverse: #ffffff;
 
 	/* accent system */
-	--accent-fg: #fff;
-	--accent-muted: rgba(82, 103, 232, 0.18);
-	--accent-a: #8A9AF5;
+	/* Янтарная лампа: текст на акценте — тёмный, иначе контраст не проходит. */
+	--accent-fg: #1F1B16;
+	--accent-muted: rgba(201, 130, 43, 0.16);
+	--accent-a: var(--accent);
 	--accent-b: var(--accent);
-	--accent-gradient: linear-gradient(100deg, var(--accent-a), var(--accent-b));
-	--ambient-a: rgba(82, 103, 232, 0.07);
-	--ambient-b: rgba(52, 199, 123, 0.045);
+	--accent-gradient: var(--accent);
+	--ambient-a: rgba(255, 255, 255, 0.02);
+	--ambient-b: rgba(255, 255, 255, 0.012);
 
 	/* status aliases */
 	--ok: var(--success);
@@ -67,7 +68,7 @@
 
 	/* focus rings */
 	--ring: var(--accent);
-	--ring-soft: rgba(82, 103, 232, 0.28);
+	--ring-soft: rgba(201, 130, 43, 0.30);
 
 	/* ---- spacing: 4px step ---- */
 	--sp-1: 4px;
@@ -155,8 +156,8 @@
 	--border: rgba(15, 18, 30, 0.08);
 	--fg: #14161A;
 	--muted: #6E7280;
-	--accent: #5267E8;
-	--accent-text: #3D50C4;
+	--accent: #8A5A12;
+	--accent-text: #8A5A12;
 	--success: #1E9E5A;
 	--warning: #B26B00;
 	--error: #D64541;
@@ -166,21 +167,22 @@
 	--surface-strong: #ffffff;
 	--glass: rgba(247, 248, 250, 0.78);
 	--hover: rgba(0, 0, 0, 0.05);
-	--selected: rgba(82, 103, 232, 0.1);
+	--selected: rgba(138, 90, 18, 0.10);
 	--fg-faint: #757A85;
 	--fg-secondary: #4B4F56;
 	--fg-tertiary: #6B7078;
 	--fg-inverse: #fff;
-	--accent-muted: rgba(82, 103, 232, 0.12);
+	--accent-muted: rgba(138, 90, 18, 0.12);
 	--accent-a: var(--accent);
-	--accent-b: #7B8AF0;
-	--ambient-a: rgba(82, 103, 232, 0.05);
-	--ambient-b: rgba(30, 158, 90, 0.04);
+	--accent-b: var(--accent);
+	--accent-fg: #FFFFFF;
+	--ambient-a: rgba(15, 18, 30, 0.02);
+	--ambient-b: rgba(15, 18, 30, 0.012);
 	--border-strong: rgba(0, 0, 0, 0.16);
 	--hairline: rgba(15, 18, 30, 0.08);
 	--edge-top: rgba(15, 18, 30, 0.08);
 	--edge-bottom: rgba(0, 0, 0, 0.03);
-	--ring-soft: rgba(82, 103, 232, 0.2);
+	--ring-soft: rgba(138, 90, 18, 0.22);
 	--success-muted: rgba(30, 158, 90, 0.14);
 	--warning-muted: rgba(178, 107, 0, 0.14);
 	--error-muted: rgba(214, 69, 65, 0.14);
@@ -201,8 +203,8 @@
 		--border: rgba(15, 18, 30, 0.08);
 		--fg: #14161A;
 		--muted: #6E7280;
-		--accent: #5267E8;
-		--accent-text: #3D50C4;
+		--accent: #8A5A12;
+		--accent-text: #8A5A12;
 		--success: #1E9E5A;
 		--warning: #B26B00;
 		--error: #D64541;
@@ -212,21 +214,22 @@
 		--surface-strong: #ffffff;
 		--glass: rgba(247, 248, 250, 0.78);
 		--hover: rgba(0, 0, 0, 0.05);
-		--selected: rgba(82, 103, 232, 0.1);
+		--selected: rgba(138, 90, 18, 0.10);
 		--fg-faint: #757A85;
 		--fg-secondary: #4B4F56;
 		--fg-tertiary: #6B7078;
 		--fg-inverse: #fff;
-		--accent-muted: rgba(82, 103, 232, 0.12);
+		--accent-muted: rgba(138, 90, 18, 0.12);
 		--accent-a: var(--accent);
-		--accent-b: #7B8AF0;
-		--ambient-a: rgba(82, 103, 232, 0.05);
-		--ambient-b: rgba(30, 158, 90, 0.04);
+		--accent-b: var(--accent);
+		--accent-fg: #FFFFFF;
+		--ambient-a: rgba(15, 18, 30, 0.02);
+		--ambient-b: rgba(15, 18, 30, 0.012);
 		--border-strong: rgba(0, 0, 0, 0.16);
 		--hairline: rgba(15, 18, 30, 0.08);
 		--edge-top: rgba(15, 18, 30, 0.08);
 		--edge-bottom: rgba(0, 0, 0, 0.03);
-		--ring-soft: rgba(82, 103, 232, 0.2);
+		--ring-soft: rgba(138, 90, 18, 0.22);
 		--success-muted: rgba(30, 158, 90, 0.14);
 		--warning-muted: rgba(178, 107, 0, 0.14);
 		--error-muted: rgba(214, 69, 65, 0.14);

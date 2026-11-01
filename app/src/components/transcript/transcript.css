@@ -24,7 +24,7 @@
 .tr-row {
 	display: flex;
 	flex-direction: column;
-	padding: 6px 0;
+	padding: 8px 0;
 	/* Крупные сессии — это тысячи строк. Браузер не считает и не рисует то,
 	   что за пределами экрана, пока до него не доскроллят. */
 	content-visibility: auto;
@@ -41,15 +41,15 @@
 
 
 
-/* User turns: a raised card so prompts stand apart from agent prose. */
+/* Ход пользователя: плоская подложка с одной волосяной линейкой слева —
+ * ни пузыря, ни тени. */
 .tr-row--user .tr-body {
 	justify-self: start;
 	max-width: 100%;
-	padding: 9px 14px;
+	padding: 8px 12px;
 	background: var(--bg-raised);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-lg);
-	box-shadow: var(--shadow-card);
+	border-left: 2px solid var(--border-strong);
+	border-radius: 0;
 }
 
 .tr-body {
@@ -84,66 +84,54 @@
 	max-height: 240px;
 	max-width: 100%;
 	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
+	border-radius: 0;
 }
 
 .tr-msg-img-fallback {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
 	padding: 8px 12px;
 	border: 1px dashed var(--border);
-	border-radius: var(--radius-sm);
+	border-radius: 0;
 	color: var(--fg-muted);
-	font-size: 0.8125rem;
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
 }
 
 /* ---- chips & badges ---- */
 
-.tr-badge {
-	display: inline-block;
-	padding: 0 7px;
-	border-radius: 8px;
-	background: var(--accent-muted);
-	color: var(--accent);
-	font-family: var(--font-mono);
-	font-size: 0.6875rem;
-	line-height: 18px;
-	text-transform: none;
-	letter-spacing: 0;
-}
-
+/* Метки статуса — приглушённый моно-текст без заливок и рамок: акцент
+ * на экране один и принадлежит живому состоянию, а не украшению. */
 .tr-chip {
 	display: inline-flex;
 	align-items: center;
-	height: 20px;
-	padding: 0 8px;
-	border: 1px solid var(--border);
-	border-radius: 8px;
-	background: var(--bg-raised);
-	color: var(--fg-muted);
+	gap: 4px;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: none;
+	color: var(--fg-faint);
 	font-family: var(--font-mono);
 	font-size: 0.6875rem;
+	line-height: 16px;
+	letter-spacing: 0.04em;
 	white-space: nowrap;
 }
 
 .tr-chip--err {
-	border-color: color-mix(in oklch, var(--err) 50%, var(--border));
 	color: var(--err);
-	background: color-mix(in oklch, var(--err) 10%, transparent);
 }
 
 .tr-chip--warn {
-	border-color: color-mix(in oklch, var(--warn) 50%, var(--border));
 	color: var(--warn);
-	background: color-mix(in oklch, var(--warn) 10%, transparent);
 }
 
 .tr-stop {
 	display: flex;
 	align-items: baseline;
 	gap: 8px;
-	margin-top: 2px;
+	margin-top: 4px;
 }
 
 .tr-stop-msg {
@@ -167,7 +155,7 @@
 	gap: 4px;
 	width: 100%;
 	min-height: 44px;
-	padding: 0 2px;
+	padding: 0 4px;
 	border: none;
 	background: none;
 	cursor: pointer;
@@ -187,8 +175,8 @@
 .tr-think-body {
 	align-self: stretch;
 	margin: 0;
-	padding: 2px 0 8px 12px;
-	border-left: 2px solid var(--border);
+	padding: 0 0 8px 12px;
+	border-left: 1px solid var(--hairline);
 	color: var(--fg-muted);
 	font-style: italic;
 	font-size: 0.75rem;
@@ -211,7 +199,7 @@
 .tr-divider {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
 	margin: 16px 0;
 	color: var(--fg-faint);
 	font-size: 0.75rem;
@@ -235,12 +223,13 @@
 .tr-earlier {
 	display: block;
 	margin: 4px auto 16px;
-	height: 28px;
-	padding: 0 14px;
+	min-height: 44px;
+	padding: 0 16px;
 	border: 1px solid var(--border-strong);
-	border-radius: var(--radius-btn, 12px);
-	background: var(--bg-raised);
+	border-radius: var(--radius-sm);
+	background: transparent;
 	color: var(--fg-muted);
+	font-family: var(--font-mono);
 	font-size: 0.75rem;
 	cursor: pointer;
 }
@@ -251,9 +240,9 @@
 }
 
 .tr-shimmer {
-	color: var(--fg-muted);
+	color: var(--fg-faint);
+	font-family: var(--font-mono);
 	font-size: 0.8125rem;
-	opacity: 0.7;
 }
 
 /* ---- tool cards ----
@@ -287,7 +276,7 @@
 }
 
 .tr-md p {
-	margin: 6px 0;
+	margin: 8px 0;
 }
 
 .tr-md p,
@@ -301,7 +290,7 @@
 .tr-md h4,
 .tr-md h5,
 .tr-md h6 {
-	margin: 14px 0 6px;
+	margin: 16px 0 8px;
 	font-weight: 600;
 	line-height: 1.3;
 }
@@ -326,12 +315,12 @@
 
 .tr-md ul,
 .tr-md ol {
-	margin: 6px 0;
-	padding-left: 22px;
+	margin: 8px 0;
+	padding-left: 24px;
 }
 
 .tr-md li {
-	margin: 2px 0;
+	margin: 4px 0;
 }
 
 .tr-md li > ul,
@@ -340,16 +329,15 @@
 }
 
 .tr-md li > p {
-	margin: 2px 0;
+	margin: 4px 0;
 }
 
-/* Inline code: pill on --surface2; the hairline edge keeps it legible on
- * light surfaces where --surface2 matches the card behind it. */
+/* Inline code: моно и приглушённый фон, без пилюли и рамки. */
 .tr-md code {
-	padding: 2px 8px;
-	border: 1px solid var(--hairline);
-	border-radius: 8px;
-	background: var(--surface2);
+	padding: 0 4px;
+	border: 0;
+	border-radius: 0;
+	background: var(--bg-inset);
 	font-family: var(--font-mono);
 	font-size: 0.86em;
 }
@@ -357,10 +345,10 @@
 /* Block code: wrapper carries the frame; the bar holds a language label and a
  * copy button (delegated click handler in Markdown.tsx). */
 .tr-code {
-	margin: 10px 0;
+	margin: 8px 0;
 	overflow: hidden;
 	border: 1px solid var(--hairline);
-	border-radius: 12px;
+	border-radius: 0;
 	background: var(--bg-inset);
 }
 
@@ -371,24 +359,25 @@
 	gap: 8px;
 	padding: 0 4px 0 12px;
 	border-bottom: 1px solid var(--hairline);
-	background: var(--surface2);
+	background: transparent;
 }
 
 .tr-code-lang {
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: 0.6875rem;
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
-	color: var(--fg-muted);
+	color: var(--fg-faint);
 }
 
 .tr-code-copy {
-	min-width: 32px;
-	min-height: 32px;
-	padding: 0 10px;
+	min-width: 44px;
+	min-height: 44px;
+	padding: 0 8px;
 	border: 0;
 	background: none;
-	font-size: 12px;
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
 	color: var(--fg-muted);
 	cursor: pointer;
 	-webkit-tap-highlight-color: transparent;
@@ -396,7 +385,7 @@
 
 .tr-code-copy:active,
 .tr-code-copy--done {
-	color: var(--accent);
+	color: var(--fg);
 }
 
 .tr-md .tr-code pre {
@@ -419,8 +408,8 @@
 
 .tr-md blockquote {
 	margin: 8px 0;
-	padding: 2px 12px;
-	border-left: 2px solid var(--accent);
+	padding: 0 12px;
+	border-left: 2px solid var(--border-strong);
 	color: var(--fg-muted);
 }
 
@@ -439,8 +428,6 @@
 .ss-transcript .tr-tablewrap--wrap {
 	overflow-x: visible;
 	max-width: 100%;
-	mask-image: none;
-	-webkit-mask-image: none;
 }
 
 .tr-tablewrap--wrap table,
@@ -455,23 +442,20 @@
 	vertical-align: top;
 }
 
-/* Table wrapper: scrollable, hairline border, rounded — emitted by the table renderer.
-   Right-edge mask hints that wide tables scroll horizontally (fades under the
-   last cell, the wrapper border itself stays crisp because the mask is inset). */
+/* Table wrapper: scrollable, hairline frame — emitted by the table renderer.
+   Широкая таблица просто прокручивается внутри рамки, без краевых затуханий. */
 .tr-tablewrap {
-	margin: 10px 0;
+	margin: 8px 0;
 	max-width: 100%;
 	overflow-x: auto;
 	border: 1px solid var(--hairline);
-	border-radius: var(--radius);
+	border-radius: 0;
 	scrollbar-width: thin;
-	mask-image: linear-gradient(to right, #000 calc(100% - 20px), rgba(0, 0, 0, 0.35) calc(100% - 6px), rgba(0, 0, 0, 0.12));
-	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), rgba(0, 0, 0, 0.35) calc(100% - 6px), rgba(0, 0, 0, 0.12));
 }
 
 .tr-md th,
 .tr-md td {
-	padding: 8px 10px;
+	padding: 8px 12px;
 	border: 1px solid var(--hairline);
 	overflow-wrap: anywhere;
 	text-align: left;
@@ -493,7 +477,7 @@
 }
 
 .tr-md hr {
-	margin: 12px 0;
+	margin: 16px 0;
 	border: none;
 	height: 1px;
 	background: var(--border);
@@ -502,7 +486,7 @@
 .tr-md img {
 	max-width: 100%;
 	max-height: 320px;
-	border-radius: var(--radius-sm);
+	border-radius: 0;
 	cursor: zoom-in;
 }
 
@@ -524,14 +508,14 @@
 /* ---- compact variant (agent drawer) ---- */
 
 .tr-root--compact {
-	padding: 12px 14px 16px;
+	padding: 12px 16px 16px;
 	font-size: 0.8125rem;
 }
 
 .tr-root--compact .tr-row {
 	grid-template-columns: 52px 1fr;
 	gap: 0 8px;
-	padding: 3px 0;
+	padding: 4px 0;
 }
 
 
@@ -568,40 +552,40 @@
 		padding: 8px 0;
 	}
 	.tr-root {
-		padding: 16px 14px 12px;
+		padding: 16px 16px 12px;
 	}
 }
 
 /* Подпись гостя над коллаб-сообщением (вместо ярлыка в гуттере). */
 .tr-collab-from {
-	margin: 0 0 3px 2px;
+	margin: 0 0 4px 0;
+	font-family: var(--font-mono);
 	font-size: var(--text-caption);
 	font-weight: 500;
-	color: var(--accent);
+	color: var(--fg-muted);
 }
 
-/* ---- tool groups · progressive disclosure (серии tool-карточек) ---- */
-
+/* Серия tool-карточек: строка-нажималка без плашки, свет при касании — фоном. */
 .tr-group {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
 	width: 100%;
-	min-height: 40px;
-	padding: 0 10px;
+	min-height: 44px;
+	padding: 0 12px;
 	border: none;
-	border-radius: 12px;
-	background: var(--surface2);
+	border-radius: 0;
+	background: transparent;
 	color: var(--fg-muted);
-	font-family: var(--font-ui);
-	font-size: 0.8125rem;
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
 	text-align: left;
 	cursor: pointer;
 	-webkit-tap-highlight-color: transparent;
 }
 
 .tr-group:active {
-	background: color-mix(in oklch, var(--surface2) 90%, var(--accent));
+	background: var(--surface2);
 }
 
 .tr-group-ico {
@@ -630,13 +614,14 @@
 /* Кнопка «Свернуть» под раскрытой серией. */
 .tr-group-collapse {
 	align-self: flex-start;
-	margin: 2px 0 0;
-	padding: 5px 12px;
+	margin: 0;
+	min-height: 44px;
+	padding: 0 12px;
 	border: 1px solid var(--border);
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--fg-muted);
-	font-family: var(--font-ui);
+	font-family: var(--font-mono);
 	font-size: 0.75rem;
 	cursor: pointer;
 	-webkit-tap-highlight-color: transparent;
@@ -668,12 +653,12 @@
 	max-width: calc(100vw - 24px);
 	max-height: calc(100vh - 140px);
 	object-fit: contain;
-	border-radius: var(--radius-md);
+	border-radius: 0;
 }
 
 .tr-imgv-close {
 	position: absolute;
-	top: max(10px, env(safe-area-inset-top));
+	top: max(12px, env(safe-area-inset-top));
 	right: 12px;
 	display: flex;
 	align-items: center;
@@ -681,7 +666,7 @@
 	width: 44px;
 	height: 44px;
 	border: none;
-	border-radius: 50%;
+	border-radius: 0;
 	background: rgba(255, 255, 255, 0.08);
 	color: #fff;
 }
@@ -697,10 +682,10 @@
 	height: 48px;
 	padding: 0 24px;
 	border: none;
-	border-radius: 24px;
+	border-radius: 0;
 	background: var(--accent);
-	color: #fff;
+	color: var(--accent-fg);
 	font-size: 0.9375rem;
-	font-weight: 600;
+	font-weight: 500;
 	text-decoration: none;
 }

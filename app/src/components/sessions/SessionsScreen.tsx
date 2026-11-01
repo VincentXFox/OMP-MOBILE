@@ -217,12 +217,12 @@ export function SessionsScreen(props: { onOpenInstance: (instanceId: string) => 
 									<div className="sess-row-main">
 										<span className="sess-title">{rowTitle(session)}</span>
 										<span
-											className={`pk-chip${session.status === "live" ? " pk-chip--on" : ""}${dead ? " sess-chip--dead" : ""}`}
+											className={`sess-status${session.status === "live" ? " sess-status--live" : ""}${dead ? " sess-status--dead" : ""}`}
 										>
 											{STATUS_LABEL[session.status]}
 										</span>
 										{session.parentId !== null && (
-											<span className="pk-chip sess-chip--child" title={`Продолжение сессии ${session.parentId.slice(0, 8)}`}>
+											<span className="sess-child" title={`Продолжение сессии ${session.parentId.slice(0, 8)}`}>
 												продолжение
 											</span>
 										)}

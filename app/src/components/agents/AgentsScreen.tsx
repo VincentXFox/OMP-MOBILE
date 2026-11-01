@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen, ChevronDown, Check, CircleAlert, Folder, Lock, OctagonPause, Play, Plus, Search, Star, Timer, UsersRound, X } from "lucide-react";
+import { ArrowLeft, BookOpen, ChevronDown, Check, CircleAlert, Folder, Lock, Plus, Search, Star, Timer, UsersRound, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { basename, dayTimeLabel, pluralRu, shortenPath } from "../../lib/format";
@@ -15,21 +15,16 @@ export type HostStatus = {
 	label: string;
 	tone: "accent" | "warning" | "success" | "muted";
 	pulse: boolean;
-	/** Status is never colour-only: shape + text come with the dot. */
-	icon: ReactNode;
 };
 
 export function hostStatus(host: HostInfo): HostStatus {
 	// Мёртвый процесс реестра: join невозможен — только resume.
-	if (host.alive === false)
-		return { label: "Завершён", tone: "muted", pulse: false, icon: <Check size={14} /> };
-	if (!host.relayConnected)
-		return { label: "Нет связи", tone: "muted", pulse: false, icon: <CircleAlert size={14} /> };
-	if (host.inputRequired)
-		return { label: "Ждёт подтверждения", tone: "warning", pulse: false, icon: <OctagonPause size={14} /> };
-	if (host.busy) return { label: "Работает", tone: "accent", pulse: true, icon: <Play size={14} /> };
+	if (host.alive === false) return { label: "Завершён", tone: "muted", pulse: false };
+	if (!host.relayConnected) return { label: "Нет связи", tone: "muted", pulse: false };
+	if (host.inputRequired) return { label: "Ждёт подтверждения", tone: "warning", pulse: false };
+	if (host.busy) return { label: "Работает", tone: "success", pulse: true };
 	// Idle = агент дошёл до конца своей задачи: завершён, а не «ждёт».
-	return { label: "Выполнен", tone: "success", pulse: false, icon: <Check size={14} /> };
+	return { label: "Выполнен", tone: "success", pulse: false };
 }
 
 /** Живое время работы: <60с «только что», <60м «N мин», иначе «N ч M мин». */
@@ -106,15 +101,6 @@ function isScratchCwd(cwd: string): boolean {
 	return cwd === "/tmp" || cwd.startsWith("/tmp/");
 }
 
-/** Палитра проектов. Цвет выдаётся папкам по алфавиту (не по хешу): одинаковый
- * цвет = один проект, и он не сталкивается у двух разных папок. */
-const PROJECT_HUES: readonly number[] = [265, 205, 160, 95, 45, 10, 330, 300];
-
-function projectHues(hosts: readonly HostInfo[]): Map<string, number> {
-	const projects = [...new Set(hosts.map(h => h.cwd))].sort();
-	return new Map(projects.map((cwd, i) => [cwd, PROJECT_HUES[i % PROJECT_HUES.length] ?? 265]));
-}
-
 function sectionOf(host: HostInfo): SectionId {
 	if (host.inputRequired) return "attention";
 	if (host.busy) return "working";
@@ -127,7 +113,6 @@ type AgentRow = {
 	name: string;
 	project: string;
 	scratch: boolean;
-	hue: number;
 	/** Живые субагенты этой сессии (доска «Роя»). */
 	subagents: number;
 	/** Стол штата: за что агент отвечает (null — живёт вне штата). */
@@ -137,14 +122,13 @@ type AgentRow = {
 	haystack: string;
 };
 
-function agentRow(host: HostInfo, board: SuperBoard | null, opened: Record<string, number>, hues: ReadonlyMap<string, number>): AgentRow {
+function agentRow(host: HostInfo, board: SuperBoard | null, opened: Record<string, number>): AgentRow {
 	const name = agentName(host);
 	return {
 		host,
 		name,
 		project: shortenPath(host.cwd),
 		scratch: isScratchCwd(host.cwd),
-		hue: hues.get(host.cwd) ?? 265,
 		subagents: matchBoardAgent(host, board)?.subagents.filter(s => s.active).length ?? 0,
 		desk: host.desk ?? null,
 		recency: Math.max(opened[host.sessionId] ?? 0, host.startedAt),
@@ -170,13 +154,12 @@ function AgentCard(props: {
 		<div
 			className={`pk-card ag-card pk-host${dim ? " pk-host--dim" : ""}${host.inputRequired ? " pk-host--attention" : ""}${opening ? " pk-host--opening" : ""}`}
 		>
-			<span aria-hidden="true" className="ag-rail" style={{ background: `hsl(${row.hue} 55% 55%)` }} />
+			<span aria-hidden="true" className="ag-rail" />
 			<button type="button" className="ag-card-main" disabled={opening} onClick={() => props.onOpen(host)}>
 				<span className="ag-name">{row.name}</span>
 				{row.desk !== null && <span className="ag-role">{row.desk.role}</span>}
 				<span className="ag-status">
 					<span className={`pk-dot pk-dot--${status.tone}${status.pulse ? " pk-dot--pulse" : ""}`} />
-					<span className="ag-status-icon">{status.icon}</span>
 					<span>{opening ? "Открываю…" : status.label}</span>
 					{host.busy && (
 						<span className="ag-elapsed">
@@ -947,8 +930,7 @@ export function AgentsScreen(props: {
 		const opened = openedTimes();
 		// Палитра строится по всем агентам, а не по отфильтрованным: фильтр по
 		// проекту не должен перекрашивать карточки.
-		const hues = projectHues(shown);
-		const rows = inFilter.map(h => agentRow(h, board, opened, hues));
+			const rows = inFilter.map(h => agentRow(h, board, opened));
 		const matched = q === "" ? rows : rows.filter(r => r.haystack.includes(q));
 
 		const bySection = new Map<SectionId, AgentRow[]>();

@@ -36,20 +36,21 @@
 	flex: 0 0 auto;
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	gap: 4px;
 	max-width: 220px;
-	padding: 8px 12px;
+	padding: 10px 12px;
 	text-align: left;
 	background: var(--surface);
-	border: 1px solid var(--border);
+	border: 1px solid var(--hairline);
 	border-radius: var(--radius-sm);
 	color: var(--fg-muted);
 }
 
+/* Selected session: surface step + accent hairline, no tinted fill. */
 .tg-rail-item--on {
 	color: var(--fg);
 	border-color: var(--accent);
-	background: var(--selected);
+	background: var(--surface2);
 }
 
 .tg-rail-title {
@@ -63,6 +64,7 @@
 	font-size: 0.75rem;
 	color: var(--fg-faint);
 	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
 }
 
 .tg-rail-foot {
@@ -74,7 +76,7 @@
 .tg-rail-foot .pk-btn {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
 	text-decoration: none;
 }
 
@@ -90,9 +92,9 @@
 .tg-chat-head {
 	display: flex;
 	align-items: baseline;
-	gap: 10px;
+	gap: 12px;
 	padding-bottom: 8px;
-	border-bottom: 1px solid var(--border);
+	border-bottom: 1px solid var(--hairline);
 }
 
 .tg-chat-title {
@@ -110,7 +112,7 @@
 	margin-left: auto;
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
 }
 
 .tg-error {
@@ -124,7 +126,7 @@
 .tg-note {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
 	padding-top: 8px;
 	font-size: 0.8125rem;
 	color: var(--fg-faint);
@@ -146,7 +148,7 @@
 		flex: none;
 		position: sticky;
 		top: 0;
-		border-right: 1px solid var(--border);
+		border-right: 1px solid var(--hairline);
 		padding-right: 16px;
 	}
 
@@ -178,7 +180,7 @@
 	}
 
 	.tg-transcript .tr-root {
-		padding: 6px 0;
+		padding: 8px 0;
 	}
 
 	.tg-transcript .tr-root .tr-row {

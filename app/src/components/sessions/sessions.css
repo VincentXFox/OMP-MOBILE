@@ -1,4 +1,6 @@
-/* sessions screen */
+/* Сессии — ведомость смены: одна колонка, один шаг между строками,
+ * один источник света на экране (лампа живой сессии). */
+
 .sess-groups {
 	display: flex;
 	flex-direction: column;
@@ -10,10 +12,15 @@
 	padding: 0 0 var(--sp-4);
 }
 
-.sess-sk {
+/* Скелетон той же геометрии, что у строки: список не прыгает после загрузки.
+ * Два класса — гасим бегущий градиент из pocket.css: плашка ровная, без блика. */
+.pk-skeleton.sess-sk {
 	display: block;
-	height: 13px;
-	border-radius: 7px;
+	height: 12px;
+	min-height: 12px;
+	border-radius: 0;
+	background: var(--bg-inset);
+	animation: none;
 }
 
 .sess-sk--title {
@@ -22,150 +29,258 @@
 
 .sess-sk--meta {
 	width: 35%;
-	height: 11px;
+	height: 12px;
 	margin-top: var(--sp-2);
 }
 
 .sess-resume-error {
-	margin-bottom: 2px;
+	margin-bottom: 4px;
 }
 
 .sess-group {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	gap: var(--sp-2);
 }
 
 .sess-group-label {
-	font-size: 0.75rem;
-	font-weight: 600;
-	color: var(--muted);
-	text-transform: uppercase;
-	letter-spacing: 0.4px;
+	padding: 0 4px;
 	font-family: var(--font-mono);
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--fg-faint);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
+/* Один gap внутри группы строк — он же задаёт шаг всему списку. */
 .sess-rows {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	gap: var(--sp-2);
+}
+
+/* Строка: плоская карточка с хайрлайном вместо тени, одинаковая высота
+ * у живой, завершённой и оборванной сессии (12 + 24 + 4 + 16 + 8 + 44 + 12).
+ * Два класса — pocket.css грузится позже и иначе перебьёт поля карточки. */
+.pk-card.sess-row {
+	display: block;
+	min-height: 120px;
+	padding: 12px;
+	border-color: var(--hairline);
+	border-radius: var(--radius);
+	box-shadow: none;
+	content-visibility: auto;
+	contain-intrinsic-size: auto 120px;
+}
+
+/* Карточка списка не нажимается целиком — масштаб при касании тут обманка. */
+.pk-card.sess-row:active {
+	transform: none;
+	opacity: 1;
 }
 
 .sess-row-main {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 10px;
+	gap: 8px;
+	min-height: 24px;
 }
 
 .sess-title {
-	font-size: 0.90625rem;
-	font-weight: 600;
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: 15px;
+	font-weight: 500;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.sess-chip--dead {
-	color: var(--warning);
-	border-color: var(--warning);
+/* Статус — слово и точка-лампа. Свет только у живой сессии. */
+.sess-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex: none;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.04em;
+	color: var(--fg-muted);
+	white-space: nowrap;
 }
 
+.sess-status::before {
+	content: "";
+	width: 6px;
+	height: 6px;
+	box-sizing: border-box;
+	border-radius: 50%;
+	background: currentColor;
+}
+
+.sess-status--live::before {
+	background: var(--accent);
+}
+
+/* Оборванная сессия — пустой контур лампы, а не вторая янтарная точка. */
+.sess-status--dead::before {
+	background: transparent;
+	border: 1px solid var(--warning);
+}
+
+/* Продолжение — метка словами, без рамки и заливки. */
+.sess-child {
+	flex: none;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--fg-faint);
+	white-space: nowrap;
+}
+
+.sess-child::before {
+	content: "↳";
+	margin-right: 4px;
+}
+
+/* Даты и размеры — цифры одной ширины, чтобы колонка не дёргалась. */
 .sess-meta {
 	margin-top: 4px;
-	font-size: 0.78125rem;
-	color: var(--muted);
-}
-
-.sess-resume {
-	margin-top: 10px;
-	width: 100%;
-}
-
-.sess-chip--child {
-	color: var(--accent);
-	border-color: var(--accent);
-	flex: none;
+	font-family: var(--font-mono);
+	font-size: 12px;
+	line-height: 16px;
+	font-variant-numeric: tabular-nums;
+	color: var(--fg-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .sess-victim-note {
 	margin-top: 4px;
-	font-size: 0.75rem;
-	color: var(--warning);
+	font-size: 12px;
+	line-height: 16px;
+	color: var(--fg-muted);
 }
 
 .sess-actions {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	margin-top: 10px;
+	margin-top: 8px;
+	min-height: 44px;
 }
 
-.sess-actions .sess-resume {
-	margin-top: 0;
-	flex: 1;
+/* Подъём сессии — вторичное действие: контур, без янтарной заливки. */
+.pk-btn.sess-resume {
+	flex: 1 1 auto;
+	width: auto;
+	min-height: 44px;
+	padding: 0 16px;
+	font-size: 14px;
+	font-weight: 500;
+	color: var(--fg);
+	background: transparent;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
 }
 
-.sess-rename-toggle {
+.pk-btn.sess-resume:active {
+	background: var(--surface2);
+	transform: none;
+	opacity: 1;
+}
+
+.pk-btn.sess-resume:disabled {
+	color: var(--fg-faint);
+}
+
+.pk-icon-btn.sess-rename-toggle {
+	position: static;
 	flex: none;
-	border: 1px solid var(--border);
-	border-radius: 10px;
-	padding: 8px;
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	color: var(--fg-muted);
+	background: transparent;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+}
+
+.pk-icon-btn.sess-rename-toggle:active {
+	background: var(--surface2);
+	transform: none;
 }
 
 .sess-rename {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	margin-top: 10px;
+	margin-top: 8px;
+	min-height: 44px;
 }
 
 .sess-rename .pk-field-input {
 	flex: 1;
 	min-width: 0;
-	padding: 8px 10px;
-	font-size: 0.90625rem;
+	min-height: 44px;
+	padding: 0 12px;
 }
 
-.sess-rename-btn {
+.pk-btn.sess-rename-btn {
 	flex: none;
-	border: 1px solid var(--border);
-	border-radius: 10px;
-	padding: 8px 10px;
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	color: var(--fg-muted);
+	background: transparent;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 }
 
-.sess-rename-btn:disabled {
+.pk-btn.sess-rename-btn:active {
+	background: var(--surface2);
+	transform: none;
+	opacity: 1;
+}
+
+.pk-btn.sess-rename-btn:disabled {
 	opacity: 0.45;
+	background: transparent;
 }
 
 /* Список сессий из офлайн-копии: предупреждение, а не ошибка. */
 .sess-stale-note {
-	font-size: 13px;
-	line-height: 18px;
-	color: var(--pk-warn, #b7791f);
-	padding: 6px 2px 10px;
 	display: flex;
 	flex-wrap: wrap;
-	gap: 6px;
 	align-items: center;
+	gap: 8px;
+	padding: 4px 0 8px;
+	font-size: 12px;
+	line-height: 16px;
+	color: var(--fg-muted);
 }
 
 /* Маркер окна списка: сколько показано из скольких. */
 .sess-more {
-	font-size: 13px;
-	color: var(--pk-muted, #8a8f98);
-	padding: 14px 2px 6px;
+	padding: 12px 0 0;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+	color: var(--fg-faint);
 	text-align: center;
 }
 
-/* Карточки ниже экрана не считаются и не рисуются, пока до них не доскроллят. */
-.sess-row {
-	content-visibility: auto;
-	contain-intrinsic-size: auto 96px;
+/* Кнопки в служебных баннерах — контур и обычный текст: янтарь на экране
+ * принадлежит лампе живой сессии. */
+.sess-stale-note .pk-btn--ghost,
+.sess-resume-error .pk-btn--ghost {
+	color: var(--fg);
 }
