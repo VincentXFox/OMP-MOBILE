@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { resolveBin } from "./bins.ts";
 import { findSessionFile, parseSessionHead } from "./sessions.ts";
 import { todoProgressOf, type TodoProgress } from "./todo-progress.ts";
@@ -98,11 +98,33 @@ export async function runOmp(args: string[], timeoutMs: number, ompPath?: string
   return promise;
 }
 
+/**
+ * Реестр collab исполнителя. Состояние collab у каждого пользователя своё,
+ * поэтому агенты, поднятые от `omp-exec`, не видны в `omp collab list` владельца.
+ * Забираем их через лаунчер исполнителя (он исполняет список от omp-exec) и
+ * объединяем: без этого переключённый агент «пропадает» из приложения.
+ */
+async function execHosts(): Promise<OmpHostsOutput["hosts"]> {
+  const socket = process.env.OMP_EXEC_LAUNCHER_SOCKET ?? "/run/omp-exec-launcher/launch.sock";
+  if (!existsSync(socket)) return [];
+  try {
+    const response = await fetch("http://launcher/collab-list", { unix: socket } as RequestInit & { unix: string });
+    if (!response.ok) return [];
+    const parsed = (await response.json()) as Partial<OmpHostsOutput>;
+    return Array.isArray(parsed.hosts) ? parsed.hosts : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function listHosts(ompPath?: string): Promise<OmpHostsOutput> {
   const res = await runOmp(["collab", "list", "--json"], 5000, ompPath);
   if (res.code !== 0) throw new Error(`omp collab list failed: ${res.stderr.trim() || `exit ${res.code}`}`);
   const parsed = JSON.parse(res.stdout) as Partial<OmpHostsOutput>;
-  const hosts = Array.isArray(parsed.hosts) ? parsed.hosts : [];
+  const ownHosts = Array.isArray(parsed.hosts) ? parsed.hosts : [];
+  const extra = await execHosts();
+  const seen = new Set(ownHosts.map(h => h.instanceId));
+  const hosts = [...ownHosts, ...extra.filter(h => !seen.has(h.instanceId))];
   return {
     hosts: hosts.map((h) => {
       const sessionFile = typeof h.sessionId === "string" ? findSessionFile(h.sessionId) : null;

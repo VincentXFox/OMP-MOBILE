@@ -76,6 +76,8 @@ export function runtimeFor(cwd: string | null | undefined): string | undefined {
 /** Выполнить запрос к рантайму, соответствующему каталогу агента. */
 export async function withRuntimeFor<T>(cwd: string | null | undefined, fn: () => Promise<T>): Promise<T> {
 	const socket = runtimeFor(cwd);
+	// Диагностика выбора рантайма (видно в journalctl шлюза).
+	console.log(`[panes] runtimeFor(${cwd ?? "-"}) → ${socket ?? "прежний рантайм"}`);
 	if (socket === undefined) return fn();
 	const previous = process.env.OMP_RUNTIME_SOCKET;
 	process.env.OMP_RUNTIME_SOCKET = socket;

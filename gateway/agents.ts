@@ -15,7 +15,7 @@ import { closeSync, fsyncSync, openSync, readFileSync, renameSync, statSync, wri
 import { basename, dirname, join } from "node:path";
 import { listHosts, type OmpHost } from "./hosts.ts";
 import { resolveBin } from "./bins.ts";
-import { bindPane, closePane, createPane, listPanes, panePids, runInPane, withRuntimeFor } from "./panes.ts";
+import { bindPane, closePane, createPane, listPanes, panePids, runInPane, runtimeFor, withRuntimeFor } from "./panes.ts";
 import { withStateFileLock } from "./recovery/migrate.ts";
 
 /**
@@ -137,7 +137,23 @@ async function waitHostGone(instanceId: string, timeoutMs: number): Promise<bool
   }
 }
 
+/**
+ * Запуск идёт в рантайме, соответствующем каталогу агента: панель, команда,
+ * ожидание регистрации и привязка — всё это обращения к рантайму, и они обязаны
+ * попадать в один и тот же сокет. Точечная обёртка не годилась: ожидание
+ * регистрации уходило в прежний рантайм и панель «терялась» (pane not found).
+ */
 async function launchAgentOnce(
+  cwd: string,
+  model: string | undefined,
+  label: string | undefined,
+  ompArgs: readonly string[],
+  sessionFile: string | null,
+): Promise<StartOutcome> {
+  return withRuntimeFor(cwd, () => launchAgentOnceInner(cwd, model, label, ompArgs, sessionFile));
+}
+
+async function launchAgentOnceInner(
   cwd: string,
   model: string | undefined,
   label: string | undefined,
@@ -152,11 +168,18 @@ async function launchAgentOnce(
   }
   if (!cwdOk) return { kind: "bad_cwd", error: `cwd does not exist: ${cwd}` };
 
+  // Бинарь исполнителя лежит в нейтральном месте: домашний каталог владельца
+  // оmp-exec не читает, и `omp` из PATH владельца в панели исполнителя просто
+  // не запускается (панель молчит, агент не регистрируется).
   let ompBin: string;
-  try {
-    ompBin = await resolveBin("omp");
-  } catch (err) {
-    return { kind: "failed", error: `omp недоступен: ${err instanceof Error ? err.message : String(err)}` };
+  if (runtimeFor(cwd) !== undefined) {
+    ompBin = process.env.OMP_EXEC_BIN ?? "/opt/omp-exec-launcher/omp";
+  } else {
+    try {
+      ompBin = await resolveBin("omp");
+    } catch (err) {
+      return { kind: "failed", error: `omp недоступен: ${err instanceof Error ? err.message : String(err)}` };
+    }
   }
 
   const displayLabel = label?.trim() || basename(cwd);
@@ -167,7 +190,7 @@ async function launchAgentOnce(
   try {
     // Каталог агента определяет рантайм: список OMP_EXEC_CWDS → панели службы
     // исполнителя (omp-exec), иначе — прежний рантайм владельца.
-    const pane = await withRuntimeFor(cwd, () => createPane(cwd, { name: displayLabel.slice(0, 64), cols: PANE_COLS, rows: PANE_ROWS }));
+    const pane = await createPane(cwd, { name: displayLabel.slice(0, 64), cols: PANE_COLS, rows: PANE_ROWS });
     paneId = pane.paneId;
   } catch (err) {
     return { kind: "failed", error: `панель не создана: ${err instanceof Error ? err.message : String(err)}` };
@@ -178,7 +201,7 @@ async function launchAgentOnce(
   const argv = [ompBin, "--cwd", cwd, "--allow-home", ...(model === undefined ? [] : ["--model", model]), ...ompArgs];
   let alreadyRunning = false;
   try {
-    alreadyRunning = (await withRuntimeFor(cwd, () => runInPane(paneId, argv, { sessionFile }))).alreadyRunning;
+    alreadyRunning = (await runInPane(paneId, argv, { sessionFile })).alreadyRunning;
   } catch (err) {
     await closePane(paneId).catch(() => undefined);
     return { kind: "failed", error: `агент не запустился: ${err instanceof Error ? err.message : String(err)}` };

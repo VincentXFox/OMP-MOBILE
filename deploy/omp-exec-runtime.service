@@ -1,0 +1,30 @@
+[Unit]
+Description=OMP executor pane runtime (панели агентов под omp-exec)
+After=network.target
+
+[Service]
+Type=simple
+User=omp-exec
+Group=omp-exec
+Environment=HOME=/var/lib/omp-exec
+Environment=OMP_RUNTIME_SOCKET=/run/omp-exec-runtime/runtime.sock
+Environment=OMP_RUNTIME_STATE_DIR=/var/lib/omp-exec/state
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Свой runtime-каталог: без XDG_RUNTIME_DIR агент не поднимает collab-хост и не регистрируется.
+Environment=XDG_RUNTIME_DIR=/run/omp-exec-runtime/user
+ExecStartPre=/bin/sh -c 'mkdir -p -m 700 /run/omp-exec-runtime/user && chown omp-exec:omp-exec /run/omp-exec-runtime/user'
+ExecStart=/opt/omp-exec-launcher/bun /opt/omp-exec-runtime/runtime/main.ts
+Restart=always
+RestartSec=2
+RuntimeDirectory=omp-exec-runtime
+RuntimeDirectoryMode=0755
+StateDirectory=omp-exec
+ProtectHome=read-only
+ProtectSystem=full
+PrivateTmp=true
+ReadWritePaths=/run/omp-exec-runtime /var/lib/omp-exec /srv/omp-exec /tmp
+# Сокет рантайма создаётся 0600 под omp-exec: владельцу даём доступ ACL, а не группой.
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 100); do if [ -S /run/omp-exec-runtime/runtime.sock ]; then exec /usr/bin/setfacl -m u:vincentfox:rw /run/omp-exec-runtime/runtime.sock; fi; sleep 0.1; done; exit 1'
+
+[Install]
+WantedBy=multi-user.target

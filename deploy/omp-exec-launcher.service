@@ -1,0 +1,23 @@
+[Unit]
+Description=OMP executor launcher (запускает агентов строго от omp-exec)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/omp-exec-launcher/bun /opt/omp-exec-launcher/launcher.ts
+Restart=always
+RestartSec=2
+# Сокет и рабочие каталоги — только нужное; домашний каталог владельца не открываем.
+RuntimeDirectory=omp-exec-launcher
+RuntimeDirectoryMode=0755
+NoNewPrivileges=no
+ProtectHome=read-only
+ProtectSystem=full
+PrivateTmp=true
+ReadWritePaths=/run/omp-exec-launcher /srv/omp-exec /var/lib/omp-exec /var/log
+# Понижение прав делает сам лаунчер через setpriv; параметра «от кого» в API нет.
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 100); do if [ -S /run/omp-exec-launcher/launch.sock ]; then chmod 660 /run/omp-exec-launcher/launch.sock; chown root:omp-exec /run/omp-exec-launcher/launch.sock; exec /usr/bin/setfacl -m u:vincentfox:rw /run/omp-exec-launcher/launch.sock; fi; sleep 0.1; done; exit 1'
+
+[Install]
+WantedBy=multi-user.target
