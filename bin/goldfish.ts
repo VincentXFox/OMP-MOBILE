@@ -296,7 +296,21 @@ export async function runGoldfish(options: RunOptions): Promise<GoldfishRun> {
 	ensureProfile();
 	// Модель передаём явно: в профиле нет роли default, и без --model проверяющий
 	// молча ждёт выбора модели (первый прогон так и повис).
-	const args = ["--profile", PROFILE, "-p", prompt, "--no-session", "--no-skills", "--no-rules", "--no-context-files"];
+	// Изоляция не текстом промпта, а флагами: проверяющему доступны только чтение,
+	// поиск и обзор файлов. Ни правки, ни запись, ни запуск команд, ни расширения,
+	// ни правила исполнителя — им неоткуда взяться внутри процесса проверки.
+	const args = [
+		"--profile",
+		PROFILE,
+		"-p",
+		prompt,
+		"--no-session",
+		"--no-skills",
+		"--no-rules",
+		"--no-context-files",
+		"--no-extensions",
+		"--tools=read,grep,glob",
+	];
 	const model = options.model ?? defaultModel();
 	if (model !== null) args.push("--model", model);
 	if (options.model !== undefined) args.push("--model", options.model);
@@ -334,7 +348,7 @@ export async function runGoldfish(options: RunOptions): Promise<GoldfishRun> {
 		subjectHash: packet.subjectHash,
 		runner: {
 			kind: "spawn",
-			command: "omp --profile goldfish -p",
+			command: "omp --profile goldfish -p --no-extensions --tools=read,grep,glob",
 			model: options.model ?? null,
 			exitCode,
 			timedOut,
