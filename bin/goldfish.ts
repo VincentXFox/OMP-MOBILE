@@ -263,6 +263,27 @@ interface RunOptions {
 
 /** Запуск проверяющего: отдельный процесс, изолированный каталог, чистый контекст. */
 export async function runGoldfish(options: RunOptions): Promise<GoldfishRun> {
+	// Кривой вызов — это не проверка: отказ без исключения и без PASS.
+	const materials = (options as { materials?: unknown } | null)?.materials;
+	if (options === null || typeof options !== "object" || !Array.isArray(materials)) {
+		return {
+			schema: 1,
+			runId: "gf-invalid",
+			taskId: "",
+			stage: (options as { stage?: "plan" | "result" } | null)?.stage ?? "result",
+			verdict: "INSUFFICIENT-DATA",
+			packetHash: "",
+			subjectHash: "",
+			runner: { kind: "spawn", command: "", model: null, exitCode: null, timedOut: false, attempts: 0, isolation: "нет запуска" },
+			findings: [],
+			unverified: ["пакет не собран: не переданы материалы"],
+			startedAt: new Date().toISOString(),
+			finishedAt: new Date().toISOString(),
+			tookMs: 0,
+			dir: "",
+			attestation: null,
+		} as unknown as GoldfishRun;
+	}
 	const runId = `gf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 	const startedAt = new Date().toISOString();
 	const started = Date.now();

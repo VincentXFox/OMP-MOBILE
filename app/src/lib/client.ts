@@ -82,7 +82,13 @@ const TRANSCRIPT_TIMEOUT_MS = 10_000;
 /** Mirrors the TUI guest's WELCOME_TIMEOUT_MS: a host that never answers hello ends the join. */
 const WELCOME_TIMEOUT_MS = 30_000;
 /** Mirrors the TUI guest's SNAPSHOT_PROGRESS_TIMEOUT_MS: every snapshot chunk must make progress. */
-const SNAPSHOT_PROGRESS_TIMEOUT_MS = 30_000;
+/**
+ * Ожидание следующего куска снапшота. 30 с не хватало на больших сессиях
+ * (22 МБ истории уходило больше), и чат закрывался с «timed out waiting for the
+ * host's session snapshot» ещё до первого кадра. Ждём дольше, но не бесконечно:
+ * таймаут по-прежнему срабатывает, если прогресса нет вовсе.
+ */
+const SNAPSHOT_PROGRESS_TIMEOUT_MS = 120_000;
 /** Commit delay when `requestAnimationFrame` is unavailable (tests, non-DOM hosts). */
 const FRAME_FALLBACK_MS = 16;
 
