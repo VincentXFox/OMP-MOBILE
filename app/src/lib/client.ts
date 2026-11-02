@@ -88,7 +88,9 @@ const WELCOME_TIMEOUT_MS = 30_000;
  * host's session snapshot» ещё до первого кадра. Ждём дольше, но не бесконечно:
  * таймаут по-прежнему срабатывает, если прогресса нет вовсе.
  */
-const SNAPSHOT_PROGRESS_TIMEOUT_MS = 120_000;
+const SNAPSHOT_PROGRESS_TIMEOUT_MS = 60_000;
+/** Сколько раз подряд ждём снимок, прежде чем закрыть канал (60 с × 5 = 5 мин). */
+const SNAPSHOT_MAX_STALLS = 5;
 /** Commit delay when `requestAnimationFrame` is unavailable (tests, non-DOM hosts). */
 const FRAME_FALLBACK_MS = 16;
 
@@ -368,11 +370,28 @@ export class GuestClient {
 		}
 	}
 
+	#snapshotStalls = 0;
+
 	#armSnapshotProgressTimer(): void {
 		this.#clearSnapshotProgressTimer();
 		this.#snapshotProgressTimer = setTimeout(() => {
 			this.#snapshotProgressTimer = null;
-			this.#end("timed out waiting for the host's session snapshot");
+			// Сокет не рвём: при занятом агенте снапшот приходит позже, и раньше мы
+			// хоронили живую сессию. Показываем состояние и ждём дальше — с потолком,
+			// чтобы не висеть вечно на мёртвом хосте.
+			this.#snapshotStalls += 1;
+			if (this.#snapshotStalls > SNAPSHOT_MAX_STALLS) {
+				this.#end("timed out waiting for the host's session snapshot");
+				return;
+			}
+			this.#pushNotice(
+				"info",
+				this.#snapshotStalls === 1
+					? "Агент занят — ждём снимок сессии"
+					: `Ждём снимок сессии (попытка ${this.#snapshotStalls}/${SNAPSHOT_MAX_STALLS})`,
+			);
+			this.#commit();
+			this.#armSnapshotProgressTimer();
 		}, SNAPSHOT_PROGRESS_TIMEOUT_MS);
 	}
 
