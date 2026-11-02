@@ -8,7 +8,7 @@
  * размазывается по десятку файлов.
  */
 
-import { RuntimeError, type PaneStatus } from "./runtime/protocol.ts";
+import { RuntimeError, withRuntimeSocket, type PaneStatus } from "./runtime/protocol.ts";
 import { probeRuntime, runtimeRequest } from "./runtime/client.ts";
 
 /** Панель в том виде, в каком её видит шлюз. */
@@ -79,14 +79,9 @@ export async function withRuntimeFor<T>(cwd: string | null | undefined, fn: () =
 	// Диагностика выбора рантайма (видно в journalctl шлюза).
 	console.log(`[panes] runtimeFor(${cwd ?? "-"}) → ${socket ?? "прежний рантайм"}`);
 	if (socket === undefined) return fn();
-	const previous = process.env.OMP_RUNTIME_SOCKET;
-	process.env.OMP_RUNTIME_SOCKET = socket;
-	try {
-		return await fn();
-	} finally {
-		if (previous === undefined) delete process.env.OMP_RUNTIME_SOCKET;
-		else process.env.OMP_RUNTIME_SOCKET = previous;
-	}
+	// Сокет передаётся контекстом вызова, а не подменой process.env: параллельные
+	// операции с разными рантаймами больше не могут перепутать выбор.
+	return await withRuntimeSocket(socket, fn);
 }
 
 export async function listPanes(): Promise<ManagedPane[]> {

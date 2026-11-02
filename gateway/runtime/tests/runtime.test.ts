@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { connect } from "node:net";
 import { afterEach, expect, test } from "bun:test";
 import { startRuntime, launchArgvOf, restorationArgv, type RuntimeHandle } from "../server.ts";
+import { runtimeSocketPath, withRuntimeSocket } from "../protocol.ts";
 import { runtimeRequest, runtimeSubscribe } from "../client.ts";
 import { Screen } from "../screen.ts";
 import { keySequence } from "../keys.ts";
@@ -310,4 +311,25 @@ test("словарь клавиш: старые токены приложени�
   expect(keySequence("up")).toBe("\x1b[A");
   expect(keySequence("ж")).toBe("ж");
   expect(keySequence("нет-такой")).toBeNull();
+});
+
+test("сокет рантайма выбирается контекстом вызова, а не глобальной переменной", async () => {
+  const seen: string[] = [];
+  const worker = (name: string) =>
+    withRuntimeSocket(`/tmp/rt-${name}.sock`, async () => {
+      await Bun.sleep(name === "a" ? 20 : 5);
+      seen.push(`${name}:${runtimeSocketPath()}`);
+    });
+  await Promise.all([worker("a"), worker("b")]);
+  expect(seen.sort()).toEqual(["a:/tmp/rt-a.sock", "b:/tmp/rt-b.sock"]);
+});
+
+test("вложенный контекст возвращает прежний сокет после выхода", async () => {
+  await withRuntimeSocket("/tmp/outer.sock", async () => {
+    expect(runtimeSocketPath()).toBe("/tmp/outer.sock");
+    await withRuntimeSocket("/tmp/inner.sock", async () => {
+      expect(runtimeSocketPath()).toBe("/tmp/inner.sock");
+    });
+    expect(runtimeSocketPath()).toBe("/tmp/outer.sock");
+  });
 });

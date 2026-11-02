@@ -18,6 +18,8 @@
 /** Статусы панели. `shell` — оболочка готова и свободна, `closed` — панель закрыта
  * пользователем. `starting/working/blocked/idle` проставляет шлюз: рантайм про
  * состояние агента в collab-реестре ничего не знает. */
+import { AsyncLocalStorage } from "node:async_hooks";
+
 export const PANE_STATUSES = ["shell", "starting", "working", "blocked", "idle", "closed"] as const;
 export type PaneStatus = (typeof PANE_STATUSES)[number];
 
@@ -102,7 +104,20 @@ function defaultRuntimeDir(): string {
   return `/run/user/${process.getuid?.() ?? 0}`;
 }
 
+/**
+ * Сокет рантайма на время операции. Глобальная переменная окружения здесь не годится:
+ * два параллельных запуска панелей перетирали бы выбор друг друга. AsyncLocalStorage
+ * держит привязку в контексте асинхронного вызова, а не в процессе.
+ */
+const SOCKET_SCOPE = new AsyncLocalStorage<string>();
+
+export function withRuntimeSocket<T>(socket: string, fn: () => T): T {
+  return SOCKET_SCOPE.run(socket, fn);
+}
+
 export function runtimeSocketPath(): string {
+  const scoped = SOCKET_SCOPE.getStore();
+  if (scoped !== undefined && scoped !== "") return scoped;
   const explicit = process.env["OMP_RUNTIME_SOCKET"];
   return explicit !== undefined && explicit !== "" ? explicit : `${defaultRuntimeDir()}/omp-pocket-runtime.sock`;
 }
