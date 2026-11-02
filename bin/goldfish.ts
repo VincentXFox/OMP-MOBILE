@@ -202,6 +202,7 @@ export interface ParsedVerdict {
 
 /** Разбор ответа проверяющего: последний JSON-объект в выводе. */
 export function parseVerdict(out: string): ParsedVerdict | null {
+	// Ниже — после извлечения JSON: проверяются обязательные поля.
 	const matches = out.match(/\{[\s\S]*\}/gu);
 	if (matches === null) return null;
 	for (const candidate of [...matches].reverse()) {
@@ -220,7 +221,14 @@ export function parseVerdict(out: string): ParsedVerdict | null {
 				}
 			}
 			const list = (value: unknown): string[] => (Array.isArray(value) ? value.filter((x): x is string => typeof x === "string" && x.trim() !== "") : []);
-			return { verdict, findings, unverified: list(parsed.unverified), requested: list(parsed.requested) };
+			const unverified = list(parsed.unverified);
+			const requested = list(parsed.requested);
+			// Пустой объект {"verdict":"PASS"} — не проверка: нужны основания.
+			// PASS без findings и без unverified — это «ничего не проверил».
+			if (verdict === "PASS" && findings.length === 0 && unverified.length === 0 && requested.length === 0) return null;
+			if (verdict === "NEEDS-FIX" && findings.length === 0) return null;
+			if (verdict === "INSUFFICIENT-DATA" && requested.length === 0) return null;
+			return { verdict, findings, unverified, requested };
 		} catch {
 			continue;
 		}
@@ -313,7 +321,9 @@ export async function runGoldfish(options: RunOptions): Promise<GoldfishRun> {
 	}
 
 	const finishedAt = new Date().toISOString();
-	const verdict = finalVerdict(parsed);
+	// Аварийный выход процесса — не PASS, даже если в выводе что-то распозналось.
+	const abnormal = timedOut || (exitCode !== null && exitCode !== 0);
+	const verdict = abnormal && parsed !== null && parsed.verdict === "PASS" ? "ERROR" : finalVerdict(parsed);
 	const record: GoldfishRun = {
 		schema: SCHEMA_VERSION,
 		runId,
@@ -410,16 +420,36 @@ export function appendJournal(entry: Record<string, unknown>, path: string = JOU
  * уровней — иметь аттестацию верификатора. Это закрывает «написал рыбка проверила
  * в JSON и получил одобрение».
  */
+export interface FreshPassRejections {
+	/** Почему конкретные записи не приняты — для отчёта и тестов. */
+	reasons: string[];
+}
+
 export function freshPass(
 	runs: readonly GoldfishRun[],
 	stage: Stage,
 	subjectHash: string,
-	options: { projectDir?: string; requireAttestation?: boolean } = {},
+	options: { projectDir?: string; requireAttestation?: boolean; rejections?: string[] } = {},
 ): GoldfishRun | null {
+	const rejections = options.rejections ?? [];
 	for (const run of runs) {
 		if (run.stage !== stage || run.verdict !== "PASS" || run.subjectHash !== subjectHash) continue;
-		if (options.projectDir !== undefined && !runInProject(run, options.projectDir)) continue;
-		if (options.requireAttestation === true && run.attestation === undefined) continue;
+		if (options.projectDir !== undefined) {
+			const verified = runInProject(run, options.projectDir);
+			if (verified.kind !== "ok") {
+				rejections.push(`${run.runId}: ${verified.reason}`);
+				continue;
+			}
+		}
+		// Аттестация должна быть настоящей: пустой объект {} не считается.
+		if (options.requireAttestation === true) {
+			const attestation = run.attestation;
+			const real = attestation !== undefined && typeof attestation.mac === "string" && attestation.mac.length >= 32 && typeof attestation.by === "string" && attestation.by !== "";
+			if (!real) {
+				rejections.push(`${run.runId}: нет настоящей аттестации (пустой MAC не принимается)`);
+				continue;
+			}
+		}
 		return run;
 	}
 	return null;
@@ -435,12 +465,21 @@ function runInProject(run: GoldfishRun, projectDir: string): boolean {
 			if (!existsSync(file)) continue;
 			const body = readFileSync(file, "utf8");
 			const parsed = JSON.parse(body) as Partial<GoldfishRun>;
-			if (parsed.runId === run.runId && parsed.subjectHash === run.subjectHash && parsed.verdict === "PASS") return true;
+			if (parsed.runId !== run.runId) continue;
+			if (parsed.subjectHash !== run.subjectHash) return { kind: "reject", reason: "хеш предмета в записи не совпадает" };
+			if (parsed.verdict !== "PASS") return { kind: "reject", reason: "вердикт в записи не PASS" };
+			// Материалы должны быть именно из этого проекта: совпадение по окончанию
+			// пути не годится (запись для /different-project/app.ts не подтверждает app.ts).
+			const packet = JSON.parse(readFileSync(join(projectDir, ".omp", "gate", entry.name, "goldfish", `${run.runId}.json`), "utf8")) as { runner?: { isolation?: unknown } };
+			if (typeof packet.runner?.isolation !== "string" || !packet.runner.isolation.includes("профиль")) {
+				return { kind: "reject", reason: "в записи нет подтверждённой изоляции запуска" };
+			}
+			return { kind: "ok" };
 		}
-	} catch {
-		return false;
+	} catch (error) {
+		return { kind: "reject", reason: `запись не прочитана: ${error instanceof Error ? error.message : String(error)}` };
 	}
-	return false;
+	return { kind: "reject", reason: "записи прогона нет в каталоге приёмки проекта" };
 }
 
 /**

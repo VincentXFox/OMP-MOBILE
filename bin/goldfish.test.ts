@@ -111,7 +111,7 @@ describe("свежесть и привязка к проекту", () => {
 		verdict: "PASS",
 		packetHash: "p",
 		subjectHash: "s",
-		runner: { kind: "spawn", command: "omp", model: null, exitCode: 0, timedOut: false, attempts: 1, isolation: "тест" },
+		runner: { kind: "spawn", command: "omp --profile goldfish -p", model: null, exitCode: 0, timedOut: false, attempts: 1, isolation: "профиль goldfish (свой agentDir без хуков)" },
 		findings: [],
 		unverified: [],
 		startedAt: new Date().toISOString(),
@@ -155,7 +155,7 @@ describe("свежесть и привязка к проекту", () => {
 		const dir = sandbox();
 		publishRun(run(), dir, "slug");
 		expect(freshPass([run()], "result", "s", { projectDir: dir, requireAttestation: true })).toBeNull();
-		expect(freshPass([run({ attestation: { by: "omp-verifier", at: "now", mac: "x" } })], "result", "s", { projectDir: dir, requireAttestation: true })?.runId).toBe("gf-test-1");
+		expect(freshPass([run({ attestation: { by: "omp-verifier (uid omp-verifier)", at: new Date().toISOString(), mac: "a".repeat(64) } })], "result", "s", { projectDir: dir, requireAttestation: true })?.runId).toBe("gf-test-1");
 		rmSync(dir, { recursive: true, force: true });
 	});
 });
@@ -168,6 +168,46 @@ describe("журнал доказательств", () => {
 		const body = readFileSync(journal, "utf8");
 		expect(body).toContain("gf-j");
 		expect(body).not.toContain("sk-");
+		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+describe("обходы из ревью не проходят", () => {
+	test("пустой PASS и PASS без оснований отклоняются", () => {
+		expect(parseVerdict('{"verdict":"PASS"}')).toBeNull();
+		expect(parseVerdict('{"verdict":"PASS","findings":[]}')).toBeNull();
+		expect(parseVerdict('{"verdict":"PASS","unverified":[]}')).toBeNull();
+	});
+
+	test("NEEDS-FIX без замечаний и INSUFFICIENT-DATA без запроса отклоняются", () => {
+		expect(parseVerdict('{"verdict":"NEEDS-FIX"}')).toBeNull();
+		expect(parseVerdict('{"verdict":"INSUFFICIENT-DATA"}')).toBeNull();
+	});
+
+	test("пустая аттестация не удовлетворяет требование", () => {
+		const dir = mkdtempSync(join(tmpdir(), "gf-attest-"));
+		mkdirSync(join(dir, ".omp", "gate", "slug", "goldfish"), { recursive: true });
+		const run: GoldfishRun = {
+			schema: 1, runId: "gf-a", taskId: "t", stage: "result", verdict: "PASS", packetHash: "p", subjectHash: "s",
+			runner: { kind: "spawn", command: "omp", model: null, exitCode: 0, timedOut: false, attempts: 1, isolation: "профиль goldfish" },
+			findings: [], unverified: [], startedAt: "n", finishedAt: "n", tookMs: 1, dir,
+			attestation: { by: "", at: "", mac: "" },
+		};
+		publishRun(run, dir, "slug");
+		expect(freshPass([run], "result", "s", { projectDir: dir, requireAttestation: true })).toBeNull();
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	test("запись без подтверждённой изоляции не считается проверкой", () => {
+		const dir = mkdtempSync(join(tmpdir(), "gf-iso-"));
+		mkdirSync(join(dir, ".omp", "gate", "slug", "goldfish"), { recursive: true });
+		const run: GoldfishRun = {
+			schema: 1, runId: "gf-b", taskId: "t", stage: "result", verdict: "PASS", packetHash: "p", subjectHash: "s",
+			runner: { kind: "spawn", command: "omp", model: null, exitCode: 0, timedOut: false, attempts: 1, isolation: "" },
+			findings: [], unverified: [], startedAt: "n", finishedAt: "n", tookMs: 1, dir,
+		};
+		publishRun(run, dir, "slug");
+		expect(freshPass([run], "result", "s", { projectDir: dir })).toBeNull();
 		rmSync(dir, { recursive: true, force: true });
 	});
 });
