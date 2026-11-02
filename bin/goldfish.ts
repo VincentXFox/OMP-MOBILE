@@ -619,3 +619,34 @@ if (import.meta.main) {
 			process.exit(1);
 		});
 }
+
+/**
+ * Проверка свежести ЧЕРЕЗ ДЕМОН. Локальный JSON — это данные, а не доказательство:
+ * подпись аттестата знает только `omp-verifier` (отдельный uid, ключ недоступен
+ * исполнителю). Принимаем PASS только если демон подтвердил сертификат проекта.
+ */
+export async function freshPassVerified(
+	runs: readonly GoldfishRun[],
+	stage: Stage,
+	subjectHash: string,
+	options: { projectDir: string; slug: string; requireAttestation?: boolean; socketPath?: string },
+): Promise<{ run: GoldfishRun | null; reason: string }> {
+	const rejections: string[] = [];
+	const candidate = freshPass(runs, stage, subjectHash, { ...options, rejections });
+	if (candidate === null) return { run: null, reason: rejections.at(-1) ?? "нет записи прогона для текущего предмета" };
+
+	const socket = options.socketPath ?? process.env.OMP_VERIFIER_SOCKET ?? "/run/omp-verifier/verify.sock";
+	try {
+		const response = await fetch("http://verifier/", {
+			method: "POST",
+			body: JSON.stringify({ action: "verify", project: options.projectDir, slug: options.slug }),
+			...(Bun.version ? { unix: socket } : {}),
+		} as RequestInit & { unix?: string });
+		if (!response.ok) return { run: null, reason: `верификатор ответил ${response.status}` };
+		const body = (await response.json()) as { ok?: boolean; verdict?: string; detail?: string };
+		if (body.ok !== true || body.verdict !== "PASS") return { run: null, reason: `верификатор не подтвердил: ${body.detail ?? body.verdict ?? "нет вердикта"}` };
+		return { run: candidate, reason: "подтверждено верификатором" };
+	} catch (error) {
+		return { run: null, reason: `верификатор недоступен: ${error instanceof Error ? error.message : String(error)}` };
+	}
+}

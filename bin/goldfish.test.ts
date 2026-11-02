@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildPacket, finalVerdict, freshPass, loadRuns, parseVerdict, publishRun, appendJournal, type GoldfishRun } from "./goldfish.ts";
+import { buildPacket, finalVerdict, freshPass, freshPassVerified, loadRuns, parseVerdict, publishRun, appendJournal, type GoldfishRun } from "./goldfish.ts";
 import { classify } from "./goldfish-policy.ts";
 
 const sandbox = (): string => mkdtempSync(join(tmpdir(), "gf-test-"));
@@ -208,6 +208,22 @@ describe("обходы из ревью не проходят", () => {
 		};
 		publishRun(run, dir, "slug");
 		expect(freshPass([run], "result", "s", { projectDir: dir })).toBeNull();
+		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+describe("свежесть подтверждается демоном, а не локальным JSON", () => {
+	test("недоступный верификатор не даёт PASS", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "gf-daemon-"));
+		const run: GoldfishRun = {
+			schema: 1, runId: "gf-d", taskId: "t", stage: "result", verdict: "PASS", packetHash: "p", subjectHash: "s",
+			runner: { kind: "spawn", command: "omp", model: null, exitCode: 0, timedOut: false, attempts: 1, isolation: "профиль goldfish" },
+			findings: [], unverified: [], startedAt: "n", finishedAt: "n", tookMs: 1, dir,
+		};
+		publishRun(run, dir, "slug");
+		const result = await freshPassVerified([run], "result", "s", { projectDir: dir, slug: "slug", socketPath: "/run/does-not-exist.sock" });
+		expect(result.run).toBeNull();
+		expect(result.reason).toContain("верификатор");
 		rmSync(dir, { recursive: true, force: true });
 	});
 });
