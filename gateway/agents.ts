@@ -15,7 +15,7 @@ import { closeSync, fsyncSync, openSync, readFileSync, renameSync, statSync, wri
 import { basename, dirname, join } from "node:path";
 import { listHosts, type OmpHost } from "./hosts.ts";
 import { resolveBin } from "./bins.ts";
-import { bindPane, closePane, createPane, listPanes, panePids, runInPane } from "./panes.ts";
+import { bindPane, closePane, createPane, listPanes, panePids, runInPane, withRuntimeFor } from "./panes.ts";
 import { withStateFileLock } from "./recovery/migrate.ts";
 
 /**
@@ -165,7 +165,9 @@ async function launchAgentOnce(
 
   let paneId: string;
   try {
-    const pane = await createPane(cwd, { name: displayLabel.slice(0, 64), cols: PANE_COLS, rows: PANE_ROWS });
+    // Каталог агента определяет рантайм: список OMP_EXEC_CWDS → панели службы
+    // исполнителя (omp-exec), иначе — прежний рантайм владельца.
+    const pane = await withRuntimeFor(cwd, () => createPane(cwd, { name: displayLabel.slice(0, 64), cols: PANE_COLS, rows: PANE_ROWS }));
     paneId = pane.paneId;
   } catch (err) {
     return { kind: "failed", error: `панель не создана: ${err instanceof Error ? err.message : String(err)}` };
@@ -176,7 +178,7 @@ async function launchAgentOnce(
   const argv = [ompBin, "--cwd", cwd, "--allow-home", ...(model === undefined ? [] : ["--model", model]), ...ompArgs];
   let alreadyRunning = false;
   try {
-    alreadyRunning = (await runInPane(paneId, argv, { sessionFile })).alreadyRunning;
+    alreadyRunning = (await withRuntimeFor(cwd, () => runInPane(paneId, argv, { sessionFile }))).alreadyRunning;
   } catch (err) {
     await closePane(paneId).catch(() => undefined);
     return { kind: "failed", error: `агент не запустился: ${err instanceof Error ? err.message : String(err)}` };
@@ -264,7 +266,7 @@ export async function stopAgent(instanceId: string, opts: { force?: boolean } = 
   // убить чужой процесс. Для мёртвой записи остановка уже состоялась.
   if (!host.alive) {
     forgetStarted(instanceId);
-    await detachPane(instanceId).catch(() => undefined);
+    await detachPane(instanceId, host.cwd).catch(() => undefined);
     return { found: true, killed: true, scoped: false };
   }
 
@@ -279,13 +281,13 @@ export async function stopAgent(instanceId: string, opts: { force?: boolean } = 
   signal("SIGTERM");
   if (await waitHostGone(instanceId, 5_000)) {
     forgetStarted(instanceId);
-    await detachPane(instanceId).catch(() => undefined);
+    await detachPane(instanceId, host.cwd).catch(() => undefined);
     return { found: true, killed: true, scoped: false };
   }
   signal("SIGKILL");
   if (await waitHostGone(instanceId, 5_000)) {
     forgetStarted(instanceId);
-    await detachPane(instanceId).catch(() => undefined);
+    await detachPane(instanceId, host.cwd).catch(() => undefined);
     return { found: true, killed: true, scoped: false };
   }
   return { found: true, killed: false, scoped: false };
@@ -293,8 +295,8 @@ export async function stopAgent(instanceId: string, opts: { force?: boolean } = 
 
 /** Панель остаётся (в ней живая оболочка), но мёртвая сессия с неё снимается:
  * иначе панель продолжала бы считаться «панелью агента», которого уже нет. */
-async function detachPane(instanceId: string): Promise<void> {
-  const pane = (await listPanes()).find((candidate) => candidate.instanceId === instanceId);
+async function detachPane(instanceId: string, cwd?: string): Promise<void> {
+  const pane = (await withRuntimeFor(cwd, () => listPanes())).find((candidate) => candidate.instanceId === instanceId);
   if (pane === undefined) return;
   await bindPane(pane.paneId, { instanceId: null, sessionId: null, sessionFile: null, awaitingApproval: false, status: "idle", launchArgv: [] });
 }

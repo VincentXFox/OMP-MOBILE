@@ -57,6 +57,36 @@ export function isPaneGone(error: unknown): boolean {
   return error instanceof RuntimeError && (error.code === "pane_not_found" || error.code === "pane_closed");
 }
 
+/**
+ * Рантайм исполнителя: агенты, чей рабочий каталог попал в список
+ * `OMP_EXEC_CWDS`, исполняются в панелях службы `omp-exec-runtime` (учётка
+ * omp-exec). Пусто в списке — поведение как раньше, это и есть откат.
+ */
+const EXEC_SOCKET = process.env.OMP_EXEC_RUNTIME_SOCKET ?? "/run/omp-exec-runtime/runtime.sock";
+
+export function runtimeFor(cwd: string | null | undefined): string | undefined {
+	if (cwd === null || cwd === undefined || cwd === "") return undefined;
+	const list = (process.env.OMP_EXEC_CWDS ?? "")
+		.split(",")
+		.map(item => item.trim())
+		.filter(item => item !== "");
+	return list.some(prefix => cwd === prefix || cwd.startsWith(`${prefix}/`)) ? EXEC_SOCKET : undefined;
+}
+
+/** Выполнить запрос к рантайму, соответствующему каталогу агента. */
+export async function withRuntimeFor<T>(cwd: string | null | undefined, fn: () => Promise<T>): Promise<T> {
+	const socket = runtimeFor(cwd);
+	if (socket === undefined) return fn();
+	const previous = process.env.OMP_RUNTIME_SOCKET;
+	process.env.OMP_RUNTIME_SOCKET = socket;
+	try {
+		return await fn();
+	} finally {
+		if (previous === undefined) delete process.env.OMP_RUNTIME_SOCKET;
+		else process.env.OMP_RUNTIME_SOCKET = previous;
+	}
+}
+
 export async function listPanes(): Promise<ManagedPane[]> {
   const out = await runtimeRequest<{ panes: RawPane[] }>("pane.list", {}, 10_000);
   return out.panes.map(toManaged);
