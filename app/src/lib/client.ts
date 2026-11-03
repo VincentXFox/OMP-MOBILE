@@ -75,12 +75,42 @@ export interface GuestSnapshot {
 	loading: { received: number; total: number } | null;
 	/** Отправка: очередь переполнилась, часть кадров потеряна (накопительный счётчик). */
 	droppedFrames: number;
+	/**
+	 * Хост не отдал пропущенный кусок истории: часть вывода недоступна.
+	 * Показываем явно, а не выдаём устаревшее состояние за актуальное.
+	 */
+	historyGap: boolean;
 }
 
 const MAX_NOTICES = 50;
+
+/** Идентификатор записи транскрипта: по нему ищем разрыв истории после реконнекта. */
+function entryIdOf(entry: SessionEntry): string | null {
+	const candidate = entry as unknown as { id?: unknown };
+	return typeof candidate.id === "string" ? candidate.id : null;
+}
+
+function lastEntryId(entries: readonly SessionEntry[]): string | null {
+	for (let i = entries.length - 1; i >= 0; i -= 1) {
+		const id = entryIdOf(entries[i] as SessionEntry);
+		if (id !== null) return id;
+	}
+	return null;
+}
 const TRANSCRIPT_TIMEOUT_MS = 10_000;
 /** Mirrors the TUI guest's WELCOME_TIMEOUT_MS: a host that never answers hello ends the join. */
 const WELCOME_TIMEOUT_MS = 30_000;
+
+/**
+ * Сторож соединения. Сокет может оставаться «открытым», когда события уже не
+ * идут (мёртвый TCP через NAT, уснувший телефон): без проверки интерфейс
+ * показывает устаревшее состояние как актуальное.
+ */
+const WATCHDOG_TICK_MS = 5_000;
+/** Тишина дольше этого — повод переспросить хост (повторный hello). */
+const STALL_PROBE_MS = 20_000;
+/** Тишина после пробы — соединение считаем мёртвым и переподключаемся. */
+const STALL_RECONNECT_MS = 35_000;
 /** Mirrors the TUI guest's SNAPSHOT_PROGRESS_TIMEOUT_MS: every snapshot chunk must make progress. */
 /**
  * Ожидание следующего куска снапшота. 30 с не хватало на больших сессиях
@@ -135,6 +165,14 @@ export class GuestClient {
 	#reqSeq = 0;
 	#noticeSeq = 0;
 	#everConnected = false;
+	/** Сторож: последний полученный кадр и момент отправки пробы. */
+	#lastFrameAt = 0;
+	#probeSentAt = 0;
+	#watchdogTimer: Timer | null = null;
+	/** История заменилась не целиком: хост не хранит пропущенное — покажем пробел. */
+	#historyGap = false;
+	/** Последний известный id записи до переподключения — по нему ищем разрыв. */
+	#lastKnownEntryId: string | null = null;
 	#welcomed = false;
 	#welcomeTimer: Timer | null = null;
 	#snapshotProgressTimer: Timer | null = null;
@@ -232,6 +270,7 @@ export class GuestClient {
 	close(): void {
 		this.#clearWelcomeTimer();
 		this.#clearSnapshotProgressTimer();
+		this.#stopWatchdog();
 		this.#socket.close();
 	}
 
@@ -265,28 +304,48 @@ export class GuestClient {
 		this.#commit();
 	}
 
-	sendPrompt(text: string): void {
-		this.#socket.send({ t: "prompt", text });
+	/** @returns false — связи нет, промпт НЕ отправлен (текст остаётся у пользователя). */
+	sendPrompt(text: string): boolean {
+		if (this.#socket.sendCritical({ t: "prompt", text })) return true;
+		this.#pushNotice("warning", "Связи нет — промпт не отправлен");
+		this.#commit();
+		return false;
 	}
 
-	sendPromptWithImages(text: string, images: ReadonlyArray<{ data: string; mimeType: string }>): void {
-		this.#socket.send({
+	sendPromptWithImages(text: string, images: ReadonlyArray<{ data: string; mimeType: string }>): boolean {
+		const ok = this.#socket.sendCritical({
 			t: "prompt",
 			text,
 			images: images.map(i => ({ type: "image", data: i.data, mimeType: i.mimeType })),
 		});
+		if (!ok) {
+			this.#pushNotice("warning", "Связи нет — промпт с картинками не отправлен");
+			this.#commit();
+		}
+		return ok;
 	}
 
-	sendUiResponse(reqId: number, value?: CollabUiResponseValue): void {
-		this.#socket.send({ t: "ui-response", reqId, value });
+	sendUiResponse(reqId: number, value?: CollabUiResponseValue): boolean {
+		// Подтверждение без связи молча не копим: неизвестно, принял ли хост ответ.
+		if (!this.#socket.sendCritical({ t: "ui-response", reqId, value })) {
+			this.#pushNotice("warning", "Связи нет — подтверждение не отправлено, ответь ещё раз после восстановления");
+			this.#commit();
+			return false;
+		}
 		if (this.#uiRequest?.reqId === reqId) {
 			this.#showNextUiRequest();
 			this.#commit();
 		}
+		return true;
 	}
 
-	sendAbort(): void {
-		this.#socket.send({ t: "abort" });
+	sendAbort(): boolean {
+		if (!this.#socket.sendCritical({ t: "abort" })) {
+			this.#pushNotice("warning", "Связи нет — прерывание не отправлено");
+			this.#commit();
+			return false;
+		}
+		return true;
 	}
 
 	sendAgentCmd(cmd: "chat" | "kill" | "revive", agentId: string, text?: string): void {
@@ -324,7 +383,49 @@ export class GuestClient {
 		this.#socket.send({ t: "hello", proto: COLLAB_PROTO, name: this.#name, writeToken: this.#writeToken });
 		this.#phase = this.#everConnected ? "reconnecting" : "waiting";
 		this.#everConnected = true;
+		this.#lastFrameAt = Date.now();
+		this.#probeSentAt = 0;
+		this.#startWatchdog();
 		this.#commit();
+	}
+
+	/**
+	 * Сторож: раз в 5 секунд сверяет тишину. Сначала переспрашивает хост
+	 * (повторный hello — он отвечает свежим welcome), потом, если тишина
+	 * продолжается, переподключается. Параллельных попыток нет: пока идёт
+	 * проба, новых не шлём.
+	 */
+	#startWatchdog(): void {
+		this.#stopWatchdog();
+		if (typeof window === "undefined") return;
+		this.#watchdogTimer = setInterval(() => {
+			if (this.#phase === "ended") {
+				this.#stopWatchdog();
+				return;
+			}
+			if (!this.#socket.isOpen) return; // закрытый сокет ведёт обычный retry
+			const now = Date.now();
+			const silence = now - Math.max(this.#lastFrameAt, this.#socket.lastActivityAt);
+			if (silence >= STALL_PROBE_MS && this.#probeSentAt === 0) {
+				this.#probeSentAt = now;
+				this.#socket.send({ t: "hello", proto: COLLAB_PROTO, name: this.#name, writeToken: this.#writeToken });
+				this.#pushNotice("info", "Связь молчит — проверяю соединение");
+				this.#commit();
+				return;
+			}
+			if (this.#probeSentAt !== 0 && silence >= STALL_RECONNECT_MS) {
+				this.#probeSentAt = 0;
+				this.#pushNotice("info", "Соединение не отвечает — переподключаюсь");
+				this.reconnectNow();
+			}
+		}, WATCHDOG_TICK_MS);
+	}
+
+	#stopWatchdog(): void {
+		if (this.#watchdogTimer !== null) {
+			clearInterval(this.#watchdogTimer);
+			this.#watchdogTimer = null;
+		}
 	}
 
 	#handleClose(reason: string, willReconnect: boolean): void {
@@ -404,6 +505,8 @@ export class GuestClient {
 
 	/** Surfaces apply failures instead of letting the socket's recv chain swallow them. */
 	#applyFrameSafe(frame: HostFrame): void {
+		this.#lastFrameAt = Date.now();
+		this.#probeSentAt = 0;
 		try {
 			this.#applyFrame(frame);
 		} catch (err) {
@@ -420,6 +523,10 @@ export class GuestClient {
 	#applyFrame(frame: HostFrame): void {
 		switch (frame.t) {
 			case "welcome":
+				// Разрыв истории: запоминаем последний показанный id, чтобы после
+				// снапшота понять, догнал ли хост наш хвост или кусок потерян.
+				this.#lastKnownEntryId = this.#everConnected && this.#entries.length > 0 ? lastEntryId(this.#entries) : null;
+				this.#historyGap = false;
 				// A fresh welcome (first join or reconnect) restarts the snapshot.
 				// Entries already on screen stay until the new snapshot replaces
 				// them once complete, so a resync never blanks the transcript.
@@ -469,6 +576,13 @@ export class GuestClient {
 				}
 				this.#entries = pending.entries;
 				this.#entries.push(...pending.live);
+				// Хвост, который был на экране до переподключения, обязан найтись в новой
+				// истории; если его нет — хост её не хранит, показываем пробел.
+				if (this.#lastKnownEntryId !== null && !this.#entries.some((entry) => entryIdOf(entry) === this.#lastKnownEntryId)) {
+					this.#historyGap = true;
+					this.#pushNotice("warning", "Часть истории недоступна: хост отдал снапшот без пропущенного фрагмента");
+				}
+				this.#lastKnownEntryId = null;
 				this.#publishedEntries = [...this.#entries];
 				this.#pendingSnapshot = null;
 				this.#clearSnapshotProgressTimer();
@@ -722,6 +836,7 @@ export class GuestClient {
 			activeTools: this.#activeTools,
 			working: this.#working,
 			droppedFrames: this.#droppedFrames,
+			historyGap: this.#historyGap,
 			readOnly: this.#readOnly,
 			uiRequest: this.#uiRequest,
 			notices: this.#notices,

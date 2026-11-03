@@ -19,8 +19,13 @@ const RELAY_CLOSE_REASONS: Record<number, string> = {
 
 /** Первый ретрай короткий: короткий обрыв сети гасится до появления баннера. */
 const BACKOFF_BASE_MS = 400;
-/** Потолок паузы: после короткого падения релея чат должен подняться за секунды, а не за полминуты. */
-const BACKOFF_MAX_MS = 2_000;
+/**
+ * Потолок паузы: при долгом отказе нельзя долбить сервер каждые 2 секунды —
+ * растём до 20 с и держим разброс, чтобы клиенты не били синхронно.
+ */
+const BACKOFF_MAX_MS = 20_000;
+/** Пока браузер знает, что сети нет, попытки бессмысленны: ждём событие online. */
+const OFFLINE_WAIT_MS = 30_000;
 /** Max enveloped frames buffered while a reconnect is pending; overflow is dropped. */
 const MAX_PENDING_SENDS = 256;
 
@@ -59,6 +64,10 @@ export class CollabSocket {
 	#pendingSends: Uint8Array<ArrayBuffer>[] = [];
 	/** Время последнего ручного реконнекта — гасит дубли от пары wake-событий. */
 	#lastManualReconnect = 0;
+	/** Последняя активность сокета: по ней ловится «открыт, но события не идут». */
+	#lastActivityAt = 0;
+	/** Ждём событие online вместо таймера: иначе офлайн-режим крутит попытки вхолостую. */
+	#waitingOnline = false;
 
 	constructor(opts: CollabSocketOptions) {
 		this.#opts = opts;
@@ -68,9 +77,35 @@ export class CollabSocket {
 		return this.#ws?.readyState === WebSocket.OPEN;
 	}
 
+	/** Момент последнего кадра/открытия: клиентский сторож ловит по нему зависание. */
+	get lastActivityAt(): number {
+		return this.#lastActivityAt;
+	}
+
+	/**
+	 * Отправка пользовательской команды. В отличие от обычной очереди, здесь
+	 * «не знаю, принял ли сервер» превращается в явный отказ: молча копить
+	 * промпт/подтверждение и отправить его через минуту — это дубль или потеря.
+	 */
+	sendCritical(frame: GuestFrame): boolean {
+		const ws = this.#ws;
+		if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+		void this.#sendChain.then(async () => {
+			try {
+				const envelope = packEnvelope(0, await seal(await this.#opts.key, frame));
+				const current = this.#ws;
+				if (current && current.readyState === WebSocket.OPEN) current.send(envelope);
+			} catch {
+				// сокет умер между проверкой и отправкой: отказ уже показан вызывающему
+			}
+		});
+		return true;
+	}
+
 	connect(): void {
 		if (this.#ws || this.#retryTimer) return;
 		this.#closed = false;
+		this.#waitingOnline = false;
 		this.#retryMissingRoom = false;
 		this.#attempt = 0;
 		this.#openSocket();
@@ -133,6 +168,7 @@ export class CollabSocket {
 		this.#clearRetry();
 		const wasClosed = this.#closed;
 		this.#closed = true;
+		this.#waitingOnline = false;
 		this.#retryMissingRoom = false;
 		this.#pendingSends.length = 0;
 		const ws = this.#ws;
@@ -148,11 +184,23 @@ export class CollabSocket {
 	}
 
 	#openSocket(): void {
+		// Один сокет на клиента: параллельные попытки дают двойные кадры и двойные
+		// подтверждения. Старый закрываем до открытия нового.
+		const previous = this.#ws;
+		if (previous !== null && previous.readyState !== WebSocket.CLOSED) {
+			this.#ws = null;
+			try {
+				previous.close(4000, "superseded by new attempt");
+			} catch {
+				// уже закрывается
+			}
+		}
 		const ws = new WebSocket(`${this.#opts.wsUrl}?role=${this.#opts.role}`);
 		ws.binaryType = "arraybuffer";
 		this.#ws = ws;
 		ws.onopen = () => {
 			if (this.#ws !== ws) return;
+			this.#lastActivityAt = Date.now();
 			if (!this.#retryMissingRoom) this.#attempt = 0;
 			for (const envelope of this.#pendingSends) ws.send(envelope);
 			this.#pendingSends.length = 0;
@@ -160,6 +208,7 @@ export class CollabSocket {
 		};
 		ws.onmessage = (event: MessageEvent) => {
 			if (this.#ws !== ws) return;
+			this.#lastActivityAt = Date.now();
 			this.#handleMessage(ws, event.data);
 		};
 		ws.onerror = () => {
@@ -253,12 +302,31 @@ export class CollabSocket {
 	#scheduleRetry(): void {
 		const base = Math.min(BACKOFF_BASE_MS * 2 ** this.#attempt, BACKOFF_MAX_MS);
 		this.#attempt++;
-		const delay = base * (0.75 + Math.random() * 0.5);
-		this.#retryTimer = setTimeout(() => {
+		const delay = Math.round(base * (0.8 + Math.random() * 0.5));
+		const retry = (): void => {
 			this.#retryTimer = undefined;
 			if (this.#closed) return;
 			this.#openSocket();
-		}, delay);
+		};
+		// Сеть «по мнению браузера» отсутствует — ждём событие online, но не дольше
+		// OFFLINE_WAIT_MS: события может не быть (баг платформы), а связь появиться.
+		if (typeof navigator !== "undefined" && navigator.onLine === false) {
+			this.#waitingOnline = true;
+			const onOnline = (): void => {
+				if (this.#closed) return;
+				this.#waitingOnline = false;
+				this.#clearRetry();
+				retry();
+			};
+			if (typeof window !== "undefined") window.addEventListener("online", onOnline, { once: true });
+			this.#retryTimer = setTimeout(() => {
+				if (typeof window !== "undefined") window.removeEventListener("online", onOnline);
+				this.#waitingOnline = false;
+				retry();
+			}, OFFLINE_WAIT_MS);
+			return;
+		}
+		this.#retryTimer = setTimeout(retry, delay);
 	}
 
 	#clearRetry(): void {

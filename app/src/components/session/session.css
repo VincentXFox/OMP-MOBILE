@@ -1654,3 +1654,15 @@
 	flex: 1;
 }
 .ss-agent-summary-chevron { color: var(--fg-faint); flex: none; }
+
+/* Пропущенный фрагмент истории: показываем явно, а не молча */
+.ss-gap-banner {
+	margin: 8px 12px;
+	padding: 8px 12px;
+	border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--warning) 12%, transparent);
+	color: var(--fg);
+	font-size: 12.5px;
+	line-height: 1.45;
+}

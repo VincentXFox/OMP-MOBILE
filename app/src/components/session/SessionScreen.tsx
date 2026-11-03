@@ -1194,8 +1194,13 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 			} else {
 				setPendingPrompts(prev => prev + 1);
 			}
-		} else if (images.length > 0) client.sendPromptWithImages(fullText, images);
-		else client.sendPrompt(fullText);
+		} else if (images.length > 0) {
+			if (!client.sendPromptWithImages(fullText, images)) return;
+		} else if (!client.sendPrompt(fullText)) {
+			// Связи нет и промпт не ушёл: текст остаётся в поле, чтобы пользователь
+			// видел, что сообщение не отправлено, и не получил дубль после реконнекта.
+			return;
+		}
 		setDraft("");
 		setImages([]);
 		setTextFiles([]);
@@ -1645,7 +1650,12 @@ export function SessionScreen(props: { client: GuestClient; onLeave: () => void;
 				{snap.phase === "connecting" && <div className="ss-phase-banner">Подключение…</div>}
 				{snap.phase === "waiting" && !previewing && (
 					<div className="ss-phase-banner">
-						{snap.loading !== null
+						{snap.historyGap && (
+				<div className="ss-gap-banner" role="status">
+					Часть истории недоступна: хост не отдал пропущенный фрагмент. Обнови сессию, чтобы увидеть актуальное состояние.
+				</div>
+			)}
+			{snap.loading !== null
 							? `Загрузка сессии: ${snap.loading.received} / ${snap.loading.total}`
 							: "Ожидание снимка сессии…"}
 					</div>

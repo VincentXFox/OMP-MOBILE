@@ -87,6 +87,12 @@ export function App(): ReactNode {
 	const [pendingInstanceId, setPendingInstanceId] = useState<string | null>(initial.current.instanceId);
 	const [hosts, setHosts] = useState<HostInfo[] | null>(null);
 	const [hostsError, setHostsError] = useState<string | null>(null);
+	/** Токен не принят шлюзом (401): это не обрыв связи, а требование входа —
+	 *  интерфейс должен сказать это явно, а не «нет связи». */
+	const [authNeeded, setAuthNeeded] = useState(false);
+	/** Без токена опрос каждые 5 с — это долбёж в 401: пока вход не восстановлен, не опрашиваем. */
+	const authNeededRef = useRef(false);
+	authNeededRef.current = authNeeded;
 	const [filterCwd, setFilterCwd] = useState<string | null>(null);
 	const [client, setClient] = useState<GuestClient | null>(null);
 	const clientRef = useRef<GuestClient | null>(null);
@@ -249,10 +255,15 @@ export function App(): ReactNode {
 				if (!alive) return;
 				hostsVersion.current = delta.version;
 				setNetState("online");
+				// Связь восстановлена — снимаем баннер сразу, а не только когда приехал
+				// новый список: при «реестр не менялся» ответ 200 всё равно доказывает,
+				// что шлюз доступен. Иначе после обрыва баннер «Нет связи» висел вечно,
+				// хотя опрос /api/hosts шёл успешно каждые 5 с.
+				setHostsError(null);
+				setAuthNeeded(false);
 				if (delta.hosts === null) return; // реестр не менялся: только версия
 				const list = delta.hosts;
 				setHosts(list);
-				setHostsError(null);
 				// победил другой кандидат — перечитываем реестр немедленно, не ждём 5 с
 				const active = getActiveBase();
 				if (active !== lastActive) {
@@ -264,6 +275,7 @@ export function App(): ReactNode {
 			} catch (err) {
 				if (!alive) return;
 				const status = err instanceof GatewayError ? err.status : 0;
+				setAuthNeeded(status === 401);
 				setHostsError(
 					status === 401
 						? "Шлюз вернул 401 — открой Настройки и введи токен."
@@ -281,7 +293,12 @@ export function App(): ReactNode {
 		};
 		const start = (): void => {
 			stop();
-			timer = window.setInterval(() => void poll(), 5000);
+			timer = window.setInterval(() => {
+				// Токен не принят: повторять запрос каждые 5 с бессмысленно и вредно —
+				// ждём, пока пользователь введёт токен (кнопка «Повторить»/Настройки).
+				if (authNeededRef.current) return;
+				void poll();
+			}, 5000);
 		};
 		const sync = (): void => {
 			if (document.visibilityState === "visible") {
@@ -575,7 +592,11 @@ export function App(): ReactNode {
 						<span className="pk-net-dot" aria-hidden="true" />
 						{netState !== "online" && (
 							<span className="pk-net-label">
-								{netState === "offline" ? "Нет сети" : "Нет связи со шлюзом — переподключение…"}
+								{authNeeded
+									? "Нужен вход — токен не принят"
+									: netState === "offline"
+										? "Нет сети"
+										: "Нет связи со шлюзом — переподключение…"}
 							</span>
 						)}
 					</span>
