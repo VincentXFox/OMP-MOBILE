@@ -302,6 +302,22 @@ export async function runGoldfish(options: RunOptions): Promise<GoldfishRun> {
 	const packet = buildPacket(input);
 	writeFileSync(join(dir, "packet.md"), packet.text, "utf8");
 	writeFileSync(join(dir, "packet.json"), json({ ...input, hash: packet.hash, subjectHash: packet.subjectHash }), "utf8");
+	// Манифест проверенной версии: путь, размер и sha256 каждого файла. Нужен, чтобы
+	// после ревью можно было доказать, что предмет не менялся.
+	try {
+		const manifest = input.materials.map((path) => {
+			try {
+				const bytes = readFileSync(path);
+				return { path, size: bytes.byteLength, sha256: createHash("sha256").update(bytes).digest("hex") };
+			} catch {
+				return { path, size: null, sha256: null };
+			}
+		});
+		const digest = createHash("sha256").update(manifest.map((m) => `${m.path}|${m.size}|${m.sha256}`).join("\n")).digest("hex").slice(0, 32);
+		writeFileSync(join(dir, "materials.json"), json({ digest, files: manifest }), "utf8");
+	} catch {
+		// манифест вспомогательный: его отсутствие не ломает прогон, но и не подтверждает
+	}
 
 	// Рабочий каталог проверяющего: копия материалов не делается — они читаются по
 	// указанным путям, но сам процесс стартует вне проекта, чтобы не подхватить

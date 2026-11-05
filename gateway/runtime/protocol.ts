@@ -112,6 +112,11 @@ function defaultRuntimeDir(): string {
 const SOCKET_SCOPE = new AsyncLocalStorage<string>();
 
 export function withRuntimeSocket<T>(socket: string, fn: () => T): T {
+  // Пустой сокет не должен молча уводить операцию в рантайм по умолчанию:
+  // это тихая подмена чужого рантайма (аудит 2026-11-02).
+  if (typeof socket !== "string" || socket === "") {
+    throw new Error("withRuntimeSocket: пустой путь сокета рантайма");
+  }
   return SOCKET_SCOPE.run(socket, fn);
 }
 
