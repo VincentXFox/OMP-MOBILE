@@ -408,9 +408,9 @@ export class GuestClient {
 			const silence = now - Math.max(this.#lastFrameAt, this.#socket.lastActivityAt);
 			if (silence >= STALL_PROBE_MS && this.#probeSentAt === 0) {
 				this.#probeSentAt = now;
+				// Проба — тихая: на простое (агент молчит) это норма, и уведомление
+				// только пугает. Пользователь увидит сообщение, если дойдёт до реконнекта.
 				this.#socket.send({ t: "hello", proto: COLLAB_PROTO, name: this.#name, writeToken: this.#writeToken });
-				this.#pushNotice("info", "Связь молчит — проверяю соединение");
-				this.#commit();
 				return;
 			}
 			if (this.#probeSentAt !== 0 && silence >= STALL_RECONNECT_MS) {

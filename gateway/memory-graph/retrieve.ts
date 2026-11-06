@@ -15,6 +15,8 @@ export function projectRelevance(factProject: string, cwd: string | null | undef
 	const project = factProject.replace(/\/+$/u, "");
 	const here = cwd.replace(/\/+$/u, "");
 	if (project === here) return 1;
+	/** SHARED: общий слой памяти всех агентов (project = "shared/...") виден в любом проекте с пониженным весом. */
+	if (project.startsWith("shared/")) return 0.5;
 	if (project.startsWith(`${here}/`)) return 0.9;
 	if (here.startsWith(`${project}/`) || (project === "" && here.startsWith("/"))) return project === "" || project === "/" ? 0.35 : 0.6;
 	return 0;
@@ -82,7 +84,15 @@ export function rankFacts(facts: readonly GraphFact[], options: RankOptions = {}
 		const score = base * (0.4 + 0.6 * relevance);
 		return { ...fact, score: Number(score.toFixed(6)), matched: lex.matched };
 	});
-	const relevant = scored.filter((fact) => projectRelevance(fact.project, options.project ?? null) > 0);
+	/* SHARED_NOISE: сырые промпты и связи из общего слоя в контекст не подмешиваем (мусор и риск утечки). */
+	const relevant = scored.filter((fact) => {
+		if (projectRelevance(fact.project, options.project ?? null) <= 0) return false;
+		// Виды приходят из разных версий экстрактора: сравниваем как строки, чтобы
+		// новые виды (ask/relation) не ломали типизацию и не просачивались в контекст.
+		const kind = String(fact.kind);
+		if (fact.project.startsWith("shared/") && (kind === "ask" || kind === "relation")) return false;
+		return true;
+	});
 	relevant.sort((a, b) => b.score - a.score || b.lastSeen - a.lastSeen);
 	return relevant.slice(0, Math.max(1, limit));
 }
@@ -101,7 +111,13 @@ function shortDate(at: number): string {
 	return new Date(at).toISOString().slice(0, 10);
 }
 
+/** Сколько фактов общего слоя максимум допускаем в блок: локальные важнее. */
+const MAX_SHARED = 4;
+
 const KIND_LABEL: Record<string, string> = {
+	episode: "эпизод",
+	ask: "запрос",
+	relation: "связь",
 	decision: "решение",
 	insight: "причина",
 	fix: "исправлено",
@@ -123,7 +139,17 @@ export function contextBlock(db: Database, options: RankOptions & { maxChars?: n
 	if (ranked.length === 0) return "";
 	const lines: string[] = [];
 	let used = 0;
+	let sharedUsed = 0;
+	const picked: RankedFact[] = [];
 	for (const fact of ranked) {
+		if (fact.project.startsWith("shared/")) {
+			if (sharedUsed >= MAX_SHARED) continue;
+			sharedUsed++;
+		}
+		picked.push(fact);
+		if (picked.length >= (options.limit ?? 12)) break;
+	}
+	for (const fact of picked) {
 		const label = KIND_LABEL[fact.kind] ?? fact.kind;
 		const text = fact.fact.length > 240 ? `${fact.fact.slice(0, 239)}…` : fact.fact;
 		const line = `- [${label}] ${text} (${projectLabel(fact.project)}, ${shortDate(fact.lastSeen)})`;

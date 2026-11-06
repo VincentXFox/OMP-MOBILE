@@ -111,12 +111,40 @@ export async function createPane(cwd: string, opts: { name?: string; cols?: numb
  * процесса в дереве панели: cwd сам по себе ничего не доказывает — агент может
  * жить в чужой панели (например, в унаследованной панели прежнего рантайма),
  * а в том же каталоге стоять наша свободная панель. Не подтвердилось — «панели нет». */
-export async function paneOfHost(host: { instanceId: string; pid: number; cwd: string }): Promise<ManagedPane | null> {
+/**
+ * Кэш «инстанс → панель»: поиск по pid — это обход всех панелей с запросом
+ * процессов на каждую (157 панелей → 7 с на открытие терминала, замер 06.11).
+ */
+const paneByInstance = new Map<string, { paneId: string; at: number }>();
+const PANE_CACHE_MS = 60_000;
+
+export async function paneOfHost(host: { instanceId: string; pid: number; cwd: string; sessionId?: string }): Promise<ManagedPane | null> {
+  const cached = paneByInstance.get(host.instanceId);
+  if (cached !== undefined && Date.now() - cached.at < PANE_CACHE_MS) {
+    const panes = (await listPanes()).filter((pane) => pane.status !== "closed");
+    const hit = panes.find((pane) => pane.paneId === cached.paneId);
+    if (hit !== undefined) return hit;
+    paneByInstance.delete(host.instanceId);
+  }
   const panes = (await listPanes()).filter((pane) => pane.status !== "closed");
   const bound = panes.find((pane) => pane.instanceId === host.instanceId);
-  if (bound !== undefined) return bound;
+  if (bound !== undefined) {
+    paneByInstance.set(host.instanceId, { paneId: bound.paneId, at: Date.now() });
+    return bound;
+  }
+  // Панель могла потерять привязку (рестарт агента): ищем по сессии, это дешево.
+  if (host.sessionId !== undefined && host.sessionId !== "") {
+    const bySession = panes.find((pane) => pane.sessionId === host.sessionId);
+    if (bySession !== undefined) {
+      paneByInstance.set(host.instanceId, { paneId: bySession.paneId, at: Date.now() });
+      return bySession;
+    }
+  }
   for (const candidate of panes) {
-    if ((await panePids(candidate.paneId)).includes(host.pid)) return candidate;
+    if ((await panePids(candidate.paneId)).includes(host.pid)) {
+      paneByInstance.set(host.instanceId, { paneId: candidate.paneId, at: Date.now() });
+      return candidate;
+    }
   }
   return null;
 }
@@ -161,11 +189,24 @@ async function paneShellPid(paneId: string): Promise<number> {
 /** Снимок панели. `lines` отсчитываются от конца вместе со скроллбеком
  * (`source: recent`): «подтверждения» агента легко уезжают выше видимого экрана,
  * и режим visible вернул бы ровно 34 строки панели. */
-export async function readPane(paneId: string, format: "text" | "ansi" = "text", lines?: number): Promise<string> {
+/**
+ * Чтение панели. `visible` — только экран (по умолчанию для ANSI), `recent` —
+ * последние `lines` строк. Раньше всегда запрашивался recent, и ANSI-снимок
+ * тянул весь скроллбэк: 230+ КБ и секунды ожидания на кадр (06.11).
+ */
+export async function readPane(
+  paneId: string,
+  format: "text" | "ansi" = "text",
+  linesOrSource?: number | "visible" | "recent",
+  linesArg?: number,
+): Promise<string> {
+  const legacyLines = typeof linesOrSource === "number" ? linesOrSource : undefined;
+  const source = typeof linesOrSource === "string" ? linesOrSource : "recent";
+  const lines = linesArg ?? legacyLines;
   const out = await runtimeRequest<{ text: string }>(
     "pane.read",
-    { paneId, format, source: "recent", ...(lines === undefined ? {} : { lines }) },
-    15_000,
+    { paneId, format, source, ...(lines === undefined ? {} : { lines }) },
+    20_000,
   );
   return out.text;
 }

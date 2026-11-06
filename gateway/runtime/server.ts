@@ -506,7 +506,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
           const source = params["source"] === undefined ? "visible" : String(params["source"]);
           if (source !== "visible" && source !== "recent") throw new RuntimeError("invalid_params", "invalid source");
           return {
-            text: format === "ansi" ? pane.screen.ansi() : pane.screen.text(source as "visible" | "recent", lines),
+            text:
+              format === "ansi"
+                ? pane.screen.ansi(source as "visible" | "recent", lines)
+                : pane.screen.text(source as "visible" | "recent", lines),
             revision: pane.seq,
           };
         });

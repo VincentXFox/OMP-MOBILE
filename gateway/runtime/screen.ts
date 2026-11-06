@@ -9,6 +9,10 @@
 import { Terminal } from "@xterm/headless";
 import { SerializeAddon } from "@xterm/addon-serialize";
 
+/** Предел истории для ANSI-снимка и максимальный размер ответа терминала. */
+const MAX_ANSI_SCROLLBACK = 200;
+const MAX_ANSI_BYTES = 96 * 1024;
+
 export class Screen {
   readonly terminal: Terminal;
   private readonly serializer: SerializeAddon;
@@ -45,8 +49,19 @@ export class Screen {
     return out.join("\n");
   }
 
-  ansi(): string {
-    return this.serializer.serialize({ scrollback: 1000 });
+  /**
+   * ANSI-снимок экрана. По умолчанию — только видимое окно: сериализация всего
+   * скроллбэка (1000 строк) давала ответы в сотни килобайт, и терминал в PWA
+   * выглядел зависшим (замер 06.11: 233 КБ и 7.5 с на один кадр).
+   */
+  ansi(source: "visible" | "recent" = "visible", lines = this.terminal.rows): string {
+    const scrollback = source === "visible" ? 0 : Math.min(Math.max(1, lines), MAX_ANSI_SCROLLBACK);
+    const text = this.serializer.serialize({ scrollback });
+    if (text.length <= MAX_ANSI_BYTES) return text;
+    // Обрезаем по строкам, чтобы не рвать escape-последовательности посередине.
+    const cut = text.slice(text.length - MAX_ANSI_BYTES);
+    const firstNewline = cut.indexOf("\n");
+    return firstNewline === -1 ? cut : cut.slice(firstNewline + 1);
   }
 
   resize(cols: number, rows: number): void {

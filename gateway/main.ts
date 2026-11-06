@@ -1149,11 +1149,26 @@ async function route(req: Request, url: URL): Promise<Response> {
   const termMatch = /^\/api\/agents\/([^/]+)\/terminal$/.exec(url.pathname);
   if (termMatch && req.method === "GET") {
     const format = url.searchParams.get("format") === "ansi" ? "ansi" : "plain";
-    const outcome = await readTerminal(decodeURIComponent(termMatch[1]), format);
+    const sourceParam = url.searchParams.get("source") === "recent" ? "recent" : "visible";
+    const linesParam = Number(url.searchParams.get("lines"));
+    const outcome = await readTerminal(decodeURIComponent(termMatch[1]), format, {
+      source: sourceParam,
+      lines: Number.isFinite(linesParam) && linesParam > 0 ? linesParam : undefined,
+    });
     if (outcome.kind === "not_found") return json(404, { error: outcome.error });
     if (outcome.kind === "not_managed") return json(404, { error: outcome.error, code: "agent_not_managed" });
     if (outcome.kind === "failed") return json(502, { error: outcome.error });
-    return json(200, { paneId: outcome.paneId, text: outcome.text, ...(outcome.format === "ansi" ? { format: "ansi" } : {}) });
+    // Жёсткий предел ответа: даже если рантайм отдал весь скроллбэк, клиент не
+    // получает сотни килобайт на каждый кадр (терминал «висел» именно на этом).
+    const MAX_TERMINAL_BYTES = 64 * 1024;
+    const raw = outcome.text;
+    const text = raw.length > MAX_TERMINAL_BYTES ? raw.slice(raw.length - MAX_TERMINAL_BYTES) : raw;
+    return json(200, {
+      paneId: outcome.paneId,
+      text,
+      ...(text.length !== raw.length ? { truncated: true } : {}),
+      ...(outcome.format === "ansi" ? { format: "ansi" } : {}),
+    });
   }
 
   const keysMatch = /^\/api\/agents\/([^/]+)\/terminal\/keys$/.exec(url.pathname);

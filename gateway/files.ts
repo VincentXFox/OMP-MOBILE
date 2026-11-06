@@ -84,7 +84,7 @@ async function resolvePane(instanceId: string): Promise<PaneResolution> {
   try {
     // paneOfHost при неоднозначности (несколько панелей в каталоге) бросает
     // исключение — это сбой, а не «панели нет»: угадывать чужую нельзя.
-    const pane = await paneOfHost(host);
+    const pane = await paneOfHost({ ...host, sessionId: host.sessionId });
     if (pane === null) return { kind: "not_managed", error: "агент не управляется панелью шлюза" };
     return { kind: "ok", paneId: pane.paneId };
   } catch (err) {
@@ -103,11 +103,22 @@ export type TerminalRead =
   | { kind: "not_managed"; error: string }
   | { kind: "failed"; error: string };
 
-export async function readTerminal(instanceId: string, format: "plain" | "ansi" = "plain"): Promise<TerminalRead> {
+/**
+ * Снимок терминала. `source`/`lines` ограничивают окно: по умолчанию только
+ * видимый экран. Полный скроллбэк (1000 строк) давал 230+ КБ на кадр и терминал
+ * в PWA выглядел зависшим (замер 06.11: 7.5 с на один ответ).
+ */
+export async function readTerminal(
+  instanceId: string,
+  format: "plain" | "ansi" = "plain",
+  options: { source?: "visible" | "recent"; lines?: number } = {},
+): Promise<TerminalRead> {
   const pane = await resolvePane(instanceId);
   if (pane.kind !== "ok") return pane;
+  const source = options.source === "recent" ? "recent" : "visible";
+  const lines = Number.isFinite(options.lines) ? Math.max(1, Math.min(2000, Number(options.lines))) : undefined;
   try {
-    const text = await readPane(pane.paneId, format === "ansi" ? "ansi" : "text");
+    const text = await readPane(pane.paneId, format === "ansi" ? "ansi" : "text", source, lines);
     return format === "ansi" ? { kind: "ok", paneId: pane.paneId, text, format: "ansi" } : { kind: "ok", paneId: pane.paneId, text };
   } catch (err) {
     return { kind: "failed", error: `чтение панели не удалось: ${paneFailure(err)}` };

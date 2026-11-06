@@ -1292,10 +1292,20 @@ export async function applyAgentSettings(
 }
 
 /** Terminal pane snapshot. `null` = unknown host; `{error}` = agent is not managed by a gateway pane. */
-export async function getTerminal(instanceId: string, format: "plain" | "ansi" = "plain"): Promise<TerminalResult | null> {
+export async function getTerminal(
+	instanceId: string,
+	format: "plain" | "ansi" = "plain",
+	options: { source?: "visible" | "recent"; lines?: number } = {},
+): Promise<TerminalResult | null> {
 	try {
-		const data = await request<{ paneId?: unknown; text?: unknown; format?: unknown }>(
-			`/api/agents/${encodeURIComponent(instanceId)}/terminal${format === "ansi" ? "?format=ansi" : ""}`,
+		// Только видимое окно: полный скроллбэк — это сотни килобайт на кадр,
+		// из-за которых терминал в PWA выглядел зависшим (замер 06.11).
+		const params = new URLSearchParams();
+		if (format === "ansi") params.set("format", "ansi");
+		params.set("source", options.source ?? "visible");
+		if (options.lines !== undefined) params.set("lines", String(options.lines));
+		const data = await request<{ paneId?: unknown; text?: unknown; format?: unknown; truncated?: unknown }>(
+			`/api/agents/${encodeURIComponent(instanceId)}/terminal?${params.toString()}`,
 		);
 		if (typeof data.paneId === "string" && typeof data.text === "string") {
 			return { paneId: data.paneId, text: data.text, ...(data.format === "ansi" ? { format: "ansi" as const } : {}) };
