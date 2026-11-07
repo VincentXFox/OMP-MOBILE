@@ -184,8 +184,13 @@ export function buildPacket(input: PacketInput): { text: string; hash: string; s
 		"- Проверяй утверждения, а не формулировки: требуй проверяемость и ссылки на факты.",
 		"- Если данных не хватает — верни INSUFFICIENT-DATA и перечисли, что нужно дослать.",
 		"- Пустой, повреждённый или просроченный ответ не считается проверкой.",
+		// PASS без оснований не принимается: проверяющий обязан показать, ЧТО он проверил
+		// и чем. Поле `checked` есть в схеме намеренно — иначе модель отвечает
+		// {"verdict":"PASS"} с пустыми массивами, и такой ответ считается неразбираемым.
+		"- Для PASS обязательно заполни `checked`: по одному пункту на каждый критерий —",
+		"  id критерия и how (чем именно подтверждено: строка в результате, файл, проверка).",
 		"- Ответ — ровно один JSON-объект в конце вывода:",
-		'  {"verdict":"PASS|NEEDS-FIX|INSUFFICIENT-DATA","findings":[{"severity":"critical|major|minor","text":"...","ref":"..."}],"unverified":["..."],"requested":["..."]}',
+		'  {"verdict":"PASS|NEEDS-FIX|INSUFFICIENT-DATA","findings":[{"severity":"critical|major|minor","text":"...","ref":"..."}],"unverified":["..."],"requested":["..."],"checked":[{"id":"критерий","how":"чем подтверждено"}]}',
 		"",
 	);
 	const text = lines.join("\n");
@@ -223,9 +228,26 @@ export function parseVerdict(out: string): ParsedVerdict | null {
 			const list = (value: unknown): string[] => (Array.isArray(value) ? value.filter((x): x is string => typeof x === "string" && x.trim() !== "") : []);
 			const unverified = list(parsed.unverified);
 			const requested = list(parsed.requested);
+			// Опорой для PASS служит одно из: замечания (то есть что проверялось),
+			// перечень непроверенного, запрос данных, либо явный список проверенных
+			// критериев с основанием. Требовать «придумай замечание» нельзя: чистый
+			// результат — законный, если проверяющий показал, ЧТО он проверил и как.
+			const checked = Array.isArray((parsed as { checked?: unknown }).checked)
+				? ((parsed as { checked?: unknown[] }).checked ?? []).filter((item) => {
+						if (item === null || typeof item !== "object") return false;
+						const c = item as { id?: unknown; how?: unknown };
+						return typeof c.id === "string" && c.id.trim() !== "" && typeof c.how === "string" && c.how.trim() !== "";
+					})
+				: [];
 			// Пустой объект {"verdict":"PASS"} — не проверка: нужны основания.
-			// PASS без findings и без unverified — это «ничего не проверил».
-			if (verdict === "PASS" && findings.length === 0 && unverified.length === 0 && requested.length === 0) return null;
+			if (
+				verdict === "PASS" &&
+				findings.length === 0 &&
+				unverified.length === 0 &&
+				requested.length === 0 &&
+				checked.length === 0
+			)
+				return null;
 			if (verdict === "NEEDS-FIX" && findings.length === 0) return null;
 			if (verdict === "INSUFFICIENT-DATA" && requested.length === 0) return null;
 			return { verdict, findings, unverified, requested };
