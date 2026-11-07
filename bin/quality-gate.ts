@@ -216,6 +216,9 @@ function signedPayload(cert: Certificate): Record<string, unknown> {
 		residualNone: cert.residualNone,
 		security: cert.security,
 		adversarial: cert.adversarial,
+		// Результаты независимой проверки входят в подпись: без этого вердикт
+		// проверяющего не связан с аттестатом.
+		goldfish: cert.goldfish,
 		artifacts: cert.artifacts,
 		status: cert.status,
 	};
@@ -975,11 +978,17 @@ async function runSpawnReview(cert: Certificate, argv: string[]): Promise<SpawnO
 	const diff = gitOr(["diff", "HEAD"], "");
 	const timeoutMs = Number(argValue(argv, "--review-timeout") ?? 240) * 1000;
 	const attemptsMax = Math.max(1, Math.min(4, Number(argValue(argv, "--review-attempts") ?? 2)));
+	// В диффе могут оказаться файлы с байтом 0 (сюда попал трекнутый .state/watchdog.log).
+	// Аргумент процесса в принципе не может содержать NUL: spawn падал с
+	// «must be a string without null bytes», и независимое ревью было недоступно.
 	const prompt =
 		"Ты независимый ревьюер. Ниже дифф изменений и критерии приёмки. Найди контрпримеры: что могло сломаться, " +
 		"что не доказано, где доказательство подменяет поведение. Ответь ровно двумя строками без пояснений вокруг: " +
 		"VERDICT: PASS или VERDICT: FAIL, затем NOTE: <одна строка>. Не верь утверждениям автора — только тому, что видно.\n\n" +
-		`Критерии: ${cert.criteria.map((c) => `${c.id} ${c.text}`).join("; ")}\n\nДифф:\n${diff.slice(0, 60_000)}`;
+		`Критерии: ${cert.criteria.map((c) => `${c.id} ${c.text}`).join("; ")}\n\nДифф:\n${diff.slice(0, 60_000)}`.replaceAll(
+			"\u0000",
+			"",
+		);
 
 	const workspace = await makeReviewWorkspace(diff);
 	if (workspace.error !== null) return { kind: "unavailable", detail: workspace.error, attempts: 0 };
@@ -1078,7 +1087,10 @@ interface ReviewWorkspace {
  */
 async function makeReviewWorkspace(diff: string): Promise<ReviewWorkspace> {
 	const base = mkdtempSync(join(tmpdir(), "gate-review-"));
-	if (gitOr(["rev-parse", "--is-inside-work-tree"], "").trim() !== "true") return { path: base, error: null, created: true };
+	// Три состояния из общей проверки: «git не ответил» — это не «репозитория нет».
+	const tree = gitTreeState();
+	if (tree === "hung") return { path: base, error: "git не ответил за 20 с: копию предмета не сделать", created: true };
+	if (tree === "no") return { path: base, error: null, created: true };
 	const worktree = Bun.spawnSync(["git", "worktree", "add", "--detach", base, "HEAD"], { cwd: process.cwd(), timeout: 30_000 });
 	if (worktree.exitCode !== 0) return { path: base, error: `не удалось сделать копию предмета: ${worktree.stderr.toString().trim().slice(0, 160)}`, created: true };
 	if (diff.trim() !== "") {
@@ -1094,8 +1106,8 @@ async function makeReviewWorkspace(diff: string): Promise<ReviewWorkspace> {
 
 async function cleanupWorkspace(workspace: ReviewWorkspace): Promise<void> {
 	if (!workspace.created) return;
-	if (gitOr(["rev-parse", "--is-inside-work-tree"], "").trim() === "true")
-		Bun.spawnSync(["git", "worktree", "remove", "--force", workspace.path], { cwd: process.cwd(), timeout: 30_000 });
+	if (gitTreeState() === "yes")
+		Bun.spawnSync(["git", "worktree", "remove", "--force", workspace.path], { cwd: process.cwd(), timeout: 30_000, stderr: "ignore" });
 	await rm(workspace.path, { recursive: true, force: true });
 }
 
