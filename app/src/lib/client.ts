@@ -120,7 +120,8 @@ const STALL_RECONNECT_MS = 35_000;
  */
 const SNAPSHOT_PROGRESS_TIMEOUT_MS = 60_000;
 /** Сколько раз подряд ждём снимок, прежде чем закрыть канал (60 с × 5 = 5 мин). */
-const SNAPSHOT_MAX_STALLS = 5;
+/** Каждые N неудачных ожиданий переподключаемся к хосту, не закрывая чат. */
+const SNAPSHOT_RECONNECT_EVERY = 3;
 /** Commit delay when `requestAnimationFrame` is unavailable (tests, non-DOM hosts). */
 const FRAME_FALLBACK_MS = 16;
 
@@ -481,16 +482,21 @@ export class GuestClient {
 			// хоронили живую сессию. Показываем состояние и ждём дальше — с потолком,
 			// чтобы не висеть вечно на мёртвом хосте.
 			this.#snapshotStalls += 1;
-			if (this.#snapshotStalls > SNAPSHOT_MAX_STALLS) {
-				this.#end("timed out waiting for the host's session snapshot");
-				return;
-			}
+			// Сдаваться нельзя: большая история (25 МБ) отдаётся дольше, чем кажется,
+			// и раньше чат закрывался с «не удалось загрузить агента». Ждём дальше,
+			// показываем прогресс и переподключаемся, если канал отвалился.
+			const minutes = Math.max(1, Math.round((this.#snapshotStalls * SNAPSHOT_PROGRESS_TIMEOUT_MS) / 60000));
 			this.#pushNotice(
 				"info",
 				this.#snapshotStalls === 1
 					? "Агент занят — ждём снимок сессии"
-					: `Ждём снимок сессии (попытка ${this.#snapshotStalls}/${SNAPSHOT_MAX_STALLS})`,
+					: `Ждём снимок сессии: ${minutes} мин, попытка ${this.#snapshotStalls}`,
 			);
+			if (this.#snapshotStalls % SNAPSHOT_RECONNECT_EVERY === 0) {
+				// Долгое ожидание часто означает, что канал уже мёртв молча —
+				// переподключаемся, не закрывая экран.
+				this.#socket.reconnectNow();
+			}
 			this.#commit();
 			this.#armSnapshotProgressTimer();
 		}, SNAPSHOT_PROGRESS_TIMEOUT_MS);
