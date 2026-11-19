@@ -80,7 +80,7 @@ export interface GoldfishRun {
 	/** Хеш предмета проверки: по нему проверка инвалидируется при изменении. */
 	subjectHash: string;
 	/** Модель/раннер проверяющего — для провенанса. */
-	runner: { kind: "spawn"; command: string; model: string | null; exitCode: number | null; timedOut: boolean; attempts: number; isolation: string };
+	runner: { kind: "spawn"; command: string; model: string | null; modelSource?: string; exitCode: number | null; timedOut: boolean; attempts: number; isolation: string };
 	findings: { id: string; severity: "critical" | "major" | "minor"; text: string; ref?: string }[];
 	unverified: string[];
 	/** Что проверяющий просил дослать (если данных не хватило). */
@@ -277,8 +277,12 @@ interface RunOptions {
 	resultFile?: string;
 	materials: string[];
 	taskId?: string;
+	/** Что в пакет сознательно не передано: границы проверки видны проверяющему. */
+	unknowns?: string;
 	timeoutMs: number;
 	model?: string;
+	/** Сессия OMP, чья работа проверяется: её модель берём для проверяющего. */
+	session?: string;
 	attempts: number;
 	allowTests: boolean;
 }
@@ -320,6 +324,7 @@ export async function runGoldfish(options: RunOptions): Promise<GoldfishRun> {
 		plan: readMaybe(options.planFile),
 		result: readMaybe(options.resultFile),
 		materials: options.materials,
+		unknowns: options.unknowns,
 	};
 	const packet = buildPacket(input);
 	writeFileSync(join(dir, "packet.md"), packet.text, "utf8");
@@ -370,9 +375,9 @@ export async function runGoldfish(options: RunOptions): Promise<GoldfishRun> {
 		"--no-extensions",
 		"--tools=read,grep,glob",
 	];
-	const model = options.model ?? defaultModel();
-	if (model !== null) args.push("--model", model);
-	if (options.model !== undefined) args.push("--model", options.model);
+	// Проверяющий работает той же моделью, что выбрана в OMP (см. resolveGoldfishModel).
+	const resolution = await resolveGoldfishModel({ model: options.model, session: options.session });
+	if (resolution.model !== null) args.push("--model", resolution.model);
 	let out = "";
 	let exitCode: number | null = null;
 	let timedOut = false;
@@ -381,6 +386,11 @@ export async function runGoldfish(options: RunOptions): Promise<GoldfishRun> {
 
 	try {
 		for (attempts = 1; attempts <= options.attempts; attempts += 1) {
+			try {
+				writeFileSync(join(dir, "args.json"), JSON.stringify({ args, workspace }, null, 1), "utf8");
+			} catch {
+				// диагностика вспомогательная
+			}
 			const run = await spawnOnce(args, workspace, options.timeoutMs);
 			out = run.out;
 			exitCode = run.code;
@@ -408,7 +418,8 @@ export async function runGoldfish(options: RunOptions): Promise<GoldfishRun> {
 		runner: {
 			kind: "spawn",
 			command: "omp --profile goldfish -p --no-extensions --tools=read,grep,glob",
-			model: options.model ?? null,
+			model: resolution.model,
+			modelSource: resolution.source,
 			exitCode,
 			timedOut,
 			attempts,
@@ -430,17 +441,204 @@ export async function runGoldfish(options: RunOptions): Promise<GoldfishRun> {
 }
 
 /** Роль модели по умолчанию из конфигурации владельца — для явного --model. */
-export function defaultModel(): string | null {
+export type ModelSource = "cli" | "env" | "session" | "owner-session" | "default" | "fallback" | "none";
+
+export interface ModelResolution {
+	model: string | null;
+	source: ModelSource;
+	/** Чем подтверждён выбор: пишем в запись прогона для аудита. */
+	detail: string;
+}
+
+interface OwnerSession {
+	sessionId: string;
+	instanceId: string;
+	model: string | null;
+	startedAt: number | null;
+}
+
+/** Модели живых сессий из шлюза: это и есть «то, что выбрано в OMP». */
+async function ownerSessions(): Promise<OwnerSession[]> {
 	try {
-		const config = readFileSync(join(HOME, ".omp", "agent", "config.yml"), "utf8");
-		const match = /^\s*default:\s*([^\s#]+)/mu.exec(config);
-		return match?.[1] ?? null;
+		const config = JSON.parse(readFileSync(join(HOME, "omp-mobile", "gateway", "config.json"), "utf8")) as { token?: unknown };
+		if (typeof config.token !== "string") return [];
+		const response = await fetch("http://127.0.0.1:8088/api/hosts", {
+			headers: { authorization: `Bearer ${config.token}` },
+			signal: AbortSignal.timeout(4000),
+		});
+		if (!response.ok) return [];
+		const body = (await response.json()) as {
+			hosts?: Array<{ sessionId?: unknown; instanceId?: unknown; alive?: unknown; startedAt?: unknown; model?: { provider?: unknown; id?: unknown } | null }>;
+		};
+		const out: OwnerSession[] = [];
+		for (const host of body.hosts ?? []) {
+			if (host.alive !== true) continue;
+			const provider = host.model?.provider;
+			const id = host.model?.id;
+			if (typeof provider !== "string" || typeof id !== "string") continue;
+			out.push({
+				sessionId: typeof host.sessionId === "string" ? host.sessionId : "",
+				instanceId: typeof host.instanceId === "string" ? host.instanceId : "",
+				model: `${provider}/${id}`,
+				startedAt: typeof host.startedAt === "number" ? host.startedAt : null,
+			});
+		}
+		return out;
 	} catch {
-		return null;
+		return [];
 	}
 }
 
+/**
+ * Модель проверяющего по приоритету:
+ *   1. `--model` — явное указание;
+ *   2. `GOLDFISH_MODEL`;
+ *   3. модель проверяемой сессии (`--session` / `GOLDFISH_SESSION`);
+ *   4. модель самой свежей живой сессии OMP — фактический выбор владельца;
+ *   5. `modelRoles.default`, если такая модель объявлена в `models.yml`;
+ *   6. предпочтительный список объявленных моделей релея.
+ *
+ * Пункты 3–4 и означают «та же модель, что выбрана в OMP»: раньше проверяющий
+ * брал устаревшую роль default, а при необъявленном провайдере — жёсткий список,
+ * и оценивал работу не той моделью, которой работал владелец (19.11).
+ */
+/**
+ * Модели, которые omp действительно знает (включая встроенные провайдеры).
+ * Нужны как проверка: `--model` с неразрешимым именем валит процесс с кодом 1,
+ * и проверка молча уходила бы в ERROR.
+ */
+let ompSelectorsCache: string[] | null = null;
+async function ompSelectors(): Promise<string[]> {
+	if (ompSelectorsCache !== null) return ompSelectorsCache;
+	try {
+		const proc = Bun.spawnSync(["omp", "models", "ls", "--json"], { stdout: "pipe", stderr: "ignore", timeout: 30_000 });
+		const parsed = JSON.parse(proc.stdout.toString()) as { models?: Array<{ selector?: unknown }> };
+		ompSelectorsCache = (parsed.models ?? []).map((m) => (typeof m.selector === "string" ? m.selector : "")).filter((s) => s !== "");
+	} catch {
+		ompSelectorsCache = [];
+	}
+	return ompSelectorsCache;
+}
+
+export async function resolveGoldfishModel(
+	options: { model?: string; session?: string } = {},
+	deps: { sessions?: () => Promise<OwnerSession[]>; defaultModel?: () => string | null; knownModels?: () => string[] | null } = {},
+): Promise<ModelResolution> {
+	if (options.model !== undefined && options.model !== "") return { model: options.model, source: "cli", detail: "--model" };
+	const fromEnv = process.env["GOLDFISH_MODEL"];
+	if (fromEnv !== undefined && fromEnv !== "") return { model: fromEnv, source: "env", detail: "GOLDFISH_MODEL" };
+
+	const sessionId = options.session ?? process.env["GOLDFISH_SESSION"] ?? "";
+	const sessions = await (deps.sessions ?? ownerSessions)();
+	// Список известных omp моделей: в тестах — из deps, в работе — из `omp models ls`.
+	const known = deps.knownModels !== undefined ? (deps.knownModels() ?? []) : await ompSelectors();
+	/** Модель годится, только если omp её знает: иначе `--model` валит процесс с кодом 1. */
+	const usable = (model: string): boolean => known.length === 0 || known.includes(model.split(":")[0] as string);
+	const declared = (deps.defaultModel ?? defaultModel)();
+
+	if (sessionId !== "") {
+		const hit = sessions.find((item) => item.sessionId === sessionId || item.instanceId === sessionId);
+		if (hit !== undefined && hit.model !== null) {
+			if (usable(hit.model)) return { model: hit.model, source: "session", detail: `сессия ${sessionId.slice(0, 8)}` };
+			return { model: declared, source: "fallback", detail: `модель сессии ${hit.model} неизвестна omp, взята ${declared ?? "—"}` };
+		}
+	}
+	const newest = sessions
+		.filter((item) => item.model !== null)
+		.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
+	if (newest !== undefined && newest.model !== null && usable(newest.model)) {
+		return { model: newest.model, source: "owner-session", detail: `последняя сессия ${newest.sessionId.slice(0, 8)}` };
+	}
+	if (declared !== null) return { model: declared, source: "default", detail: "modelRoles.default" };
+	return { model: null, source: "none", detail: "модель не определена" };
+}
+
+/**
+ * Модель проверяющего. Берём роль default из конфига владельца, но только если
+ * такая модель реально объявлена в models.yml: иначе `omp --model` падает с кодом 1
+ * и проверка молча уходила в ERROR (найдено 07.11: default = deepseek/deepseek-flash,
+ * а провайдера deepseek в models.yml нет — проверил).
+ */
+export function defaultModel(): string | null {
+	const declared = declaredModels();
+	try {
+		const config = readFileSync(join(HOME, ".omp", "agent", "config.yml"), "utf8");
+		const match = /^\s*default:\s*([^\s#]+)/mu.exec(config);
+		const wanted = match?.[1] ?? null;
+		if (wanted !== null && (declared.length === 0 || declared.includes(wanted.replace(/:.*$/u, "")))) return wanted;
+	} catch {
+		// нет конфига — ниже выберем по объявленным моделям
+	}
+	// Порядок предпочтения для проверяющего: дешёвые и надёжные модели релея,
+	// затем любая объявленная — явный список, а не «что первое в файле».
+	for (const candidate of [
+		"cheaperinference/deepseek-v4.1-flash",
+		"cheaperinference/glm-5.3-flash",
+		"cheaperinference/gemini-3.7-flash",
+	]) {
+		if (declared.includes(candidate)) return candidate;
+	}
+	return declared.find((id) => id.startsWith("cheaperinference/")) ?? declared[0] ?? null;
+}
+
+/** Модели, объявленные в models.yml: "провайдер/модель". */
+function declaredModels(): string[] {
+	try {
+		const text = readFileSync(join(HOME, ".omp", "agent", "models.yml"), "utf8");
+		const out: string[] = [];
+		let provider = "";
+		for (const line of text.split("\n")) {
+			const head = /^  ([a-zA-Z0-9._-]+):\s*$/u.exec(line);
+			if (head !== null) {
+				provider = head[1] as string;
+				continue;
+			}
+			const model = /^\s+-\s*(?:id:\s*)?([a-zA-Z0-9._:-]+)\s*(?:#.*)?$/u.exec(line);
+			if (model !== null && provider !== "") out.push(`${provider}/${model[1] as string}`);
+		}
+		return out;
+	} catch {
+		return [];
+	}
+}
+
+/** Живые проверяющие: при отмене обёртки их группы процессов нужно погасить. */
+const LIVE_CHILDREN = new Set<number>();
+
+function killChildGroup(pid: number | undefined): void {
+	if (pid === undefined) return;
+	const signal = (sig: NodeJS.Signals): void => {
+		try {
+			process.kill(-pid, sig);
+		} catch {
+			// группы уже нет — это нормальный исход
+		}
+	};
+	signal("SIGTERM");
+	// Упрямый ребёнок, который игнорирует SIGTERM, добивается SIGKILL: иначе остаётся сирота.
+	setTimeout(() => signal("SIGKILL"), 1500).unref();
+}
+
+let exitHookInstalled = false;
+function installExitHook(): void {
+	if (exitHookInstalled) return;
+	exitHookInstalled = true;
+	const sweep = (): void => {
+		for (const pid of LIVE_CHILDREN) killChildGroup(pid);
+	};
+	process.on("exit", sweep);
+	process.on("SIGINT", () => {
+		sweep();
+		process.exit(130);
+	});
+	process.on("SIGTERM", () => {
+		sweep();
+		process.exit(143);
+	});
+}
+
 function spawnOnce(args: string[], cwd: string, timeoutMs: number): Promise<{ out: string; code: number | null; timedOut: boolean }> {
+	installExitHook();
 	const child = spawn("omp", args, {
 		cwd,
 		// GOLDFISH=1 — маркер для внешних инструментов. Изоляцию даёт профиль:
@@ -450,12 +648,16 @@ function spawnOnce(args: string[], cwd: string, timeoutMs: number): Promise<{ ou
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 	let out = "";
+	let err = "";
 	let timedOut = false;
 	const { promise, resolve } = Promise.withResolvers<number | null>();
 	child.stdout?.on("data", (chunk: Buffer) => {
 		if (out.length < 1_000_000) out += chunk.toString();
 	});
-	child.stderr?.on("data", () => {});
+	// stderr не выбрасываем: без него причина падения проверяющего не видна.
+	child.stderr?.on("data", (chunk: Buffer) => {
+		if (err.length < 200_000) err += chunk.toString();
+	});
 	const killer = setTimeout(() => {
 		timedOut = true;
 		try {
@@ -465,10 +667,21 @@ function spawnOnce(args: string[], cwd: string, timeoutMs: number): Promise<{ ou
 			child.kill("SIGKILL");
 		}
 	}, timeoutMs);
-	child.on("close", code => resolve(code ?? null));
+	child.on("close", code => {
+		if (child.pid !== undefined) LIVE_CHILDREN.delete(child.pid);
+		resolve(code ?? null);
+	});
+	if (child.pid !== undefined) LIVE_CHILDREN.add(child.pid);
 	child.on("error", () => resolve(null));
 	return promise.then(code => {
 		clearTimeout(killer);
+		if (err.trim() !== "") {
+			try {
+				require("node:fs").writeFileSync(join(cwd, "stderr.txt"), err, "utf8");
+			} catch {
+				// каталог прогона мог быть убран — не мешаем вердикту
+			}
+		}
 		return { out, code, timedOut };
 	});
 }
@@ -672,12 +885,27 @@ async function main(): Promise<number> {
 			resultFile: argValue(argv, "--result") ?? undefined,
 			materials: argValues(argv, "--material").map(p => resolve(p)),
 			taskId: argValue(argv, "--task-id") ?? undefined,
-			timeoutMs: Number(argValue(argv, "--timeout") ?? 240) * 1000,
+			unknowns: argValue(argv, "--unknowns") ?? undefined,
+			timeoutMs: Number(argValue(argv, "--timeout") ?? 900) * 1000,
 			model: argValue(argv, "--model") ?? undefined,
+			// --session <sessionId>: проверяющий возьмёт модель этой сессии OMP.
+			session: argValue(argv, "--session") ?? undefined,
 			attempts: Math.max(1, Math.min(3, Number(argValue(argv, "--attempts") ?? 2))),
 			allowTests: argv.includes("--allow-tests"),
 		});
-		console.log(json({ runId: run.runId, stage: run.stage, verdict: run.verdict, subjectHash: run.subjectHash, findings: run.findings.length, tookMs: run.tookMs, dir: run.dir }));
+		console.log(
+			json({
+				runId: run.runId,
+				stage: run.stage,
+				verdict: run.verdict,
+				subjectHash: run.subjectHash,
+				findings: run.findings.length,
+				model: run.runner.model,
+				modelSource: run.runner.modelSource ?? null,
+				tookMs: run.tookMs,
+				dir: run.dir,
+			}),
+		);
 		return run.verdict === "PASS" ? 0 : 1;
 	}
 	console.error(`неизвестная команда: ${command}`);

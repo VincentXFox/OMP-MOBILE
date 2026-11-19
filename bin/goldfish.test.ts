@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildPacket, finalVerdict, freshPass, freshPassVerified, loadRuns, parseVerdict, publishRun, appendJournal, type GoldfishRun } from "./goldfish.ts";
+import { buildPacket, finalVerdict, freshPass, freshPassVerified, loadRuns, parseVerdict, publishRun, appendJournal, type GoldfishRun, resolveGoldfishModel} from "./goldfish.ts";
 import { classify } from "./goldfish-policy.ts";
 
 const sandbox = (): string => mkdtempSync(join(tmpdir(), "gf-test-"));
@@ -225,5 +225,39 @@ describe("свежесть подтверждается демоном, а не 
 		expect(result.run).toBeNull();
 		expect(result.reason).toContain("верификатор");
 		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+describe("выбор модели проверяющего", () => {
+	test("явная модель сильнее всего", async () => {
+		const r = await resolveGoldfishModel({ model: "zai/glm-5.3-flash", session: "s-1" }, { sessions: async () => [], knownModels: () => [] });
+		expect(r).toMatchObject({ model: "zai/glm-5.3-flash", source: "cli" });
+	});
+
+	test("модель проверяемой сессии — это выбор владельца", async () => {
+		const sessions = async () => [
+			{ sessionId: "s-old", instanceId: "i-old", model: "deepseek/deepseek-flash", startedAt: 10 },
+			{ sessionId: "s-new", instanceId: "i-new", model: "cheaperinference/deepseek-v4.1-flash", startedAt: 20 },
+		];
+		const bySession = await resolveGoldfishModel({ session: "s-old" }, { sessions, knownModels: () => [] });
+		expect(bySession).toMatchObject({ model: "deepseek/deepseek-flash", source: "session" });
+		const byInstance = await resolveGoldfishModel({ session: "i-new" }, { sessions, knownModels: () => [] });
+		expect(byInstance.model).toBe("cheaperinference/deepseek-v4.1-flash");
+	});
+
+	test("без --session берётся модель самой свежей живой сессии", async () => {
+		const sessions = async () => [
+			{ sessionId: "s-old", instanceId: "i-old", model: "zai/glm-5.3-flash", startedAt: 10 },
+			{ sessionId: "s-new", instanceId: "i-new", model: "cheaperinference/glm-5.3-flash", startedAt: 99 },
+		];
+		const r = await resolveGoldfishModel({}, { sessions, knownModels: () => [] });
+		expect(r).toMatchObject({ model: "cheaperinference/glm-5.3-flash", source: "owner-session" });
+	});
+
+	test("нет сессий — падаем на modelRoles.default, затем на объявленных", async () => {
+		const fromDefault = await resolveGoldfishModel({}, { sessions: async () => [], knownModels: () => [], defaultModel: () => "zai/glm-5.3-flash" });
+		expect(fromDefault).toMatchObject({ model: "zai/glm-5.3-flash", source: "default" });
+		const none = await resolveGoldfishModel({}, { sessions: async () => [], knownModels: () => [], defaultModel: () => null });
+		expect(none).toMatchObject({ model: null, source: "none" });
 	});
 });
