@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolveBin } from "./bins.ts";
 import { findSessionFile, parseSessionHead } from "./sessions.ts";
 import { todoProgressOf, type TodoProgress } from "./todo-progress.ts";
@@ -69,6 +69,24 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Живой ли ИМЕННО агент этой сессии. `kill(pid, 0)` отвечает «да» и для pid,
+ * который ядро уже выдало другому процессу: после массового завершения сессий
+ * реестр показывал 122 живых при 6 реальных агентах (24.11). Сверяем командную
+ * строку: это должен быть `omp`, запущенный в каталоге этой сессии.
+ */
+function isAgentAlive(pid: number, cwd: string): boolean {
+  if (!isProcessAlive(pid)) return false;
+  if (cwd === "") return true;
+  try {
+    const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" ");
+    if (!/(?:^|\/)omp(?:\s|$)/u.test(cmdline)) return false;
+    return cmdline.includes(`--cwd ${cwd}`) || cmdline.includes(cwd);
+  } catch {
+    return false;
+  }
+}
+
 // omp CLI output is a verified stable JSON shape; assert at the process boundary.
 export async function runOmp(args: string[], timeoutMs: number, ompPath?: string): Promise<{ code: number; stdout: string; stderr: string }> {
   let ompBin: string;
@@ -131,7 +149,7 @@ export async function listHosts(ompPath?: string): Promise<OmpHostsOutput> {
       const identity = sessionIdentityOf(sessionFile);
       return {
         ...h,
-        alive: isProcessAlive(h.pid),
+        alive: isAgentAlive(h.pid, typeof h.cwd === "string" ? h.cwd : ""),
         sessionFile,
         sessionTitle: identity.title,
         sessionPreview: identity.preview,
@@ -156,3 +174,40 @@ export async function mintLink(id: string, view: boolean): Promise<{ url: string
   if (/not found|no such|unknown|no active|matches/i.test(err)) return { url: "", stale: false, notFound: true };
   throw new Error(`omp collab link failed: ${err}`);
 }
+
+/** Снимок реестра на 2 с. Опрос интерфейса, push-поллер и проход сопровождения
+ * панелей идут из одного `omp collab list`: запуск процесса omp стоит ~0.5 с, и
+ * по процессу на каждый вызывающий тик это ~10% ядра на пустом опросе. */
+export class HostsCache {
+  #data: OmpHostsOutput | null = null;
+  #at = 0;
+  /** In-flight запрос: одновременные вызывающие ждут один снимок, а не
+   * запускают по процессу на каждый тик. */
+  #pending: Promise<OmpHostsOutput> | null = null;
+
+  get(): Promise<OmpHostsOutput> {
+    if (this.#data && Date.now() - this.#at < HOSTS_CACHE_MS) return Promise.resolve(this.#data);
+    if (this.#pending !== null) return this.#pending;
+    const pending = listHosts()
+      .then((out) => {
+        this.#data = out;
+        this.#at = Date.now();
+        return out;
+      })
+      .finally(() => {
+        this.#pending = null;
+      });
+    this.#pending = pending;
+    return pending;
+  }
+
+  /** После старта/остановки/переименования снимок реестра устарел мгновенно. */
+  invalidate(): void {
+    this.#at = 0;
+    this.#data = null;
+  }
+}
+
+/** Все вызывающие в процессе шлюза делят один снимок реестра. */
+export const hostsCache = new HostsCache();
+const HOSTS_CACHE_MS = 2000;

@@ -98,6 +98,10 @@ async function main(argv: string[]): Promise<number> {
 	// --restart-fresh: сессии без файла истории (транскрипт не писался) поднимаем
 	// заново с тем же cwd — иначе они навсегда остаются на старом коде хуков.
 	const restartFresh = argv.includes("--restart-fresh");
+	// --model: модель для свежих запусков. Без неё сессия падает на modelRoles.default,
+	// а он бывает нерабочим (deepseek-flash отдавал пустые ответы 24.11).
+	const modelFlagIdx = argv.indexOf("--model");
+	const forcedModel = modelFlagIdx >= 0 ? (argv[modelFlagIdx + 1] ?? "" ) : "";
 	// Партия: 24 процесса разом поднимают нагрузку на машину, иду порциями.
 	const limitRaw = argv.indexOf("--limit");
 	const limit = limitRaw >= 0 && argv[limitRaw + 1] !== undefined ? Math.max(1, Number(argv[limitRaw + 1]) || 0) : 0;
@@ -199,7 +203,10 @@ async function main(argv: string[]): Promise<number> {
 		}
 		try {
 			// Истории нет — поднимаем свежий агент в том же каталоге.
-			await runtime("pane.run", { paneId: pane.id, argv: ["omp", "--cwd", host.cwd, "--allow-home"], sessionFile: null }, 120_000);
+			// Модель: явный --model, иначе та, с которой сессия работала до перезапуска.
+			const model = forcedModel !== "" ? forcedModel : host.model?.provider && host.model?.id ? `${host.model.provider}/${host.model.id}` : "";
+			const argvFresh = ["omp", "--cwd", host.cwd, "--allow-home", ...(model === "" ? [] : ["--model", model])];
+			await runtime("pane.run", { paneId: pane.id, argv: argvFresh, sessionFile: null }, 120_000);
 			freshDone += 1;
 			console.log(`  ${host.sessionId.slice(0, 8)}: перезапущен без истории (${host.cwd})`);
 		} catch (error) {
