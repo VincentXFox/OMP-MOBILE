@@ -158,3 +158,22 @@ describe("свидетельство привязано к задаче", () => 
 		rmSync(join(RUNS, "acc-probe-task"), { recursive: true, force: true });
 	});
 });
+
+describe("формулировка задачи может отличаться", () => {
+	test("переписанная та же задача подтверждается, чужая — нет", async () => {
+		const { proofForProject, taskSimilarity } = await import("../lib/trusted-verification.ts");
+		mkdirSync(PROJECT, { recursive: true });
+		writeFileSync(join(PROJECT, "b.ts"), "y");
+		seedGate();
+		seedRunWithTask("acc-probe-rewording", [join(PROJECT, "b.ts")], "Починить фильтры каталога: цвет и бренд, мобильная шторка");
+		const reworded = await proofForProject(PROJECT, "result", "починить фильтры каталога — цвет, бренд и мобильная шторка");
+		expect(reworded.proof === null ? reworded.reason : "ok").not.toMatch(/другой задаче|нет PASS-прогона/);
+		const unrelated = await proofForProject(PROJECT, "result", "сверстать страницу вакансий и подключить оплату");
+		expect(unrelated.proof).toBeNull();
+		// Похожесть: общие слова против редких.
+		expect(taskSimilarity("починить фильтры каталога цвет бренд шторка", "починить фильтры каталога цвет бренд шторка")).toBeCloseTo(1, 5);
+		expect(taskSimilarity("задача А", "задача Б")).toBeLessThan(0.6);
+		expect(taskSimilarity("", "что-то")).toBe(0);
+		rmSync(join(RUNS, "acc-probe-rewording"), { recursive: true, force: true });
+	});
+});

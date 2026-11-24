@@ -667,7 +667,10 @@ export default function (pi: StopGateApi): void {
       if (!acceptance.ok) {
         reasons.push(
           `ПРИЁМКА: успех не подтверждён — ${acceptance.reason}. ` +
-            "Пройди независимую проверку (Goldfish) и подтверждение верификатора; до этого честный итог — СТАТУС: PARTIAL или BLOCKED с «БЛОКЕР: …».",
+            "Порядок приёмки: 1) `bun bin/quality-gate.ts init <slug> …` и `run` — сертификат проекта; " +
+            "2) `bun bin/goldfish.ts run --stage result --task <файл задачи> --material …` — независимый PASS по этой задаче; " +
+            "3) `bun bin/quality-gate.ts attest <slug>` — подтверждение верификатора. " +
+            "До этого честный итог — СТАТУС: PARTIAL или BLOCKED с «БЛОКЕР: …».",
         );
       }
     }

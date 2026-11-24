@@ -229,6 +229,35 @@ export function isAcceptanceProof(value: unknown): value is AcceptanceProof {
  * прогон PASS по материалам проекта, живой ответ демона и совпадение манифеста
  * с текущим содержимым. Локальный acceptance.json доказательством не считается.
  */
+/**
+ * Похожесть формулировок задачи (Jaccard по словам). Нужна потому, что текст
+ * задачи у гейта — последнее сообщение пользователя, а у пакета — файл TASK.md:
+ * дословного совпадения почти никогда нет, и честный PASS-прогон не подтверждал
+ * работу вообще (найдено 24.11: гейт требовал побайтового копирования задачи).
+ */
+export function taskSimilarity(a: string, b: string): number {
+	const tokens = (text: string): Set<string> =>
+		new Set(
+			text
+				.toLowerCase()
+				.replace(/[^\p{L}\p{N}]+/gu, " ")
+				.split(" ")
+				.map((token) => token.trim())
+				.filter((token) => token.length >= 3),
+		);
+	const left = tokens(a);
+	const right = tokens(b);
+	// Слишком короткие формулировки («задача А» / «задача Б») после нормализации
+	// схлопываются в один токен — на таком сигнале сравнивать нельзя, только точный хеш.
+	if (left.size < 2 || right.size < 2) return 0;
+	let shared = 0;
+	for (const token of left) if (right.has(token)) shared += 1;
+	// Коэффициент перекрытия, а не Jaccard: пакет goldfish обычно содержит сжатый
+	// текст задачи, а гейт — полное сообщение пользователя. При Jaccard сжатая
+	// версия той же задачи давала 0.3–0.4 и не подтверждалась (замер 24.11).
+	return shared / Math.min(left.size, right.size);
+}
+
 export async function proofForProject(
 	project: string,
 	stage: "plan" | "result",
@@ -241,7 +270,17 @@ export async function proofForProject(
 	// Свидетельство должно относиться к ЭТОЙ задаче: чужой прогон не закрывает работу,
 	// даже если сертификат проекта действителен.
 	const wanted = typeof taskText === "string" && taskText.trim() !== "" ? sha256(taskText.trim()) : null;
-	const run = wanted === null ? runs[0] : runs.find((candidate) => sha256(candidate.task.trim()) === wanted) ?? null;
+	// 1) дословное совпадение — сильнее всего;
+	// 2) иначе — близкая формулировка той же задачи (>= 0.6 по словам): гейт видит
+	//    последнее сообщение пользователя, а пакет собран из файла задачи, поэтому
+	//    тексты почти всегда переписаны, и точный хеш недостижим без копирования;
+	// 3) без текста задачи берём самый свежий прогон.
+	const byHash = wanted === null ? runs[0] : runs.find((candidate) => sha256(candidate.task.trim()) === wanted) ?? null;
+	const bySimilarity =
+		byHash === null && wanted !== null && typeof taskText === "string"
+			? runs.filter((candidate) => taskSimilarity(candidate.task, taskText) >= 0.6).sort((a, b) => taskSimilarity(b.task, taskText) - taskSimilarity(a.task, taskText))[0] ?? null
+			: null;
+	const run = byHash ?? bySimilarity;
 	if (run === null) {
 		return { proof: null, reason: "нет PASS-прогона именно по этой задаче (свидетельство относится к другой)" };
 	}
